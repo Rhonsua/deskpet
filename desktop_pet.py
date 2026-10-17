@@ -103,7 +103,7 @@ class PetToolbar(QFrame):
             outer.addLayout(row)
         actions = QHBoxLayout()
         for caption, callback in [('摸摸', pet.pat), ('投喂', lambda: self.page('food')),
-                                  ('音乐', lambda: self.page('music')), ('休息', pet.toggle_sleep),
+                                  ('音乐', lambda: self.page('music')), ('休息', lambda: self.page('rest')),
                                   ('设置', lambda: self.page('settings'))]:
             button = QPushButton(caption)
             button.clicked.connect(callback)
@@ -151,6 +151,10 @@ class PetToolbar(QFrame):
             self.add_button('播放 / 暂停', self.pet.panel.toggle)
             self.add_button('下一首', lambda: self.pet.panel.step(1))
             self.add_button('打开歌单 / 添加 MP3', lambda: self.pet.open_tools(0))
+        elif name == 'rest':
+            self.add_button('盖被子睡觉', self.pet.toggle_sleep)
+            self.add_button('熬夜玩手机', self.pet.toggle_phone)
+            self.add_button('起床 / 收手机', self.pet.wake_up)
         elif name == 'settings':
             startup = QCheckBox('开机自启')
             try:
@@ -205,6 +209,7 @@ class DesktopPet(QWidget):
         self.setMouseTracking(True)
         self.playing = False
         self.sleeping = False
+        self.using_phone = False
         self.action = 'idle'
         self.action_start = time.monotonic()
         self.action_until = 0
@@ -265,7 +270,7 @@ class DesktopPet(QWidget):
         self.frames = {}
         sources = {'idle': filename}
         if variant == 'refined':
-            for state in ('blink', 'happy', 'eat', 'lift'):
+            for state in ('blink', 'happy', 'eat', 'lift', 'sleep', 'phone'):
                 sources[state] = directory / 'states' / (state + '.png')
         for state, path in sources.items():
             cache_key = str(path)
@@ -302,7 +307,7 @@ class DesktopPet(QWidget):
 
     def prepare_frames(self):
         self.scaled_frames = {
-            name: pixmap.scaled(round(236 * self.scale), round(270 * self.scale),
+            name: pixmap.scaled(round(236 * self.scale), round((154 if name in ('sleep', 'phone') else 270) * self.scale),
                                 Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             for name, pixmap in self.frames.items()
         }
@@ -347,7 +352,7 @@ class DesktopPet(QWidget):
     def fold_dock(self):
         if not self.dock_edge or self.dragging:
             return
-        if (self.underMouse() or self.toolbar.isVisible() or self.panel.isVisible() or
+        if (self.sleeping or self.using_phone or self.underMouse() or self.toolbar.isVisible() or self.panel.isVisible() or
                 self.bubble.isVisible() or time.monotonic() < self.action_until):
             self.fold_timer.start(700)
             return
@@ -393,6 +398,7 @@ class DesktopPet(QWidget):
         if self.dragging:
             return
         self.sleeping = False
+        self.using_phone = False
         self.reveal_dock()
         if self.dock_edge:
             self.fold_timer.start(round((seconds + 3.5) * 1000))
@@ -417,7 +423,9 @@ class DesktopPet(QWidget):
 
     def touch(self):
         self.toolbar.hide()
-        if self.sleeping:
+        if self.using_phone:
+            self.react('happy', words='被发现啦，这就收手机！')
+        elif self.sleeping:
             self.react('happy', words='醒啦！要一起听歌吗？')
         elif getattr(self, 'touch_head', True):
             self.pat()
@@ -430,12 +438,35 @@ class DesktopPet(QWidget):
 
     def toggle_sleep(self):
         if self.sleeping:
-            self.react('happy', words='睡好啦，一起玩吧！')
+            self.wake_up()
         else:
             self.sleeping = True
+            self.using_phone = False
             self.action = 'idle'
+            self.action_until = 0
+            self.action_start = time.monotonic()
+            self.reveal_dock()
             self.toolbar.hide()
-            self.bubble.say('我先眯一会儿，点我就会醒哦。')
+            self.bubble.say('被子盖好啦……晚安。点我就能叫醒我。')
+            self.update()
+
+    def toggle_phone(self):
+        if self.using_phone:
+            self.wake_up()
+            return
+        self.sleeping = False
+        self.using_phone = True
+        self.action = 'idle'
+        self.action_until = 0
+        self.action_start = time.monotonic()
+        self.reveal_dock()
+        self.toolbar.hide()
+        self.bubble.say('再看一小会儿……就一小会儿。')
+        self.update()
+
+    def wake_up(self):
+        self.toolbar.hide()
+        self.react('happy', words='起来啦，继续陪你！')
 
     def feed_reaction(self, success, words):
         if success:
@@ -460,6 +491,7 @@ class DesktopPet(QWidget):
             self.move(clamp_position(desired, self.size(), self.screen_bounds()))
             self.drag_offset = self.press_point - self.pos()
         self.sleeping = False
+        self.using_phone = False
         self.action = 'lift'
         self.action_start = time.monotonic()
         self.toolbar.hide()
@@ -506,7 +538,13 @@ class DesktopPet(QWidget):
             sy = 1 - max(0, 1 - elapsed / 0.6) * math.sin(elapsed * 14) * 0.10
             sx = 2 - sy
         elif self.sleeping:
-            state, angle, y = 'blink', 5, math.sin(now * 1.5)
+            state = 'sleep' if 'sleep' in self.scaled_frames else 'blink'
+            sy = 1 + math.sin(now * 1.5) * 0.008
+        elif self.using_phone:
+            state = 'phone' if 'phone' in self.scaled_frames else 'idle'
+            sy = 1 + math.sin(now * 1.8) * 0.004
+            angle = math.sin(now * 2.5) * 0.3
+            y = -max(0, math.sin(now * 4.5)) * 0.7
         elif self.playing:
             angle, y = math.sin(now * 3.5) * 3, -abs(math.sin(now * 3.5)) * 4
             state = 'blink' if now % 4.8 < 0.15 else 'idle'
@@ -524,19 +562,36 @@ class DesktopPet(QWidget):
         transform.rotate(angle)
         transform.scale(sx, sy)
         transform.translate(-image.width() / 2, -image.height())
-        transform *= self.dock_transform()
+        resting = key in ('sleep', 'phone')
+        if not resting:
+            transform *= self.dock_transform()
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setTransform(transform)
         painter.drawPixmap(0, 0, image)
+        if key == 'phone':
+            # A gentle screen-light pulse and small tap ring, clipped to the sprite.
+            painter.save()
+            painter.setClipRegion(self.frame_masks[key])
+            pulse = (math.sin(now * 2.4) + 1) / 2
+            painter.setBrush(QColor(130, 207, 255, round(10 + pulse * 17)))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(QPointF(image.width() * 0.28, image.height() * 0.73),
+                                image.width() * 0.07, image.height() * 0.13)
+            tap = (now * 0.65) % 1
+            painter.setPen(QPen(QColor(192, 235, 255, round((1 - tap) * 110)), 0.8 * scale))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(QPointF(image.width() * 0.29, image.height() * 0.79),
+                                (1 + tap * 4) * scale, (1 + tap * 4) * scale)
+            painter.restore()
         painter.resetTransform()
         mask = transform.map(self.frame_masks[key])
-        if (not self.dock_edge or self.dock_reveal > 0.95) and (self.action == 'happy' or self.playing or self.sleeping):
+        if (not self.dock_edge or self.dock_reveal > 0.95) and (self.action == 'happy' or self.playing or self.sleeping) and not self.using_phone:
             color = QColor('#C87991') if self.action == 'happy' else QColor('#69A3BA')
             for i in range(3):
                 phase = (now * 0.8 + i / 3) % 1
                 x = (35 + i * 76 + math.sin(now + i) * 6) * scale
-                y = (120 - phase * 60) * scale
+                y = ((190 if resting else 120) - phase * 60) * scale
                 painter.setOpacity((1 - phase) * 0.9)
                 painter.save()
                 painter.translate(x, y)

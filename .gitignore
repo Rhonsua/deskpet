@@ -9,6 +9,7 @@ dist/
 .pytest_cache/
 preview/
 assets/references/
+用户提供的素材/
 .env
 .env.*
 *.db-wal

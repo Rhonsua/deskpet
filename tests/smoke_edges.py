@@ -109,7 +109,8 @@ with tempfile.TemporaryDirectory() as scratch:
         pet.panel.tabs.setCurrentIndex(2)
         pet.panel.appearance.showPopup()
         app.processEvents()
-        for combo in (pet.panel.appearance, pet.panel.mode_choice, pet.panel.playlist_choice):
+        for combo in (pet.panel.appearance, pet.panel.mode_choice, pet.panel.playlist_choice,
+                      pet.panel.output_choice):
             palette = combo.view().palette()
             assert palette.color(QPalette.ColorRole.Text).name() == '#263e4d'
             assert palette.color(QPalette.ColorRole.Base).name() == '#ffffff'

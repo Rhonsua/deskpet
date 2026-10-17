@@ -65,14 +65,16 @@ with tempfile.TemporaryDirectory() as scratch:
                  ('lift', '提起：惊讶表情与轻轻摇摆', 18, '欸——要去哪里呀？'),
                  ('land', '放下：落地回弹', 8, '站稳啦！'),
                  ('eat', '投喂：抱着包子吃一口', 24, '啊呜……好吃！'),
-                 ('sleep', '休息：闭眼小憩，点击唤醒', 18, '我先眯一会儿。'),
+                 ('sleep', '休息：侧躺盖被子，轻轻呼吸', 24, '被子盖好啦……晚安。'),
+                 ('phone', '熬夜：被窝玩手机，点击收起', 24, '再看一小会儿……就一小会儿。'),
                  ('music', '听歌：摇摆与音符', 18, '一起听喜欢的歌吧。')]
     index = 0
     for action, caption, count, words in scenarios:
         pet.dragging = action == 'lift'
         pet.sleeping = action == 'sleep'
+        pet.using_phone = action == 'phone'
         pet.playing = action == 'music'
-        pet.action = action if action not in ('sleep', 'music') else 'idle'
+        pet.action = action if action not in ('sleep', 'phone', 'music') else 'idle'
         start = time.monotonic()
         pet.action_start = start
         pet.bubble.say(words, 30000)

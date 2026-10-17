@@ -18,6 +18,7 @@ from PySide6.QtCore import QSettings, QUrl, QEvent, QCoreApplication
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import QApplication
 from main import MusicPanel
+from audio_routing import device_id
 
 
 def wait_for(condition, timeout=15):
@@ -35,6 +36,7 @@ def dispose(panel):
         return
     panel._disposed = True
     panel.progress_timer.stop()
+    panel.audio_router.poll.stop()
     panel.autoplay_requested = False
     panel.player.stop()
     panel.player.setSource(QUrl())
@@ -69,10 +71,39 @@ with tempfile.TemporaryDirectory(prefix='天依 音乐 ') as scratch, ExitStack(
     first.play_row(0)
     wait_for(lambda: first.player.duration() > 11000 and first.player.position() > 2200)
     assert first.store.stats()['total'] > 0
+    # Route real decoded media between the available outputs without changing Windows defaults.
+    outputs = first.audio_router.outputs
+    initial = device_id(first.audio.device())
+    alternative = next((d for d in outputs if device_id(d) != initial), None)
+    if alternative is not None:
+        before = first.player.position()
+        source = first.current_path()
+        first.output_choice.setCurrentIndex(first.output_choice.findData(device_id(alternative)))
+        wait_for(lambda: device_id(first.audio.device()) == device_id(alternative)
+                 and first.player.position() > before + 350
+                 and first.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
+        assert first.current_path() == source
+        first.output_choice.setCurrentIndex(0)
+        wait_for(lambda: device_id(first.audio.device()) == device_id(first.audio_router.default)
+                 and first.player.position() > before + 600)
+        print('PASS: real output switch during playback and return to system default', flush=True)
     first.seek.setValue(5000)
     first.seek_to()
     wait_for(lambda: first.player.position() >= 5000)
     first.toggle()
+    if alternative is not None:
+        paused_at = first.player.position()
+        first.output_choice.setCurrentIndex(first.output_choice.findData(device_id(alternative)))
+        wait_for(lambda: device_id(first.audio.device()) == device_id(alternative)
+                 and abs(first.player.position() - paused_at) < 300)
+        deadline = time.monotonic() + 0.8
+        while time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        assert first.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState
+        assert abs(first.player.position() - paused_at) < 350, (
+            paused_at, first.player.position(), first.pending_seek,
+            first.player.mediaStatus(), first.player.errorString())
     first.save()
     saved_position = first.player.position()
     dispose(first)

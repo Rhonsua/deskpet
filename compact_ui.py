@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSlider, QTabWidget,
     QComboBox, QLineEdit, QStackedWidget, QListWidget, QAbstractItemView,
-    QProgressBar, QCheckBox,
+    QProgressBar, QCheckBox, QScrollArea, QFrame,
 )
 from music_library import MODES
 from pet_store import FOODS
@@ -160,8 +160,12 @@ def build(panel):
         growth.addWidget(action(f'投喂{name} · {cost} 音符', lambda checked=False, food=name: panel.feed(food)))
     growth.addStretch()
 
-    settings_page = QWidget()
-    settings = QVBoxLayout(settings_page)
+    settings_page = QScrollArea()
+    settings_page.setWidgetResizable(True)
+    settings_page.setFrameShape(QFrame.Shape.NoFrame)
+    settings_content = QWidget()
+    settings_page.setWidget(settings_content)
+    settings = QVBoxLayout(settings_content)
     settings.setContentsMargins(2, 14, 2, 0)
     settings.setSpacing(12)
     panel.tabs.addTab(settings_page, '设置')
@@ -179,6 +183,14 @@ def build(panel):
     panel.appearance.setCurrentIndex(0 if panel.settings.value('visual_variant', 'refined') == 'refined' else 1)
     panel.appearance.currentIndexChanged.connect(lambda: panel.pet.set_variant(panel.appearance.currentData()))
     settings.addWidget(panel.appearance)
+    settings.addWidget(text('音频输出'))
+    panel.output_choice = QComboBox()
+    style_combo(panel.output_choice)
+    panel.output_choice.currentIndexChanged.connect(panel.choose_audio_output)
+    settings.addWidget(panel.output_choice)
+    panel.output_note = text('正在读取音频设备…', True)
+    panel.output_note.setWordWrap(True)
+    settings.addWidget(panel.output_note)
     tip = text('摸头：点头部\n戳一戳：点身体\n提起：按住后拖动\n边缘探头：拖到边缘松手，靠近展开，移开缩回\n离开边缘：按住角色拖回桌面\n打开菜单：右键或双击天依', True)
     settings.addWidget(tip)
     settings.addStretch()

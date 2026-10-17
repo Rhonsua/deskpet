@@ -26,6 +26,7 @@ from compact_ui import build
 from desktop_pet import DesktopPet
 from music_library import MusicLibrary, PlaybackQueue, MODES
 from windows_startup import WindowsStartup
+from audio_routing import AudioRouter, device_id
 
 
 class MusicPanel(QWidget):
@@ -45,6 +46,7 @@ class MusicPanel(QWidget):
         self.failed_paths = set()
         self.queue_owner = ''
         self.last_save = time.monotonic()
+        self.route_snapshot = None
         self.setWindowTitle("天依音乐 · 第一阶段原型")
         self.resize(460, 440)
         legacy = self.settings.value('paths', [])
@@ -55,10 +57,16 @@ class MusicPanel(QWidget):
         self.player = QMediaPlayer(self)
         self.player.setAudioOutput(self.audio)
         build(self)
+        self.audio_router = AudioRouter(self.audio, self.settings, self)
+        self.audio_router.changed.connect(self.refresh_audio_outputs)
+        self.audio_router.routeWillChange.connect(self.prepare_audio_route)
+        self.audio_router.routeChanged.connect(self.finish_audio_route)
+        self.audio_router.refresh()
         self.progress_timer = QTimer(self)
         self.progress_timer.timeout.connect(self.sample)
         self.progress_timer.start(1000)
         self.player.durationChanged.connect(self.duration_changed)
+        self.player.seekableChanged.connect(lambda _: self.duration_changed(self.player.duration()))
         self.player.positionChanged.connect(self.position_changed)
         self.player.playbackStateChanged.connect(self.state_changed)
         self.player.mediaStatusChanged.connect(self.media_changed)
@@ -77,6 +85,56 @@ class MusicPanel(QWidget):
     def current_path(self):
         path = self.player.source().toLocalFile()
         return str(Path(path).resolve()) if path else ''
+
+    def reset_audio_sample(self):
+        self.last_position = None
+        self.last_tick = time.monotonic()
+
+    def prepare_audio_route(self):
+        self.reset_audio_sample()
+        source = self.player.source()
+        self.route_snapshot = None
+        if source.isEmpty():
+            return
+        position = self.pending_seek if self.pending_seek is not None else self.player.position()
+        playing = self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+        self.route_snapshot = (source, position, playing)
+        # Windows Media Foundation may reset a paused topology to position zero.
+        # Reopen the same source at the captured position on the new endpoint.
+        self.autoplay_requested = False
+        self.player.stop()
+        self.player.setSource(QUrl())
+
+    def finish_audio_route(self):
+        snapshot, self.route_snapshot = self.route_snapshot, None
+        self.reset_audio_sample()
+        if snapshot is None:
+            return
+        source, position, playing = snapshot
+        self.pending_seek = position
+        self.autoplay_requested = playing and not self.audio.device().isNull()
+        self.player.setSource(source)
+        if self.autoplay_requested:
+            self.player.play()
+
+    def refresh_audio_outputs(self):
+        router = self.audio_router
+        self.output_choice.blockSignals(True)
+        self.output_choice.clear()
+        self.output_choice.addItem('跟随系统默认输出', '')
+        for device in router.outputs:
+            self.output_choice.addItem(device.description(), device_id(device))
+        if router.preferred and self.output_choice.findData(router.preferred) < 0:
+            name = self.settings.value('audio_output_name', '上次选择的设备')
+            self.output_choice.addItem(name + '（未连接）', router.preferred)
+        self.output_choice.setCurrentIndex(max(0, self.output_choice.findData(router.preferred)))
+        self.output_choice.blockSignals(False)
+        self.output_note.setText(router.summary)
+        self.output_note.setToolTip(router.summary)
+
+    def choose_audio_output(self, index):
+        if index >= 0 and hasattr(self, 'audio_router'):
+            self.audio_router.choose(self.output_choice.itemData(index))
 
     def refresh_startup(self):
         self.startup_toggle.blockSignals(True)
@@ -194,7 +252,10 @@ class MusicPanel(QWidget):
 
     def duration_changed(self, duration):
         self.seek.setRange(0, duration)
-        if self.pending_seek is not None and duration > 0:
+        ready = self.player.mediaStatus() in (QMediaPlayer.MediaStatus.LoadedMedia,
+                                             QMediaPlayer.MediaStatus.BufferingMedia,
+                                             QMediaPlayer.MediaStatus.BufferedMedia)
+        if self.pending_seek is not None and duration > 0 and self.player.isSeekable() and ready:
             position = min(self.pending_seek, duration)
             self.pending_seek = None
             self.last_position = None
@@ -378,8 +439,6 @@ class MusicPanel(QWidget):
     def state_changed(self, state):
         self.last_position = None
         self.pet.playing = state == QMediaPlayer.PlaybackState.PlayingState
-        if self.pet.playing and hasattr(self.pet, 'sleeping'):
-            self.pet.sleeping = False
         self.play_button.setText('暂停' if self.pet.playing else '播放')
 
     def media_changed(self, status):

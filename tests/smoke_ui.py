@@ -31,6 +31,7 @@ class TestStartup:
 def dispose(pet):
     pet.timer.stop()
     pet.panel.progress_timer.stop()
+    pet.panel.audio_router.poll.stop()
     pet.panel.player.stop()
     pet.tray.hide()
     pet.toolbar.hide()
@@ -59,7 +60,7 @@ with tempfile.TemporaryDirectory() as scratch, ExitStack() as cleanup:
     cleanup.callback(dispose, pet)
     assert pet.variant == 'refined'
     assert not pet.panel.isVisible()
-    assert set(('idle', 'blink', 'happy', 'eat', 'lift')).issubset(pet.frames)
+    assert set(('idle', 'blink', 'happy', 'eat', 'lift', 'sleep', 'phone')).issubset(pet.frames)
     pet.panel.show()
     app.processEvents()
     assert pet.panel.list.count() == 0
@@ -134,8 +135,20 @@ with tempfile.TemporaryDirectory() as scratch, ExitStack() as cleanup:
     assert pet.action == 'land' and not pet.dragging
     pet.toggle_sleep()
     assert pet.sleeping
+    app.processEvents()
+    assert pet.grab().save(str(output / 'pet-sleep.png'))
+    sleep_region = pet.hit_region.boundingRect()
+    assert sleep_region.width() > sleep_region.height()
+    pet.panel.state_changed(pet.panel.player.PlaybackState.PlayingState)
+    assert pet.sleeping, 'music must not wake the sleeping pet'
+    pet.toggle_phone()
+    assert pet.using_phone and not pet.sleeping
+    app.processEvents()
+    assert pet.grab().save(str(output / 'pet-phone.png'))
+    pet.toggle_sleep()
+    assert pet.sleeping and not pet.using_phone
     pet.touch()
-    assert not pet.sleeping
+    assert not pet.sleeping and not pet.using_phone
     pet.timer.stop()
     pet.panel.progress_timer.stop()
     pet.panel.player.stop()
