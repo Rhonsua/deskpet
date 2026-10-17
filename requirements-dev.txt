@@ -1,0 +1,2 @@
+-r requirements.txt
+imageio-ffmpeg==0.6.0

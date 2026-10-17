@@ -73,6 +73,12 @@ class PetStoreTests(unittest.TestCase):
             self.store.tick_running(5)
         self.assertEqual(self.store.pet()['hunger'], 65)
 
+    def test_head_pat_daily_bonus_is_limited(self):
+        for _ in range(10):
+            self.assertTrue(self.store.interact(self.start))
+        self.assertFalse(self.store.interact(self.start))
+        self.assertEqual(self.store.pet()['mood'], 90)
+
 
 if __name__ == '__main__':
     unittest.main()

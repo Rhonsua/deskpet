@@ -21,6 +21,7 @@ class PetStore:
             PRIMARY KEY(day,path));
           CREATE TABLE IF NOT EXISTS ledger(id INTEGER PRIMARY KEY, at TEXT, reason TEXT,
             notes INTEGER, xp INTEGER);
+          CREATE TABLE IF NOT EXISTS affection(day TEXT PRIMARY KEY, count INTEGER DEFAULT 0);
         """)
         self.db.commit()
 
@@ -109,6 +110,17 @@ class PetStore:
         weekly = self.db.execute("SELECT COALESCE(SUM(seconds),0) FROM daily WHERE day BETWEEN ? AND ?", (week,today)).fetchone()[0]
         total = self.db.execute("SELECT COALESCE(SUM(seconds),0) FROM daily").fetchone()[0]
         return {'today': row[0] if row else 0, 'week': weekly, 'total': total}
+
+    def interact(self, now=None):
+        day = (now or datetime.now()).date().isoformat()
+        with self.db:
+            self.db.execute('INSERT OR IGNORE INTO affection(day) VALUES(?)', (day,))
+            count = self.db.execute('SELECT count FROM affection WHERE day=?', (day,)).fetchone()[0]
+            if count >= 10:
+                return False
+            self.db.execute('UPDATE affection SET count=count+1 WHERE day=?', (day,))
+            self.db.execute('UPDATE pet SET mood=MIN(100,mood+2) WHERE id=1')
+        return True
 
     def close(self):
         self.db.close()

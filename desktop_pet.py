@@ -1,0 +1,510 @@
+"""Character-first desktop interactions, local dialogue, state animation and a small toolbar."""
+import math
+import random
+import time
+from pathlib import Path
+
+from PySide6.QtCore import QPoint, QRect, Qt, QTimer
+from PySide6.QtGui import QColor, QPainter, QPixmap, QRegion, QTransform, QPainterPath, QPen
+from PySide6.QtWidgets import (
+    QApplication, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
+    QProgressBar, QSlider, QStyle, QSystemTrayIcon, QVBoxLayout, QWidget, QCheckBox,
+)
+
+from pet_store import FOODS
+from visual_style import sprite_bounds, update_cover
+
+
+POPUP_STYLE = """
+QFrame#PetPopup { background: #FCFEFF; border: 1px solid #AFC8D3; border-radius: 6px; }
+QWidget { font-family: 'Microsoft YaHei UI'; font-size: 12px; color: #3C5564; }
+QLabel { background: transparent; border: none; }
+QLabel#Muted { color: #869CA7; font-size: 11px; }
+QPushButton { background: #FFFFFF; border: 1px solid #D9E5EA; padding: 6px 9px; border-radius: 4px; }
+QPushButton:hover { background: #E1F0F5; border-color: #89B8C9; }
+QPushButton:checked { background: #D9EDF3; color: #36788E; }
+QProgressBar { background: #E7F0F4; border: none; border-radius: 3px; }
+QProgressBar::chunk { background: #79AEBE; border-radius: 3px; }
+QSlider::groove:horizontal { height: 3px; background: #E1EBF0; }
+QSlider::handle:horizontal { width: 9px; background: #75A4B5; margin: -3px 0; border-radius: 4px; }
+QCheckBox { spacing: 7px; }
+"""
+
+
+def clamp_near(pet, window, above=True):
+    screen = QApplication.screenAt(pet.frameGeometry().center()) or QApplication.primaryScreen()
+    bounds = screen.availableGeometry().adjusted(8, 8, -8, -8)
+    x = pet.x() + (pet.width() - window.width()) // 2
+    y = pet.y() - window.height() - 6 if above else pet.y() + pet.height() + 5
+    if y < bounds.top():
+        y = pet.y() + 20
+        x = pet.x() - window.width() - 5 if pet.x() - window.width() > bounds.left() else pet.x() + pet.width() + 5
+    window.move(max(bounds.left(), min(x, bounds.right() - window.width())),
+                max(bounds.top(), min(y, bounds.bottom() - window.height())))
+
+
+class Bubble(QFrame):
+    def __init__(self, pet):
+        super().__init__(pet, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint |
+                         Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.WindowDoesNotAcceptFocus)
+        self.pet = pet
+        self.setObjectName('PetPopup')
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setStyleSheet(POPUP_STYLE)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 10)
+        self.label = QLabel()
+        self.label.setWordWrap(True)
+        self.label.setMaximumWidth(220)
+        layout.addWidget(self.label)
+        self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self.hide)
+
+    def say(self, value, duration=3400):
+        self.label.setText(value)
+        self.adjustSize()
+        clamp_near(self.pet, self)
+        self.show()
+        self.timer.start(duration)
+
+
+class PetToolbar(QFrame):
+    def __init__(self, pet):
+        super().__init__(pet, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint |
+                         Qt.WindowType.WindowStaysOnTopHint)
+        self.pet = pet
+        self.setObjectName('PetPopup')
+        self.setStyleSheet(POPUP_STYLE)
+        self.setFixedWidth(336)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 10, 12, 10)
+        outer.setSpacing(9)
+        title = QHBoxLayout()
+        self.name = QLabel('洛天依')
+        self.name.setStyleSheet('font-weight: 600; color: #3C7A92;')
+        title.addWidget(self.name)
+        title.addStretch()
+        close = QPushButton('收起')
+        close.clicked.connect(self.hide)
+        title.addWidget(close)
+        outer.addLayout(title)
+        self.bars = {}
+        for key, caption in [('xp', '经验'), ('hunger', '饱食'), ('mood', '心情')]:
+            row = QHBoxLayout()
+            row.addWidget(QLabel(caption))
+            bar = QProgressBar()
+            bar.setFixedHeight(6)
+            bar.setTextVisible(False)
+            self.bars[key] = bar
+            row.addWidget(bar, 1)
+            outer.addLayout(row)
+        actions = QHBoxLayout()
+        for caption, callback in [('摸摸', pet.pat), ('投喂', lambda: self.page('food')),
+                                  ('音乐', lambda: self.page('music')), ('休息', pet.toggle_sleep),
+                                  ('设置', lambda: self.page('settings'))]:
+            button = QPushButton(caption)
+            button.clicked.connect(callback)
+            actions.addWidget(button)
+        outer.addLayout(actions)
+        self.content = QVBoxLayout()
+        self.content.setSpacing(7)
+        outer.addLayout(self.content)
+        self.mode = 'home'
+        self.close_timer = QTimer(self)
+        self.close_timer.setSingleShot(True)
+        self.close_timer.timeout.connect(self.auto_close)
+
+    def auto_close(self):
+        if self.underMouse():
+            self.close_timer.start(8000)
+        else:
+            self.hide()
+
+    def refresh(self):
+        data = self.pet.panel.store.pet()
+        self.name.setText(f"洛天依  Lv.{data['level']}     音符 {data['notes']}")
+        self.bars['xp'].setRange(0, 50 + 20 * (data['level'] - 1))
+        self.bars['xp'].setValue(data['xp'])
+        for key in ('hunger', 'mood'):
+            self.bars[key].setRange(0, 100)
+            self.bars[key].setValue(data[key])
+            self.bars[key].setToolTip(str(data[key]) + '/100')
+
+    def page(self, name='home'):
+        self.mode = name
+        while self.content.count():
+            item = self.content.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        if name == 'food':
+            for food, (cost, *_rest) in FOODS.items():
+                button = QPushButton(f'{food}     {cost} 音符')
+                button.clicked.connect(lambda checked=False, value=food: self.pet.panel.feed(value))
+                self.content.addWidget(button)
+        elif name == 'music':
+            title = self.pet.panel.song_title.text()
+            self.content.addWidget(QLabel(title[:24]))
+            self.add_button('上一首', lambda: self.pet.panel.step(-1))
+            self.add_button('播放 / 暂停', self.pet.panel.toggle)
+            self.add_button('下一首', lambda: self.pet.panel.step(1))
+            self.add_button('打开歌单 / 添加 MP3', lambda: self.pet.open_tools(0))
+        elif name == 'settings':
+            startup = QCheckBox('开机自启')
+            try:
+                startup.setChecked(self.pet.panel.startup.enabled())
+                startup.setEnabled(self.pet.panel.startup.supported)
+            except OSError:
+                startup.setEnabled(False)
+            startup.toggled.connect(self.pet.panel.toggle_startup)
+            startup.toggled.connect(lambda: self.page('settings'))
+            self.content.addWidget(startup)
+            self.content.addWidget(QLabel('桌宠大小'))
+            scale = QSlider(Qt.Orientation.Horizontal)
+            scale.setRange(75, 150)
+            scale.setValue(round(self.pet.scale * 100))
+            scale.valueChanged.connect(lambda value: self.pet.set_scale(value / 100))
+            self.content.addWidget(scale)
+            self.add_button('更多设置', lambda: self.pet.open_tools(2))
+        else:
+            hint = QLabel('点头部摸摸 · 拖动提起 · 双击/右键菜单')
+            hint.setObjectName('Muted')
+            self.content.addWidget(hint)
+            self.add_button('和天依说：一起加油吧', lambda: self.pet.reply())
+        self.refresh()
+        self.adjustSize()
+        if self.isVisible():
+            clamp_near(self.pet, self)
+
+    def add_button(self, caption, callback):
+        button = QPushButton(caption)
+        button.clicked.connect(callback)
+        self.content.addWidget(button)
+
+    def toggle(self):
+        if self.isVisible():
+            self.hide()
+        else:
+            self.pet.bubble.hide()
+            self.page('home')
+            clamp_near(self.pet, self)
+            self.show()
+            self.close_timer.start(12000)
+
+
+class DesktopPet(QWidget):
+    def __init__(self, panel_factory):
+        super().__init__()
+        self.setWindowTitle('洛天依桌宠')
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setMouseTracking(True)
+        self.playing = False
+        self.sleeping = False
+        self.action = 'idle'
+        self.action_start = time.monotonic()
+        self.action_until = 0
+        self.last_interaction = self.action_start
+        self.press_point = None
+        self.drag_offset = None
+        self.dragging = False
+        self.last_pat = 0
+        self.frames = {}
+        self.pixmap_cache = {}
+        self.scaled_frames = {}
+        self.frame_masks = {}
+        self.phase = 0
+        self.panel = panel_factory(self)
+        self.variant = self.panel.settings.value('visual_variant', 'refined')
+        if self.panel.settings.value('appearance_revision', '') != 'refined-smooth-v1':
+            self.variant = 'refined'
+            self.panel.settings.setValue('appearance_revision', 'refined-smooth-v1')
+        self.scale = float(self.panel.settings.value('pet_scale', 1.0))
+        self.bubble = Bubble(self)
+        self.toolbar = PetToolbar(self)
+        self.set_scale(self.scale)
+        self.set_variant(self.variant)
+        self.click_timer = QTimer(self)
+        self.click_timer.setSingleShot(True)
+        self.click_timer.timeout.connect(self.touch)
+        self.hold_timer = QTimer(self)
+        self.hold_timer.setSingleShot(True)
+        self.hold_timer.timeout.connect(self.begin_drag)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.animate)
+        self.timer.start(33)
+        self.tray = QSystemTrayIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_MediaVolume), self)
+        menu = QMenu()
+        menu.addAction('显示天依', self.restore)
+        menu.addAction('互动菜单', self.toolbar.toggle)
+        menu.addAction('歌单', lambda: self.open_tools(0))
+        menu.addAction('设置', lambda: self.open_tools(2))
+        menu.addAction('退出', QApplication.instance().quit)
+        self.tray.setContextMenu(menu)
+        self.tray.setToolTip('洛天依 · 右键打开菜单')
+        self.tray.show()
+        self.restore()
+
+    def set_variant(self, variant):
+        self.variant = variant
+        directory = Path(__file__).resolve().parent / 'assets' / 'character'
+        filename = directory / ('tianyi-simple-v3-costume.png' if variant == 'simple' else 'tianyi-refined-v3-smooth.png')
+        self.frames = {}
+        sources = {'idle': filename}
+        if variant == 'refined':
+            for state in ('blink', 'happy', 'eat', 'lift'):
+                sources[state] = directory / 'states' / (state + '.png')
+        for state, path in sources.items():
+            cache_key = str(path)
+            if cache_key in self.pixmap_cache:
+                self.frames[state] = self.pixmap_cache[cache_key]
+                continue
+            pixmap = QPixmap(cache_key)
+            if not pixmap.isNull():
+                self.frames[state] = pixmap.copy(sprite_bounds(pixmap))
+                self.pixmap_cache[cache_key] = self.frames[state]
+        self.sprite = self.frames.get('idle', QPixmap())
+        self.prepare_frames()
+        update_cover(self.panel, filename)
+        self.panel.settings.setValue('visual_variant', variant)
+        self.panel.appearance.blockSignals(True)
+        self.panel.appearance.setCurrentIndex(self.panel.appearance.findData(variant))
+        self.panel.appearance.blockSignals(False)
+        self.update()
+
+    def set_scale(self, scale):
+        anchor = self.frameGeometry().bottomLeft() if self.isVisible() else None
+        self.scale = max(0.75, min(1.5, scale))
+        self.resize(round(260 * self.scale), round(310 * self.scale))
+        if anchor is not None:
+            bounds = (QApplication.screenAt(anchor) or QApplication.primaryScreen()).availableGeometry()
+            self.move(max(bounds.left(), min(anchor.x(), bounds.right() - self.width())),
+                      max(bounds.top(), min(anchor.y() - self.height(), bounds.bottom() - self.height())))
+        self.panel.settings.setValue('pet_scale', self.scale)
+        self.prepare_frames()
+        self.update()
+
+    def prepare_frames(self):
+        self.scaled_frames = {
+            name: pixmap.scaled(round(236 * self.scale), round(270 * self.scale),
+                                Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            for name, pixmap in self.frames.items()
+        }
+        self.frame_masks = {name: QRegion(pixmap.mask()) for name, pixmap in self.scaled_frames.items()}
+
+    def restore(self):
+        screen = QApplication.primaryScreen().availableGeometry()
+        saved = self.panel.settings.value('position')
+        point = saved if isinstance(saved, QPoint) else QPoint(screen.right() - self.width() - 40, screen.bottom() - self.height() - 20)
+        if not any(s.availableGeometry().contains(point) for s in QApplication.screens()):
+            point = screen.topLeft() + QPoint(60, 120)
+        self.move(point)
+        self.show()
+
+    def open_tools(self, tab=0):
+        self.panel.tabs.setCurrentIndex(tab)
+        clamp_near(self, self.panel)
+        self.panel.show()
+        self.panel.raise_()
+        self.toolbar.hide()
+
+    def react(self, action, seconds=1.7, words=None):
+        if self.dragging:
+            return
+        self.sleeping = False
+        self.last_interaction = time.monotonic()
+        self.action = action
+        self.action_start = self.last_interaction
+        self.action_until = self.last_interaction + seconds
+        if words:
+            self.bubble.say(words)
+        self.update()
+
+    def pat(self):
+        if self.action == 'eat' and time.monotonic() < self.action_until:
+            return
+        self.toolbar.hide()
+        now = time.monotonic()
+        if now - self.last_pat >= 60:
+            self.panel.store.interact()
+            self.last_pat = now
+            self.panel.refresh_growth()
+        self.react('happy', words=random.choice(['嘿嘿，头发要被摸乱啦。', '有你在，今天也很开心！', '再陪我听一首吧？']))
+
+    def touch(self):
+        self.toolbar.hide()
+        if self.sleeping:
+            self.react('happy', words='醒啦！要一起听歌吗？')
+        elif getattr(self, 'touch_head', True):
+            self.pat()
+        else:
+            self.react('poke', 1.0, '欸？是在叫我吗？')
+
+    def reply(self):
+        self.toolbar.hide()
+        self.react('happy', words=random.choice(['一起加油！我会陪着你的。', '累了就歇一会儿，我在这里。', '今天也有好多好听的歌呢。']))
+
+    def toggle_sleep(self):
+        if self.sleeping:
+            self.react('happy', words='睡好啦，一起玩吧！')
+        else:
+            self.sleeping = True
+            self.action = 'idle'
+            self.toolbar.hide()
+            self.bubble.say('我先眯一会儿，点我就会醒哦。')
+
+    def feed_reaction(self, success, words):
+        if success:
+            self.toolbar.hide()
+            self.react('eat', 2.8, '啊呜……好吃！')
+            self.toolbar.refresh()
+        else:
+            self.bubble.say(words)
+
+    def begin_drag(self):
+        if self.press_point is None:
+            return
+        self.dragging = True
+        self.sleeping = False
+        self.action = 'lift'
+        self.action_start = time.monotonic()
+        self.toolbar.hide()
+        self.bubble.hide()
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+
+    def animate(self):
+        now = time.monotonic()
+        self.phase = now
+        if self.action not in ('idle', 'lift') and now >= self.action_until:
+            self.action = 'idle'
+        self.update()
+
+    def paintEvent(self, event):
+        now = self.phase or time.monotonic()
+        elapsed = max(0, now - self.action_start)
+        state = 'idle'
+        angle, y, sx, sy = 0.0, 0.0, 1.0, 1.0
+        if self.dragging:
+            state, angle, y = 'lift', math.sin(elapsed * 5) * 5, -5
+        elif self.action == 'eat':
+            state, y = 'eat', math.sin(elapsed * 13) * 1.5
+            sx = 1 + math.sin(elapsed * 13) * 0.008
+        elif self.action in ('happy', 'poke'):
+            state = 'happy' if self.action == 'happy' else 'lift'
+            angle = math.sin(elapsed * 11) * (2 if self.action == 'happy' else 4)
+            y = -abs(math.sin(elapsed * 7)) * 7
+        elif self.action == 'land':
+            sy = 1 - max(0, 1 - elapsed / 0.6) * math.sin(elapsed * 14) * 0.10
+            sx = 2 - sy
+        elif self.sleeping:
+            state, angle, y = 'blink', 5, math.sin(now * 1.5)
+        elif self.playing:
+            angle, y = math.sin(now * 3.5) * 3, -abs(math.sin(now * 3.5)) * 4
+            state = 'blink' if now % 4.8 < 0.15 else 'idle'
+        else:
+            state = 'blink' if now % 4.8 < 0.15 else 'idle'
+            sy = 1 + math.sin(now * 2) * 0.003
+        key = state if state in self.scaled_frames else 'idle'
+        image = self.scaled_frames.get(key)
+        if image is None or image.isNull():
+            return
+        scale = self.scale
+        transform = QTransform()
+        transform.translate(self.width() / 2, 280 * scale + y * scale)
+        transform.rotate(angle)
+        transform.scale(sx, sy)
+        transform.translate(-image.width() / 2, -image.height())
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setTransform(transform)
+        painter.drawPixmap(0, 0, image)
+        painter.resetTransform()
+        mask = transform.map(self.frame_masks[key])
+        if self.action == 'happy' or self.playing or self.sleeping:
+            color = QColor('#C87991') if self.action == 'happy' else QColor('#69A3BA')
+            for i in range(3):
+                phase = (now * 0.8 + i / 3) % 1
+                x = (35 + i * 76 + math.sin(now + i) * 6) * scale
+                y = (120 - phase * 60) * scale
+                painter.setOpacity((1 - phase) * 0.9)
+                painter.save()
+                painter.translate(x, y)
+                painter.scale(scale * 0.65, scale * 0.65)
+                path = QPainterPath()
+                if self.action == 'happy':
+                    path.moveTo(0, -4)
+                    path.cubicTo(-11, -15, -17, 0, 0, 11)
+                    path.cubicTo(17, 0, 11, -15, 0, -4)
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(color)
+                    painter.drawPath(path)
+                elif self.sleeping:
+                    path.moveTo(0, -9)
+                    path.lineTo(10, -9)
+                    path.lineTo(0, 0)
+                    path.lineTo(10, 0)
+                    painter.setPen(QPen(color, 2))
+                    painter.drawPath(path)
+                else:
+                    painter.setPen(QPen(color, 2))
+                    painter.drawLine(4, 3, 4, -12)
+                    painter.drawLine(4, -12, 11, -8)
+                    painter.setBrush(color)
+                    painter.drawEllipse(-3, 0, 7, 5)
+                painter.restore()
+                mask = mask.united(QRegion(round(x) - 16, round(y) - 18, 32, 34))
+        painter.end()
+        self.hit_region = mask
+        if QApplication.platformName() != 'offscreen':
+            self.setMask(mask)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.press_point = event.globalPosition().toPoint()
+            self.drag_offset = self.press_point - self.pos()
+            self.touch_head = event.position().y() < self.height() * 0.57
+            self.hold_timer.start(280)
+
+    def mouseMoveEvent(self, event):
+        if self.press_point is None:
+            return
+        point = event.globalPosition().toPoint()
+        if not self.dragging and (point - self.press_point).manhattanLength() > 8:
+            self.begin_drag()
+        if self.dragging:
+            screen = QApplication.screenAt(point) or QApplication.primaryScreen()
+            bounds = screen.availableGeometry()
+            desired = point - self.drag_offset
+            self.move(max(bounds.left(), min(desired.x(), bounds.right() - self.width())),
+                      max(bounds.top(), min(desired.y(), bounds.bottom() - self.height())))
+
+    def mouseReleaseEvent(self, event):
+        self.hold_timer.stop()
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        self.press_point = None
+        if getattr(self, 'ignore_release', False):
+            self.ignore_release = False
+            return
+        if self.dragging:
+            self.dragging = False
+            self.react('land', 0.65)
+            self.panel.settings.setValue('position', self.pos())
+        else:
+            self.click_timer.start(220)
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def mouseDoubleClickEvent(self, event):
+        self.click_timer.stop()
+        self.ignore_release = True
+        self.toolbar.toggle()
+
+    def contextMenuEvent(self, event):
+        self.toolbar.toggle()
+
+    def hideEvent(self, event):
+        self.toolbar.hide()
+        self.bubble.hide()
+        super().hideEvent(event)
