@@ -10,7 +10,7 @@ os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import imageio_ffmpeg
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, QRect
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
 from main import Pet
@@ -60,6 +60,8 @@ with tempfile.TemporaryDirectory() as scratch:
     output.mkdir(exist_ok=True)
     frames = Path(scratch) / 'frames'
     frames.mkdir()
+    singing_frames = Path(scratch) / 'singing'
+    singing_frames.mkdir()
     scenarios = [('idle', '待机：呼吸与眨眼', 18, '我在这里陪你。'),
                  ('happy', '摸头：闭眼挥手与爱心回应', 18, '嘿嘿，头发要被摸乱啦。'),
                  ('lift', '提起：惊讶表情与轻轻摇摆', 18, '欸——要去哪里呀？'),
@@ -67,21 +69,25 @@ with tempfile.TemporaryDirectory() as scratch:
                  ('eat', '投喂：抱着包子吃一口', 24, '啊呜……好吃！'),
                  ('sleep', '休息：背身盖被子，轻轻呼吸', 24, '被子盖好啦……晚安。'),
                  ('phone', '熬夜：被窝玩手机，点击收起', 24, '再看一小会儿……就一小会儿。'),
-                 ('music', '听歌：摇摆与音符', 18, '一起听喜欢的歌吧。')]
+                 ('music', '唱歌：持麦、左右侧转与交替点脚', 72, '一起唱喜欢的歌吧。')]
     index = 0
     for action, caption, count, words in scenarios:
         pet.dragging = action == 'lift'
-        pet.sleeping = action == 'sleep'
-        pet.using_phone = action == 'phone'
+        pet.behavior.set_mode(action if action in ('sleep', 'phone') else 'idle')
+        pet.behavior.layers.clear()
         pet.playing = action == 'music'
-        pet.action = action if action not in ('sleep', 'phone', 'music') else 'idle'
+        if action == 'lift':
+            pet.behavior.begin_drag()
+        elif action not in ('idle', 'sleep', 'phone', 'music'):
+            pet.behavior.react(action, 30)
         start = time.monotonic()
-        pet.action_start = start
         pet.bubble.say(words, 30000)
         app.processEvents()
         speech.setPixmap(pet.bubble.grab())
         action_name.setText(caption)
         for frame in range(count):
+            if frame:
+                pet.behavior.tick(1 / 12)
             pet.phase = start + frame / 12
             pet.update()
             app.processEvents()
@@ -89,6 +95,8 @@ with tempfile.TemporaryDirectory() as scratch:
             app.processEvents()
             shot = stage.grab()
             shot.save(str(frames / f'{index:04d}.png'))
+            if action == 'music':
+                stage.grab(QRect(390, 100, 300, 340)).save(str(singing_frames / f'{frame:04d}.png'))
             if action == 'happy' and frame == 7:
                 shot.save(str(output / 'interactive-preview.png'))
             index += 1
@@ -104,3 +112,8 @@ with tempfile.TemporaryDirectory() as scratch:
                     '-loop', '0', str(output / 'interactive-preview.gif')], check=True,
                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     print('Rendered interaction preview:', output / 'interactive-preview.gif')
+    subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), '-v', 'error', '-y', '-framerate', '12',
+                    '-i', str(singing_frames / '%04d.png'), '-vf',
+                    'split[a][b];[a]palettegen=max_colors=128[p];[b][p]paletteuse=dither=bayer',
+                    '-loop', '0', str(output / 'singing-preview.gif')], check=True,
+                   creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))

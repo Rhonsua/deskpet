@@ -91,6 +91,7 @@ with tempfile.TemporaryDirectory() as scratch:
             edge_position = dock_position(pet.pos(), pet.size(), bounds, edge)
             pushed = edge_position + outward * 26 + offset
             pet.drag_to(pushed)
+            pet.begin_drag()  # A delayed hold timeout must not detach the same gesture.
             assert pet.dragging and pet.drag_dock_edge == edge and pet.dock_target == 0
             pet.reveal_dock()
             assert pet.dock_target == 0, 'hover must not unfold a held push gesture'
@@ -124,8 +125,12 @@ with tempfile.TemporaryDirectory() as scratch:
         pet.phase = 40.8
         canvas = frame(pet)
         for action in ('happy', 'eat', 'lift', 'idle', 'land'):
-            pet.action = action
-            pet.action_start = 40.5
+            pet.behavior.layers.clear()
+            if action == 'lift':
+                pet.behavior.begin_drag()
+            elif action != 'idle':
+                pet.behavior.react(action, 2)
+            pet.behavior.tick(0.3)
             pet.phase += 0.23
             canvas = frame(pet, canvas)
             assert canvas == frame(pet), 'retained pixels after ' + action

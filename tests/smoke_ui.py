@@ -60,7 +60,8 @@ with tempfile.TemporaryDirectory() as scratch, ExitStack() as cleanup:
     cleanup.callback(dispose, pet)
     assert pet.variant == 'refined'
     assert not pet.panel.isVisible()
-    assert set(('idle', 'blink', 'happy', 'eat', 'lift', 'sleep', 'phone')).issubset(pet.frames)
+    assert set(('idle', 'blink', 'happy', 'eat', 'lift', 'sleep', 'phone',
+                'sing-front', 'sing-left', 'sing-right')).issubset(pet.frames)
     pet.panel.show()
     app.processEvents()
     assert pet.panel.list.count() == 0
@@ -149,6 +150,33 @@ with tempfile.TemporaryDirectory() as scratch, ExitStack() as cleanup:
     assert pet.sleeping and not pet.using_phone
     pet.touch()
     assert not pet.sleeping and not pet.using_phone
+    # The durable mode survives all drag/landing overlays, including interrupted food.
+    pet.timer.stop()
+    pet.panel.hide()
+    pet.move(200, 200)
+    for mode in ('sleep', 'phone', 'sing', 'idle'):
+        pet.set_mode(mode)
+        pet.behavior.react('eat', 2.8)
+        pet.behavior.tick(0.8)
+        pet.press_point = pet.pos() + QPoint(130, 90)
+        pet.drag_offset = QPoint(130, 90)
+        pet.begin_drag()
+        pet.behavior.tick(20)
+        assert pet.behavior.mode == mode
+        QTest.mouseRelease(pet, Qt.MouseButton.LeftButton, pos=QPoint(130, 90))
+        assert pet.action == 'land'
+        pet.behavior.tick(0.65)
+        assert pet.action == 'eat'
+        pet.behavior.tick(2.1)
+        assert pet.behavior.mode == mode and not pet.behavior.layers
+    pet.set_mode('sing')
+    for moment, label in ((0, 'front'), (1.2, 'right'), (3.6, 'left')):
+        pet.phase = moment + 4.8
+        app.processEvents()
+        assert pet.grab().save(str(output / ('pet-sing-' + label + '.png')))
+    pet.set_mode('phone')
+    assert pet.panel.settings.value('activity_mode') == 'phone'
+    pet.set_mode('idle')
     pet.timer.stop()
     pet.panel.progress_timer.stop()
     pet.panel.player.stop()

@@ -15,6 +15,8 @@ from pet_store import FOODS
 from visual_style import sprite_bounds, update_cover
 from ui_theme import CONTROL_STYLE
 from edge_docking import EDGES, clamp_position, dock_position, nearest_edge, edge_gap, pushed_edge
+from pet_behavior import MODES, PetBehavior
+from singing_motion import SingingRig, singing_pose
 
 
 POPUP_STYLE = """
@@ -150,6 +152,8 @@ class PetToolbar(QFrame):
             self.add_button('上一首', lambda: self.pet.panel.step(-1))
             self.add_button('播放 / 暂停', self.pet.panel.toggle)
             self.add_button('下一首', lambda: self.pet.panel.step(1))
+            self.add_button('拿麦克风唱歌 / 收麦', self.pet.toggle_singing)
+            self.add_button('拿麦克风转个身', self.pet.turn_body)
             self.add_button('打开歌单 / 添加 MP3', lambda: self.pet.open_tools(0))
         elif name == 'rest':
             self.add_button('盖被子睡觉', self.pet.toggle_sleep)
@@ -200,6 +204,26 @@ class PetToolbar(QFrame):
 
 
 class DesktopPet(QWidget):
+    @property
+    def playing(self):
+        return self.behavior.playing
+
+    @playing.setter
+    def playing(self, value):
+        self.behavior.playing = bool(value)
+
+    @property
+    def sleeping(self):
+        return self.behavior.mode == 'sleep'
+
+    @property
+    def using_phone(self):
+        return self.behavior.mode == 'phone'
+
+    @property
+    def action(self):
+        return self.behavior.action
+
     def __init__(self, panel_factory):
         super().__init__()
         self.setWindowTitle('洛天依桌宠')
@@ -207,13 +231,8 @@ class DesktopPet(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setMouseTracking(True)
-        self.playing = False
-        self.sleeping = False
-        self.using_phone = False
-        self.action = 'idle'
-        self.action_start = time.monotonic()
-        self.action_until = 0
-        self.last_interaction = self.action_start
+        self.behavior = PetBehavior()
+        self.last_interaction = time.monotonic()
         self.press_point = None
         self.drag_offset = None
         self.dragging = False
@@ -233,6 +252,8 @@ class DesktopPet(QWidget):
         self.hit_region = QRegion()
         self.phase = 0
         self.panel = panel_factory(self)
+        self.behavior.set_mode(self.panel.settings.value('activity_mode', 'idle')
+                               if self.panel.settings.value('activity_mode', 'idle') in MODES else 'idle')
         self.variant = self.panel.settings.value('visual_variant', 'refined')
         if self.panel.settings.value('appearance_revision', '') != 'refined-smooth-v1':
             self.variant = 'refined'
@@ -271,7 +292,8 @@ class DesktopPet(QWidget):
         self.frames = {}
         sources = {'idle': filename}
         if variant == 'refined':
-            for state in ('blink', 'happy', 'eat', 'lift', 'sleep', 'phone'):
+            for state in ('blink', 'happy', 'eat', 'lift', 'sleep', 'phone',
+                          'sing-front', 'sing-left', 'sing-right'):
                 sources[state] = directory / 'states' / ('sleep-back.png' if state == 'sleep' else state + '.png')
         for state, path in sources.items():
             cache_key = str(path)
@@ -313,6 +335,8 @@ class DesktopPet(QWidget):
             for name, pixmap in self.frames.items()
         }
         self.frame_masks = {name: QRegion(pixmap.mask()) for name, pixmap in self.scaled_frames.items()}
+        self.singing_rigs = {name: SingingRig(pixmap, self.frame_masks[name])
+                             for name, pixmap in self.scaled_frames.items() if name.startswith('sing-')}
 
     def restore(self):
         screen = QApplication.primaryScreen().availableGeometry()
@@ -356,7 +380,7 @@ class DesktopPet(QWidget):
         if not self.dock_edge or self.dragging:
             return
         if (self.sleeping or self.using_phone or self.underMouse() or self.toolbar.isVisible() or self.panel.isVisible() or
-                self.bubble.isVisible() or time.monotonic() < self.action_until):
+                self.bubble.isVisible() or self.behavior.layers):
             self.fold_timer.start(700)
             return
         self.dock_target = 0.0
@@ -398,23 +422,19 @@ class DesktopPet(QWidget):
         self.toolbar.hide()
 
     def react(self, action, seconds=1.7, words=None):
+        self.behavior.react(action, seconds)
         if self.dragging:
             return
-        self.sleeping = False
-        self.using_phone = False
         self.reveal_dock()
         if self.dock_edge:
             self.fold_timer.start(round((seconds + 3.5) * 1000))
         self.last_interaction = time.monotonic()
-        self.action = action
-        self.action_start = self.last_interaction
-        self.action_until = self.last_interaction + seconds
         if words:
             self.bubble.say(words)
         self.update()
 
     def pat(self):
-        if self.action == 'eat' and time.monotonic() < self.action_until:
+        if self.behavior.has_action('eat'):
             return
         self.toolbar.hide()
         now = time.monotonic()
@@ -427,8 +447,10 @@ class DesktopPet(QWidget):
     def touch(self):
         self.toolbar.hide()
         if self.using_phone:
+            self.set_mode('idle')
             self.react('happy', words='被发现啦，这就收手机！')
         elif self.sleeping:
+            self.set_mode('idle')
             self.react('happy', words='醒啦！要一起听歌吗？')
         elif getattr(self, 'touch_head', True):
             self.pat()
@@ -443,11 +465,7 @@ class DesktopPet(QWidget):
         if self.sleeping:
             self.wake_up()
         else:
-            self.sleeping = True
-            self.using_phone = False
-            self.action = 'idle'
-            self.action_until = 0
-            self.action_start = time.monotonic()
+            self.set_mode('sleep')
             self.reveal_dock()
             self.toolbar.hide()
             self.bubble.say('被子盖好啦……晚安。点我就能叫醒我。')
@@ -457,11 +475,7 @@ class DesktopPet(QWidget):
         if self.using_phone:
             self.wake_up()
             return
-        self.sleeping = False
-        self.using_phone = True
-        self.action = 'idle'
-        self.action_until = 0
-        self.action_start = time.monotonic()
+        self.set_mode('phone')
         self.reveal_dock()
         self.toolbar.hide()
         self.bubble.say('再看一小会儿……就一小会儿。')
@@ -469,7 +483,23 @@ class DesktopPet(QWidget):
 
     def wake_up(self):
         self.toolbar.hide()
+        self.set_mode('idle')
         self.react('happy', words='起来啦，继续陪你！')
+
+    def set_mode(self, mode):
+        self.behavior.set_mode(mode)
+        self.panel.settings.setValue('activity_mode', mode)
+        self.update()
+
+    def toggle_singing(self):
+        self.toolbar.hide()
+        self.set_mode(('listen' if self.playing else 'idle') if self.behavior.mode == 'sing' else 'sing')
+        self.reveal_dock()
+        self.bubble.say('一起唱起来！' if self.behavior.mode == 'sing' else '麦克风先收好啦。')
+
+    def turn_body(self):
+        self.toolbar.hide()
+        self.react('turn', 4.8, '换个角度，唱给你听。')
 
     def feed_reaction(self, success, words):
         if success:
@@ -480,8 +510,9 @@ class DesktopPet(QWidget):
             self.bubble.say(words)
 
     def begin_drag(self):
-        if self.press_point is None:
+        if self.press_point is None or self.dragging:
             return
+        self.hold_timer.stop()
         was_docked = bool(self.dock_edge)
         self.dragging = True
         self.drag_dock_edge = ''
@@ -494,10 +525,7 @@ class DesktopPet(QWidget):
             desired = self.press_point - QPoint(self.width() // 2, round(93 * self.scale))
             self.move(clamp_position(desired, self.size(), self.screen_bounds()))
             self.drag_offset = self.press_point - self.pos()
-        self.sleeping = False
-        self.using_phone = False
-        self.action = 'lift'
-        self.action_start = time.monotonic()
+        self.behavior.begin_drag()
         self.toolbar.hide()
         self.bubble.hide()
         self.setCursor(Qt.CursorShape.ClosedHandCursor)
@@ -514,8 +542,7 @@ class DesktopPet(QWidget):
                 not self.fold_timer.isActive()):
             self.fold_timer.start(900)
         self.phase = now
-        if self.action not in ('idle', 'lift') and now >= self.action_until:
-            self.action = 'idle'
+        self.behavior.tick(delta)
         self.update()
 
     def paintEvent(self, event):
@@ -526,32 +553,35 @@ class DesktopPet(QWidget):
         painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
         painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
         now = self.phase or time.monotonic()
-        elapsed = max(0, now - self.action_start)
+        elapsed = self.behavior.elapsed
+        activity = 'idle' if self.drag_dock_edge else self.behavior.activity
         state = 'idle'
         angle, y, sx, sy = 0.0, 0.0, 1.0, 1.0
-        if self.dragging and not self.drag_dock_edge:
+        if activity == 'lift':
             state, angle, y = 'lift', math.sin(elapsed * 5) * 5, -5
-        elif self.action == 'eat':
+        elif activity == 'eat':
             state, y = 'eat', math.sin(elapsed * 13) * 1.5
             sx = 1 + math.sin(elapsed * 13) * 0.008
-        elif self.action in ('happy', 'poke'):
-            state = 'happy' if self.action == 'happy' else 'lift'
-            angle = math.sin(elapsed * 11) * (2 if self.action == 'happy' else 4)
+        elif activity in ('happy', 'poke'):
+            state = 'happy' if activity == 'happy' else 'lift'
+            angle = math.sin(elapsed * 11) * (2 if activity == 'happy' else 4)
             y = -abs(math.sin(elapsed * 7)) * 7
-        elif self.action == 'land':
+        elif activity == 'land':
             sy = 1 - max(0, 1 - elapsed / 0.6) * math.sin(elapsed * 14) * 0.10
             sx = 2 - sy
-        elif self.sleeping:
+        elif activity == 'sleep':
             state = 'sleep' if 'sleep' in self.scaled_frames else 'blink'
             sy = 1 + math.sin(now * 1.5) * 0.008
-        elif self.using_phone:
+        elif activity == 'phone':
             state = 'phone' if 'phone' in self.scaled_frames else 'idle'
             sy = 1 + math.sin(now * 1.8) * 0.004
             angle = math.sin(now * 2.5) * 0.3
             y = -max(0, math.sin(now * 4.5)) * 0.7
-        elif self.playing:
-            angle, y = math.sin(now * 3.5) * 3, -abs(math.sin(now * 3.5)) * 4
-            state = 'blink' if now % 4.8 < 0.15 else 'idle'
+        elif activity in ('sing', 'turn'):
+            motion_time = elapsed if activity == 'turn' else now
+            state, residual = singing_pose(motion_time)
+            sx = 1 - abs(residual) * 0.035
+            angle, y = math.sin(motion_time * 3.5) * 1.4, -abs(math.sin(motion_time * 3.5)) * 2
         else:
             state = 'blink' if now % 4.8 < 0.15 else 'idle'
             sy = 1 + math.sin(now * 2) * 0.003
@@ -572,7 +602,11 @@ class DesktopPet(QWidget):
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setTransform(transform)
-        painter.drawPixmap(0, 0, image)
+        local_mask = self.frame_masks[key]
+        if key in self.singing_rigs:
+            local_mask = self.singing_rigs[key].draw(painter, motion_time, scale)
+        else:
+            painter.drawPixmap(0, 0, image)
         if key == 'phone':
             # A gentle screen-light pulse and small tap ring, clipped to the sprite.
             painter.save()
@@ -589,9 +623,9 @@ class DesktopPet(QWidget):
                                 (1 + tap * 4) * scale, (1 + tap * 4) * scale)
             painter.restore()
         painter.resetTransform()
-        mask = transform.map(self.frame_masks[key])
-        if (not self.dock_edge or self.dock_reveal > 0.95) and (self.action == 'happy' or self.playing or self.sleeping) and not self.using_phone:
-            color = QColor('#C87991') if self.action == 'happy' else QColor('#69A3BA')
+        mask = transform.map(local_mask)
+        if (not self.dock_edge or self.dock_reveal > 0.95) and activity in ('happy', 'sing', 'turn', 'sleep'):
+            color = QColor('#C87991') if activity == 'happy' else QColor('#69A3BA')
             for i in range(3):
                 phase = (now * 0.8 + i / 3) % 1
                 x = (35 + i * 76 + math.sin(now + i) * 6) * scale
@@ -601,14 +635,14 @@ class DesktopPet(QWidget):
                 painter.translate(x, y)
                 painter.scale(scale * 0.65, scale * 0.65)
                 path = QPainterPath()
-                if self.action == 'happy':
+                if activity == 'happy':
                     path.moveTo(0, -4)
                     path.cubicTo(-11, -15, -17, 0, 0, 11)
                     path.cubicTo(17, 0, 11, -15, 0, -4)
                     painter.setPen(Qt.PenStyle.NoPen)
                     painter.setBrush(color)
                     painter.drawPath(path)
-                elif self.sleeping:
+                elif activity == 'sleep':
                     path.moveTo(0, -9)
                     path.lineTo(10, -9)
                     path.lineTo(0, 0)
@@ -659,16 +693,12 @@ class DesktopPet(QWidget):
             # Pull back into the desktop during the same held gesture to detach.
             self.drag_dock_edge = self.dock_edge = ''
             self.dock_reveal = self.dock_target = 1.0
-            self.action = 'lift'
-            self.action_start = time.monotonic()
         screen = QApplication.screenAt(point) or QApplication.primaryScreen()
         bounds = screen.availableGeometry()
         self.move(clamp_position(desired, self.size(), bounds))
         edge = pushed_edge(desired, self.size(), bounds, round(24 * self.scale))
         if edge:
             self.drag_dock_edge = self.dock_edge = edge
-            self.action = 'idle'
-            self.action_until = 0
             self.fold_timer.stop()
             self.dock_target = 0.0
             self.move(dock_position(self.pos(), self.size(), bounds, edge))
@@ -690,12 +720,13 @@ class DesktopPet(QWidget):
             self.dragging = False
             if self.drag_dock_edge:
                 self.drag_dock_edge = ''
+                self.behavior.end_drag(landing=False)
                 self.dock_target = 0.0
                 self.save_position()
                 self.setCursor(Qt.CursorShape.ArrowCursor)
                 self.update()
                 return
-            self.react('land', 0.65)
+            self.behavior.end_drag()
             self.snap_to_edge()
         else:
             self.click_timer.start(220)
