@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+*.db
+*.mp3
+build/
+dist/
+*.spec
+.pytest_cache/
+preview/
+assets/references/
+.env
+.env.*
+*.db-wal
+*.db-shm
