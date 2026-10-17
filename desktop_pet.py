@@ -271,7 +271,7 @@ class DesktopPet(QWidget):
         sources = {'idle': filename}
         if variant == 'refined':
             for state in ('blink', 'happy', 'eat', 'lift', 'sleep', 'phone'):
-                sources[state] = directory / 'states' / (state + '.png')
+                sources[state] = directory / 'states' / ('sleep-v3.png' if state == 'sleep' else state + '.png')
         for state, path in sources.items():
             cache_key = str(path)
             if cache_key in self.pixmap_cache:
