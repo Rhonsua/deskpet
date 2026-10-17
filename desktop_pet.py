@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 from pet_store import FOODS
 from visual_style import sprite_bounds, update_cover
 from ui_theme import CONTROL_STYLE
-from edge_docking import EDGES, clamp_position, dock_position, nearest_edge
+from edge_docking import EDGES, clamp_position, dock_position, nearest_edge, edge_gap, pushed_edge
 
 
 POPUP_STYLE = """
@@ -217,6 +217,7 @@ class DesktopPet(QWidget):
         self.press_point = None
         self.drag_offset = None
         self.dragging = False
+        self.drag_dock_edge = ''
         self.dock_edge = ''
         self.dock_reveal = 1.0
         self.dock_target = 1.0
@@ -346,6 +347,8 @@ class DesktopPet(QWidget):
         self.save_position()
 
     def reveal_dock(self):
+        if self.drag_dock_edge:
+            return
         self.fold_timer.stop()
         self.dock_target = 1.0
 
@@ -481,6 +484,7 @@ class DesktopPet(QWidget):
             return
         was_docked = bool(self.dock_edge)
         self.dragging = True
+        self.drag_dock_edge = ''
         self.click_timer.stop()
         self.fold_timer.stop()
         self.dock_edge = ''
@@ -525,7 +529,7 @@ class DesktopPet(QWidget):
         elapsed = max(0, now - self.action_start)
         state = 'idle'
         angle, y, sx, sy = 0.0, 0.0, 1.0, 1.0
-        if self.dragging:
+        if self.dragging and not self.drag_dock_edge:
             state, angle, y = 'lift', math.sin(elapsed * 5) * 5, -5
         elif self.action == 'eat':
             state, y = 'eat', math.sin(elapsed * 13) * 1.5
@@ -643,10 +647,33 @@ class DesktopPet(QWidget):
         if not self.dragging and (point - self.press_point).manhattanLength() > 8:
             self.begin_drag()
         if self.dragging:
-            screen = QApplication.screenAt(point) or QApplication.primaryScreen()
-            bounds = screen.availableGeometry()
-            desired = point - self.drag_offset
-            self.move(clamp_position(desired, self.size(), bounds))
+            self.drag_to(point)
+
+    def drag_to(self, point):
+        desired = point - self.drag_offset
+        if self.drag_dock_edge:
+            bounds = self.screen_bounds()
+            if edge_gap(desired, self.size(), bounds, self.drag_dock_edge) < round(12 * self.scale):
+                self.move(dock_position(desired, self.size(), bounds, self.drag_dock_edge))
+                return
+            # Pull back into the desktop during the same held gesture to detach.
+            self.drag_dock_edge = self.dock_edge = ''
+            self.dock_reveal = self.dock_target = 1.0
+            self.action = 'lift'
+            self.action_start = time.monotonic()
+        screen = QApplication.screenAt(point) or QApplication.primaryScreen()
+        bounds = screen.availableGeometry()
+        self.move(clamp_position(desired, self.size(), bounds))
+        edge = pushed_edge(desired, self.size(), bounds, round(24 * self.scale))
+        if edge:
+            self.drag_dock_edge = self.dock_edge = edge
+            self.action = 'idle'
+            self.action_until = 0
+            self.fold_timer.stop()
+            self.dock_target = 0.0
+            self.move(dock_position(self.pos(), self.size(), bounds, edge))
+            self.save_position()
+        self.update()
 
     def mouseReleaseEvent(self, event):
         self.hold_timer.stop()
@@ -661,6 +688,13 @@ class DesktopPet(QWidget):
             return
         if self.dragging:
             self.dragging = False
+            if self.drag_dock_edge:
+                self.drag_dock_edge = ''
+                self.dock_target = 0.0
+                self.save_position()
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+                self.update()
+                return
             self.react('land', 0.65)
             self.snap_to_edge()
         else:

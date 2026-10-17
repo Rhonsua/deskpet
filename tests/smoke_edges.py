@@ -78,7 +78,31 @@ with tempfile.TemporaryDirectory() as scratch:
                 pet.last_frame_time = time.monotonic() - 0.033
                 pet.animate()
             assert pet.dock_reveal == 1
+        # Push past an edge while holding, pull back without releasing, then dock again.
+        directions = {'left': QPoint(-1, 0), 'right': QPoint(1, 0),
+                      'top': QPoint(0, -1), 'bottom': QPoint(0, 1)}
+        for edge, outward in directions.items():
+            pet.dock_edge = ''
+            pet.move(bounds.center() - pet.rect().center())
+            offset = QPoint(130, 90)
+            pet.press_point = pet.pos() + offset
+            pet.drag_offset = offset
+            pet.begin_drag()
+            edge_position = dock_position(pet.pos(), pet.size(), bounds, edge)
+            pushed = edge_position + outward * 26 + offset
+            pet.drag_to(pushed)
+            assert pet.dragging and pet.drag_dock_edge == edge and pet.dock_target == 0
+            pet.reveal_dock()
+            assert pet.dock_target == 0, 'hover must not unfold a held push gesture'
+            pet.drag_to(edge_position - outward * 48 + offset)
+            assert pet.dragging and not pet.drag_dock_edge and not pet.dock_edge
+            pet.drag_to(pushed)
+            QTest.mouseRelease(pet, Qt.MouseButton.LeftButton, pos=offset)
+            assert not pet.dragging and not pet.drag_dock_edge
+            assert pet.dock_edge == edge and pet.dock_target == 0
+            assert settings.value('dock_edge') == edge
         # Keep expanded while a tool is open, then fold after it closes.
+        pet.reveal_dock()
         pet.panel.show()
         pet.fold_dock()
         assert pet.dock_target == 1
@@ -117,7 +141,7 @@ with tempfile.TemporaryDirectory() as scratch:
             assert palette.color(QPalette.ColorRole.HighlightedText).name() == '#ffffff'
         pet.panel.appearance.view().grab().save(str(output / 'dropdown-dark-theme.png'))
         pet.panel.appearance.hidePopup()
-        print('PASS: four-edge peek/reveal, scale, restore, detach, clean redraw and dark-theme dropdowns')
+        print('PASS: four-edge peek/reveal, held push/pull docking, scale, restore, detach, clean redraw and dark-theme dropdowns')
     finally:
         pet.timer.stop()
         pet.fold_timer.stop()

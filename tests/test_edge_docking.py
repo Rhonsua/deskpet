@@ -1,6 +1,6 @@
 import unittest
 from PySide6.QtCore import QPoint, QRect, QSize
-from edge_docking import clamp_position, dock_position, nearest_edge
+from edge_docking import clamp_position, dock_position, nearest_edge, pushed_edge, edge_gap
 
 
 class EdgeGeometryTests(unittest.TestCase):
@@ -32,6 +32,20 @@ class EdgeGeometryTests(unittest.TestCase):
         size = QSize(390, 465)
         self.assertEqual(dock_position(QPoint(-260, 700), size, self.bounds, 'right'),
                          QPoint(-390, 375))
+
+    def test_touching_edge_does_not_count_as_pushing(self):
+        for edge in ('left', 'right', 'top', 'bottom'):
+            point = dock_position(QPoint(-1000, 100), self.size, self.bounds, edge)
+            self.assertEqual(pushed_edge(point, self.size, self.bounds), '')
+            self.assertEqual(edge_gap(point, self.size, self.bounds, edge), 0)
+
+    def test_pushing_beyond_each_edge(self):
+        moves = {'left': QPoint(-24, 0), 'right': QPoint(24, 0),
+                 'top': QPoint(0, -24), 'bottom': QPoint(0, 24)}
+        for edge, delta in moves.items():
+            point = dock_position(QPoint(-1000, 100), self.size, self.bounds, edge)
+            self.assertEqual(pushed_edge(point + delta, self.size, self.bounds), edge)
+            self.assertEqual(pushed_edge(point + delta, self.size, self.bounds, 25), '')
 
 
 if __name__ == '__main__':
