@@ -9,7 +9,7 @@ if errorlevel 1 (
   ".venv\Scripts\python.exe" -m pip install -r requirements.txt
   if errorlevel 1 goto fail
 )
-".venv\Scripts\python.exe" main.py
+start "" /d "%~dp0" "%~dp0.venv\Scripts\pythonw.exe" "%~dp0main.py"
 if errorlevel 1 goto fail
 exit /b 0
 :fail

@@ -42,6 +42,8 @@ Windows 本地音乐桌宠，默认使用经典 V3 公式服精致 Q 版。
 
 Python 3.10 或更高版本，双击“启动桌宠.bat”。首次运行自动安装项目虚拟环境中的 PySide6，需要网络。手动启动：
 
+依赖检查完成后，启动脚本使用窗口模式 Python，不留下控制台窗口。
+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
