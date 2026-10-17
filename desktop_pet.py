@@ -4,7 +4,7 @@ import random
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QRect, Qt, QTimer
+from PySide6.QtCore import QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPixmap, QRegion, QTransform, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
 
 from pet_store import FOODS
 from visual_style import sprite_bounds, update_cover
+from ui_theme import CONTROL_STYLE
+from edge_docking import EDGES, clamp_position, dock_position, nearest_edge
 
 
 POPUP_STYLE = """
@@ -28,7 +30,7 @@ QProgressBar::chunk { background: #79AEBE; border-radius: 3px; }
 QSlider::groove:horizontal { height: 3px; background: #E1EBF0; }
 QSlider::handle:horizontal { width: 9px; background: #75A4B5; margin: -3px 0; border-radius: 4px; }
 QCheckBox { spacing: 7px; }
-"""
+""" + CONTROL_STYLE
 
 
 def clamp_near(pet, window, above=True):
@@ -185,6 +187,7 @@ class PetToolbar(QFrame):
         if self.isVisible():
             self.hide()
         else:
+            self.pet.reveal_dock()
             self.pet.bubble.hide()
             self.page('home')
             clamp_near(self.pet, self)
@@ -209,11 +212,19 @@ class DesktopPet(QWidget):
         self.press_point = None
         self.drag_offset = None
         self.dragging = False
+        self.dock_edge = ''
+        self.dock_reveal = 1.0
+        self.dock_target = 1.0
+        self.last_frame_time = time.monotonic()
+        self.fold_timer = QTimer(self)
+        self.fold_timer.setSingleShot(True)
+        self.fold_timer.timeout.connect(self.fold_dock)
         self.last_pat = 0
         self.frames = {}
         self.pixmap_cache = {}
         self.scaled_frames = {}
         self.frame_masks = {}
+        self.hit_region = QRegion()
         self.phase = 0
         self.panel = panel_factory(self)
         self.variant = self.panel.settings.value('visual_variant', 'refined')
@@ -236,6 +247,7 @@ class DesktopPet(QWidget):
         self.timer.start(33)
         self.tray = QSystemTrayIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_MediaVolume), self)
         menu = QMenu()
+        menu.setStyleSheet(CONTROL_STYLE)
         menu.addAction('显示天依', self.restore)
         menu.addAction('互动菜单', self.toolbar.toggle)
         menu.addAction('歌单', lambda: self.open_tools(0))
@@ -283,6 +295,9 @@ class DesktopPet(QWidget):
                       max(bounds.top(), min(anchor.y() - self.height(), bounds.bottom() - self.height())))
         self.panel.settings.setValue('pet_scale', self.scale)
         self.prepare_frames()
+        if self.dock_edge:
+            self.move(dock_position(self.pos(), self.size(), self.screen_bounds(), self.dock_edge))
+            self.save_position()
         self.update()
 
     def prepare_frames(self):
@@ -300,9 +315,74 @@ class DesktopPet(QWidget):
         if not any(s.availableGeometry().contains(point) for s in QApplication.screens()):
             point = screen.topLeft() + QPoint(60, 120)
         self.move(point)
+        edge = self.panel.settings.value('dock_edge', '')
+        self.dock_edge = edge if edge in EDGES else ''
+        self.dock_reveal = self.dock_target = 0.0 if self.dock_edge else 1.0
+        if self.dock_edge:
+            self.move(dock_position(self.pos(), self.size(), self.screen_bounds(), self.dock_edge))
         self.show()
 
+    def screen_bounds(self):
+        return (QApplication.screenAt(self.frameGeometry().center()) or
+                QApplication.primaryScreen()).availableGeometry()
+
+    def save_position(self):
+        self.panel.settings.setValue('position', self.pos())
+        self.panel.settings.setValue('dock_edge', self.dock_edge)
+
+    def snap_to_edge(self):
+        bounds = self.screen_bounds()
+        self.dock_edge = nearest_edge(self.pos(), self.size(), bounds, round(32 * self.scale))
+        if self.dock_edge:
+            self.move(dock_position(self.pos(), self.size(), bounds, self.dock_edge))
+            self.fold_timer.start(900)
+        else:
+            self.dock_reveal = self.dock_target = 1.0
+        self.save_position()
+
+    def reveal_dock(self):
+        self.fold_timer.stop()
+        self.dock_target = 1.0
+
+    def fold_dock(self):
+        if not self.dock_edge or self.dragging:
+            return
+        if (self.underMouse() or self.toolbar.isVisible() or self.panel.isVisible() or
+                self.bubble.isVisible() or time.monotonic() < self.action_until):
+            self.fold_timer.start(700)
+            return
+        self.dock_target = 0.0
+
+    def enterEvent(self, event):
+        self.reveal_dock()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if self.dock_edge:
+            self.fold_timer.start(900)
+        super().leaveEvent(event)
+
+    def dock_transform(self):
+        transform = QTransform()
+        if not self.dock_edge:
+            return transform
+        amount = 1.0 - self.dock_reveal
+        head = QPointF(self.width() / 2, 93 * self.scale)
+        targets = {
+            'left': (QPointF(22 * self.scale, self.height() / 2), 90),
+            'right': (QPointF(self.width() - 22 * self.scale, self.height() / 2), -90),
+            'top': (QPointF(self.width() / 2, 25 * self.scale), 180),
+            'bottom': (QPointF(self.width() / 2, self.height() - 25 * self.scale), 0),
+        }
+        target, angle = targets[self.dock_edge]
+        transform.translate(head.x() + (target.x() - head.x()) * amount,
+                            head.y() + (target.y() - head.y()) * amount)
+        transform.rotate(angle * amount)
+        transform.translate(-head.x(), -head.y())
+        return transform
+
     def open_tools(self, tab=0):
+        self.reveal_dock()
         self.panel.tabs.setCurrentIndex(tab)
         clamp_near(self, self.panel)
         self.panel.show()
@@ -313,6 +393,9 @@ class DesktopPet(QWidget):
         if self.dragging:
             return
         self.sleeping = False
+        self.reveal_dock()
+        if self.dock_edge:
+            self.fold_timer.start(round((seconds + 3.5) * 1000))
         self.last_interaction = time.monotonic()
         self.action = action
         self.action_start = self.last_interaction
@@ -365,7 +448,17 @@ class DesktopPet(QWidget):
     def begin_drag(self):
         if self.press_point is None:
             return
+        was_docked = bool(self.dock_edge)
         self.dragging = True
+        self.click_timer.stop()
+        self.fold_timer.stop()
+        self.dock_edge = ''
+        self.dock_reveal = self.dock_target = 1.0
+        if was_docked:
+            # Keep the head close to the held pointer as it unfolds from the edge.
+            desired = self.press_point - QPoint(self.width() // 2, round(93 * self.scale))
+            self.move(clamp_position(desired, self.size(), self.screen_bounds()))
+            self.drag_offset = self.press_point - self.pos()
         self.sleeping = False
         self.action = 'lift'
         self.action_start = time.monotonic()
@@ -375,12 +468,27 @@ class DesktopPet(QWidget):
 
     def animate(self):
         now = time.monotonic()
+        delta = min(0.1, max(0, now - self.last_frame_time))
+        self.last_frame_time = now
+        if self.dock_reveal != self.dock_target:
+            step = delta / 0.24
+            difference = self.dock_target - self.dock_reveal
+            self.dock_reveal += max(-step, min(step, difference))
+        if (self.dock_edge and self.dock_target == 1.0 and not self.dragging and
+                not self.fold_timer.isActive()):
+            self.fold_timer.start(900)
         self.phase = now
         if self.action not in ('idle', 'lift') and now >= self.action_until:
             self.action = 'idle'
         self.update()
 
     def paintEvent(self, event):
+        # Replace the backing buffer, including pixels occupied by the previous pose.
+        # Changing a native window mask each frame can leave stale layered-window pixels.
+        painter = QPainter(self)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
         now = self.phase or time.monotonic()
         elapsed = max(0, now - self.action_start)
         state = 'idle'
@@ -408,6 +516,7 @@ class DesktopPet(QWidget):
         key = state if state in self.scaled_frames else 'idle'
         image = self.scaled_frames.get(key)
         if image is None or image.isNull():
+            painter.end()
             return
         scale = self.scale
         transform = QTransform()
@@ -415,14 +524,14 @@ class DesktopPet(QWidget):
         transform.rotate(angle)
         transform.scale(sx, sy)
         transform.translate(-image.width() / 2, -image.height())
-        painter = QPainter(self)
+        transform *= self.dock_transform()
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setTransform(transform)
         painter.drawPixmap(0, 0, image)
         painter.resetTransform()
         mask = transform.map(self.frame_masks[key])
-        if self.action == 'happy' or self.playing or self.sleeping:
+        if (not self.dock_edge or self.dock_reveal > 0.95) and (self.action == 'happy' or self.playing or self.sleeping):
             color = QColor('#C87991') if self.action == 'happy' else QColor('#69A3BA')
             for i in range(3):
                 phase = (now * 0.8 + i / 3) % 1
@@ -456,15 +565,20 @@ class DesktopPet(QWidget):
                 painter.restore()
                 mask = mask.united(QRegion(round(x) - 16, round(y) - 18, 32, 34))
         painter.end()
-        self.hit_region = mask
-        if QApplication.platformName() != 'offscreen':
-            self.setMask(mask)
+        self.hit_region = mask.intersected(QRegion(self.rect()))
+        # Windows' layered window uses the rendered alpha for click-through.
+        # Keep a single rectangular backing surface instead of changing native masks.
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            if not self.hit_region.contains(event.position().toPoint()):
+                event.ignore()
+                return
+            self.reveal_dock()
             self.press_point = event.globalPosition().toPoint()
             self.drag_offset = self.press_point - self.pos()
-            self.touch_head = event.position().y() < self.height() * 0.57
+            self.touch_head = (bool(self.dock_edge and self.dock_reveal < 0.9) or
+                               event.position().y() < self.height() * 0.57)
             self.hold_timer.start(280)
 
     def mouseMoveEvent(self, event):
@@ -477,21 +591,23 @@ class DesktopPet(QWidget):
             screen = QApplication.screenAt(point) or QApplication.primaryScreen()
             bounds = screen.availableGeometry()
             desired = point - self.drag_offset
-            self.move(max(bounds.left(), min(desired.x(), bounds.right() - self.width())),
-                      max(bounds.top(), min(desired.y(), bounds.bottom() - self.height())))
+            self.move(clamp_position(desired, self.size(), bounds))
 
     def mouseReleaseEvent(self, event):
         self.hold_timer.stop()
         if event.button() != Qt.MouseButton.LeftButton:
             return
+        had_press = self.press_point is not None
         self.press_point = None
         if getattr(self, 'ignore_release', False):
             self.ignore_release = False
             return
+        if not had_press and not self.dragging:
+            return
         if self.dragging:
             self.dragging = False
             self.react('land', 0.65)
-            self.panel.settings.setValue('position', self.pos())
+            self.snap_to_edge()
         else:
             self.click_timer.start(220)
         self.setCursor(Qt.CursorShape.ArrowCursor)

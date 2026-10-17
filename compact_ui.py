@@ -7,11 +7,13 @@ from PySide6.QtWidgets import (
 )
 from music_library import MODES
 from pet_store import FOODS
+from ui_theme import CONTROL_STYLE, style_combo
 
 
 COMPACT_STYLE = """
 QWidget { font-family: 'Microsoft YaHei UI'; font-size: 12px; color: #394C5B; }
 QWidget#PetTools { background: #FAFCFD; }
+QDialog { background: #FAFCFD; }
 QLabel { background: transparent; }
 QLabel#Muted { color: #83929D; font-size: 11px; }
 QLabel#Song { font-weight: 600; color: #315D72; font-size: 14px; }
@@ -33,7 +35,7 @@ QSlider::handle:horizontal { background: #6A9FAF; width: 9px; margin: -3px 0; bo
 QProgressBar { border: none; background: #E6EFF3; border-radius: 3px; }
 QProgressBar::chunk { background: #83B8C5; border-radius: 3px; }
 QCheckBox { spacing: 8px; padding: 8px 0; }
-"""
+""" + CONTROL_STYLE
 
 
 def text(value, muted=False):
@@ -89,6 +91,7 @@ def build(panel):
     controls.addWidget(panel.play_button)
     controls.addWidget(action('下一首', lambda: panel.step(1)))
     panel.mode_choice = QComboBox()
+    style_combo(panel.mode_choice)
     for key, name in MODES.items():
         panel.mode_choice.addItem(name, key)
     panel.mode_choice.setCurrentIndex(panel.mode_choice.findData(panel.queue.mode))
@@ -106,6 +109,7 @@ def build(panel):
     layout.addLayout(volume)
     playlists = QHBoxLayout()
     panel.playlist_choice = QComboBox()
+    style_combo(panel.playlist_choice)
     panel.playlist_choice.setMinimumContentsLength(5)
     panel.playlist_choice.currentIndexChanged.connect(panel.choose_playlist)
     playlists.addWidget(panel.playlist_choice, 1)
@@ -169,12 +173,13 @@ def build(panel):
     settings.addWidget(panel.startup_note)
     settings.addWidget(text('角色外观'))
     panel.appearance = QComboBox()
+    style_combo(panel.appearance)
     panel.appearance.addItem('精致 Q 版 · 经典 V3', 'refined')
     panel.appearance.addItem('圆润 Q 版 · 经典 V3', 'simple')
     panel.appearance.setCurrentIndex(0 if panel.settings.value('visual_variant', 'refined') == 'refined' else 1)
     panel.appearance.currentIndexChanged.connect(lambda: panel.pet.set_variant(panel.appearance.currentData()))
     settings.addWidget(panel.appearance)
-    tip = text('摸头：点头部\n戳一戳：点身体\n提起：按住后拖动\n打开菜单：右键或双击天依', True)
+    tip = text('摸头：点头部\n戳一戳：点身体\n提起：按住后拖动\n边缘探头：拖到边缘松手，靠近展开，移开缩回\n离开边缘：按住角色拖回桌面\n打开菜单：右键或双击天依', True)
     settings.addWidget(tip)
     settings.addStretch()
     panel.status = text('右键天依，打开互动菜单', True)
