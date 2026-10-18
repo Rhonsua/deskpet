@@ -8,6 +8,8 @@ datas = [(str(path), str(path.parent.relative_to(root)))
                           'blink.png', 'happy.png', 'eat.png', 'lift.png', 'sleep-back.png',
                           'phone.png', 'sing-front.png', 'sing-left.png', 'sing-right.png'}]
 datas += [(str(root / 'bilibili_probe.js'), '.'), (str(root / 'bilibili_early.js'), '.'),
+          (str(root / 'LICENSE'), '.'), (str(root / 'README.md'), '.'),
+          (str(root / 'assets' / 'README.md'), 'assets'),
           (str(root / 'characters' / 'README.md'), 'characters'),
           (str(root / 'characters' / 'example' / 'character.json.example'), 'characters/example')]
 datas += collect_data_files('webview')
