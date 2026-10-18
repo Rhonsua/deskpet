@@ -8,11 +8,11 @@ from pathlib import Path
 if sys.platform == 'win32':
     os.environ.setdefault('QT_MEDIA_BACKEND', 'windows')
 
-from PySide6.QtCore import QSettings, QTimer, QUrl, QStandardPaths, QLockFile
+from PySide6.QtCore import QSettings, QTimer, QUrl, QStandardPaths, QLockFile, Signal
 from PySide6.QtGui import QFont
-from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import (
-    QApplication, QFileDialog, QMenu, QMessageBox, QWidget, QInputDialog,
+    QApplication, QFileDialog, QMenu, QMessageBox, QWidget, QInputDialog, QProgressDialog,
 )
 
 
@@ -26,10 +26,17 @@ from compact_ui import build
 from desktop_pet import DesktopPet
 from music_library import MusicLibrary, PlaybackQueue, MODES
 from windows_startup import WindowsStartup
-from audio_routing import AudioRouter, device_id
+from audio_routing import device_id
+from remote_audio import AudioEngine
 
 
 class MusicPanel(QWidget):
+    songChanged = Signal(str)
+
+    def set_song_title(self, title):
+        self.song_title.setText(title)
+        self.songChanged.emit(title)
+
     def __init__(self, pet, data_dir=None, startup=None, settings=None):
         super().__init__()
         self.pet = pet
@@ -37,6 +44,8 @@ class MusicPanel(QWidget):
         self.startup = startup or WindowsStartup()
         data_dir = Path(data_dir) if data_dir else Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation))
         data_dir.mkdir(parents=True, exist_ok=True)
+        self.data_dir = data_dir
+        self.engine = None
         self.store = PetStore(data_dir / "pet.db")
         self.last_tick = time.monotonic()
         self.last_position = None
@@ -46,7 +55,6 @@ class MusicPanel(QWidget):
         self.failed_paths = set()
         self.queue_owner = ''
         self.last_save = time.monotonic()
-        self.route_snapshot = None
         self.playback_source = 'local'
         self.setWindowTitle("天依音乐 · 第一阶段原型")
         self.resize(460, 440)
@@ -75,26 +83,38 @@ class MusicPanel(QWidget):
         """Windows endpoint discovery can be slow; perform it on first use."""
         if self._player is not None:
             return
-        self._audio = QAudioOutput(self)
-        self._audio.setVolume(self.volume.value() / 100)
-        self._player = QMediaPlayer(self)
-        self._player.setAudioOutput(self._audio)
+        self.engine = AudioEngine(self.settings, self.data_dir, self)
+        self._audio, self._player, self._audio_router = self.engine.audio, self.engine.player, self.engine.router
         self._player.durationChanged.connect(self.duration_changed)
         self._player.seekableChanged.connect(lambda _: self.duration_changed(self._player.duration()))
         self._player.positionChanged.connect(self.position_changed)
         self._player.playbackStateChanged.connect(self.state_changed)
         self._player.mediaStatusChanged.connect(self.media_changed)
         self._player.errorOccurred.connect(self.audio_error)
-        self._audio_router = AudioRouter(self._audio, self.settings, self)
         self._audio_router.changed.connect(self.refresh_audio_outputs)
-        self._audio_router.routeWillChange.connect(self.prepare_audio_route)
-        self._audio_router.routeChanged.connect(self.finish_audio_route)
-        self._audio_router.refresh()
+        self.loading = QProgressDialog('正在准备音频设备，首次播放可能需要几秒…', '', 0, 0, self)
+        self.loading.setCancelButton(None)
+        self.loading.setWindowTitle('正在准备播放')
+        self.loading.setMinimumDuration(0)
+        self.loading.setAutoClose(False)
+        self.engine.loadingChanged.connect(lambda loading: self.loading.show() if loading else self.loading.hide())
+        self.engine.failed.connect(self.audio_helper_failed)
+        self._audio.setVolume(self.volume.value() / 100)
+        self.engine.start()
         if self._restore_request:
             path, position = self._restore_request
             self._restore_request = None
             self.pending_seek = position
             self._player.setSource(QUrl.fromLocalFile(path))
+
+    def audio_helper_failed(self, message):
+        self.autoplay_requested = False
+        self.pet.playing = False
+        self.status.setText(message)
+
+    def shutdown_audio(self):
+        if self.engine is not None:
+            self.engine.shutdown()
 
     @property
     def player(self):
@@ -146,40 +166,13 @@ class MusicPanel(QWidget):
             self.last_position = None
         self.pet.playing = playing
         self.play_button.setText('暂停' if playing else '播放')
-        self.song_title.setText(self.bilibili.title.text())
+        self.set_song_title(self.bilibili.title.text())
         self.song_meta.setText('B站网页 · ' + MODES[self.bilibili.queue.mode])
         self.status.setText('B站播放中' if playing else 'B站已暂停或正在加载')
 
     def reset_audio_sample(self):
         self.last_position = None
         self.last_tick = time.monotonic()
-
-    def prepare_audio_route(self):
-        self.reset_audio_sample()
-        source = self.player.source()
-        self.route_snapshot = None
-        if source.isEmpty():
-            return
-        position = self.pending_seek if self.pending_seek is not None else self.player.position()
-        playing = self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
-        self.route_snapshot = (source, position, playing)
-        # Windows Media Foundation may reset a paused topology to position zero.
-        # Reopen the same source at the captured position on the new endpoint.
-        self.autoplay_requested = False
-        self.player.stop()
-        self.player.setSource(QUrl())
-
-    def finish_audio_route(self):
-        snapshot, self.route_snapshot = self.route_snapshot, None
-        self.reset_audio_sample()
-        if snapshot is None:
-            return
-        source, position, playing = snapshot
-        self.pending_seek = position
-        self.autoplay_requested = playing and not self.audio.device().isNull()
-        self.player.setSource(source)
-        if self.autoplay_requested:
-            self.player.play()
 
     def refresh_audio_outputs(self):
         router = self.audio_router
@@ -343,7 +336,7 @@ class MusicPanel(QWidget):
         self.queue.reset(paths, paths.index(path))
         self.pending_seek = max(0, int(self.settings.value('current_position', 0)))
         self._restore_request = (path, self.pending_seek)
-        self.song_title.setText(Path(path).stem)
+        self.set_song_title(Path(path).stem)
         self.status.setText('已恢复上次歌曲，点击播放继续')
 
     def seek_to(self):
@@ -476,7 +469,7 @@ class MusicPanel(QWidget):
             self.player.play()
         if path in self.paths:
             self.list.setCurrentRow(self.paths.index(path))
-        self.song_title.setText(Path(path).stem)
+        self.set_song_title(Path(path).stem)
         self.song_meta.setText('本地 MP3 · ' + MODES[self.queue.mode])
         self.status.setText(('正在播放：' if autoplay else '上次听到：') + Path(path).stem)
         self.save()
@@ -586,6 +579,7 @@ def main():
     pet = Pet()
     app.aboutToQuit.connect(pet.panel.save)
     app.aboutToQuit.connect(pet.panel.bilibili.shutdown)
+    app.aboutToQuit.connect(pet.panel.shutdown_audio)
     app.aboutToQuit.connect(pet.panel.store.close)
     return app.exec()
 

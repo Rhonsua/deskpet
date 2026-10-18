@@ -73,6 +73,7 @@ def build(panel):
     panel.cover = QLabel(panel)
     panel.cover.hide()
     panel.song_title = text('添加几首喜欢的歌吧')
+    panel.song_title.setTextFormat(Qt.TextFormat.PlainText)
     panel.song_title.setObjectName('Song')
     panel.song_title.setWordWrap(True)
     panel.song_title.setMaximumHeight(44)

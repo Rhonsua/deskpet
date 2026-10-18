@@ -22,7 +22,7 @@ class NoStartup:
 def dispose(pet):
     pet.timer.stop()
     pet.panel.progress_timer.stop()
-    pet.panel.audio_router.poll.stop()
+    pet.panel.shutdown_audio()
     pet.tray.hide()
     pet.panel.store.close()
     pet.panel.hide()

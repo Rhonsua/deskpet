@@ -31,8 +31,7 @@ class TestStartup:
 def dispose(pet):
     pet.timer.stop()
     pet.panel.progress_timer.stop()
-    pet.panel.audio_router.poll.stop()
-    pet.panel.player.stop()
+    pet.panel.shutdown_audio()
     pet.tray.hide()
     pet.toolbar.hide()
     pet.bubble.hide()
@@ -180,6 +179,7 @@ with tempfile.TemporaryDirectory() as scratch, ExitStack() as cleanup:
     pet.timer.stop()
     pet.panel.progress_timer.stop()
     pet.panel.player.stop()
+    pet.panel.shutdown_audio()
     pet.tray.hide()
     pet.toolbar.hide()
     pet.bubble.hide()

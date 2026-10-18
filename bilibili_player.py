@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
 from bilibili_links import video_url, load_web_tracks, EndLatch
 from music_library import PlaybackQueue, MODES
 from ui_theme import style_combo
+from worker_command import worker_command
 
 
 class BilibiliPlayer(QWidget):
@@ -24,6 +25,7 @@ class BilibiliPlayer(QWidget):
         self.tracks = load_web_tracks(self.settings.value('bilibili_tracks', ''))
         self.queue = PlaybackQueue(self.settings.value('bilibili_mode', 'order'))
         self.current_url = ''
+        self.hidden = False
         self.active = self.playing = self.ready = self.closing = False
         self.metrics = {}
         self.last_report = 0
@@ -80,6 +82,11 @@ class BilibiliPlayer(QWidget):
             button.clicked.connect(callback)
             tools.addWidget(button)
         layout.addLayout(tools)
+        windows = QHBoxLayout()
+        minimize = QPushButton('最小化到托盘')
+        minimize.clicked.connect(lambda: self.send({'cmd': 'hide'}))
+        windows.addWidget(minimize)
+        layout.addLayout(windows)
         self.note = QLabel('网页声音使用 Windows 默认输出；登录或验证请在播放网页完成。')
         self.note.setWordWrap(True)
         self.note.setTextFormat(Qt.TextFormat.PlainText)
@@ -150,7 +157,9 @@ class BilibiliPlayer(QWidget):
         if not 0 <= index < len(self.queue.paths):
             return
         self.queue.index = index
-        self.current_url = video_url(self.queue.paths[index])
+        selected = video_url(self.queue.paths[index])
+        restart = self.active and self.current_url == selected
+        self.current_url = selected
         title = next((track['title'] for track in self.tracks if track['url'] == self.current_url), '')
         self.title.setText(title or self.current_url)
         self.latch.reset(uuid.uuid4().hex)
@@ -160,7 +169,7 @@ class BilibiliPlayer(QWidget):
         self.starting.emit()
         self.playbackChanged.emit(False)
         self.pending_load = {'cmd': 'load', 'url': self.current_url, 'token': self.latch.token,
-                             'volume': self.owner.volume.value() / 100}
+                             'volume': self.owner.volume.value() / 100, 'restart': restart}
         self.note.setText('正在打开 B站网页；如果未自动播放，请在网页点一次播放。')
         if self.process.state() == QProcess.ProcessState.NotRunning:
             self.start_process()
@@ -169,13 +178,15 @@ class BilibiliPlayer(QWidget):
 
     def start_process(self):
         self.ready = self.closing = False
+        self.hidden = False
         self.buffer = ''
         environment = QProcessEnvironment.systemEnvironment()
         environment.insert('PYTHONIOENCODING', 'utf-8')
         environment.insert('PYTHONUNBUFFERED', '1')
         self.process.setProcessEnvironment(environment)
-        self.process.setProgram(sys.executable)
-        self.process.setArguments([str(Path(__file__).parent / 'web_player_worker.py')] + self.worker_args)
+        program, arguments = worker_command('web')
+        self.process.setProgram(program)
+        self.process.setArguments(arguments + self.worker_args)
         self.process.start()
 
     def send(self, value):
@@ -217,6 +228,11 @@ class BilibiliPlayer(QWidget):
 
     def handle_event(self, value):
         kind = value.get('type')
+        if kind == 'visibility':
+            self.hidden = bool(value.get('hidden'))
+            if self.hidden:
+                self.note.setText('播放网页已收起到桌宠托盘，音乐继续；点击“显示网页”可恢复。')
+            return
         if kind == 'diagnostic':
             self.diagnostic = value
             return
@@ -240,7 +256,6 @@ class BilibiliPlayer(QWidget):
         self.metrics = value
         self.last_report = time.monotonic()
         self.playing = bool(value.get('playing'))
-        self.playbackChanged.emit(self.playing)
         title = str(value.get('title', ''))[:200]
         if title:
             self.title.setText(title)
@@ -249,6 +264,7 @@ class BilibiliPlayer(QWidget):
                     track['title'] = title
                     self.render()
                     self.save()
+        self.playbackChanged.emit(self.playing)
         if value.get('error'):
             self.note.setText('网页视频无法播放，请查看网页提示或手动切下一首')
         elif self.playing and value.get('muted'):

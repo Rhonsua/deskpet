@@ -40,6 +40,7 @@ def dispose(panel):
     panel.autoplay_requested = False
     panel.player.stop()
     panel.player.setSource(QUrl())
+    panel.shutdown_audio()
     panel.store.close()
     panel.hide()
     panel.player.deleteLater()
@@ -118,7 +119,8 @@ with tempfile.TemporaryDirectory(prefix='天依 音乐 ') as scratch, ExitStack(
     assert int(second.settings.value('current_position')) == saved_position
     second.ensure_audio()
     try:
-        wait_for(lambda: second.pending_seek is None and second.player.duration() > 11000)
+        wait_for(lambda: second.pending_seek is None and second.player.duration() > 11000
+                 and abs(second.player.position() - saved_position) < 250)
     except AssertionError:
         print('Restore diagnostics:', second.player.source().toLocalFile(), second.pending_seek,
               second.player.duration(), second.player.mediaStatus(), second.player.errorString(),

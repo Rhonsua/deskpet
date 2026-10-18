@@ -20,18 +20,30 @@
   const video = candidates.sort((a,b) => b.clientWidth*b.clientHeight-a.clientWidth*a.clientHeight)[0];
   if (!video) return {token:config.token, has_video:false, title:document.title};
   state.video = video;
+  // The desktop playlist owns repetition. Native HTML looping suppresses ended.
+  video.loop = false;
+  video.autoplay = false;
+  video.removeAttribute('autoplay');
   if (config.volume !== null) {
     video.volume = config.volume;
     if (config.volume > 0) video.muted = false;
   }
   if (config.command === 'pause') video.pause();
   if (config.command === 'seek' && Number.isFinite(config.position)) video.currentTime = config.position;
+  if (config.command === 'restart') {
+    state.ended = false;
+    state.seen_playing = false;
+    video.currentTime = 0;
+    Promise.resolve(video.play()).catch(() => {});
+  }
   if (config.command === 'play') { state.ended = false; Promise.resolve(video.play()).catch(() => {}); }
+  if (config.command === 'resume' && !state.ended && !video.ended && video.paused)
+    Promise.resolve(video.play()).catch(() => {});
   if (!video.paused && video.readyState >= 2) state.seen_playing = true;
   return {token:config.token, has_video:true, title:document.title,
     position:Number.isFinite(video.currentTime)?video.currentTime:0,
     duration:Number.isFinite(video.duration)?video.duration:0,
-    playing:!video.paused && !video.ended && video.readyState>=2,
+    playing:!video.paused && !video.ended && video.readyState>=2, paused:video.paused,
     ended:state.ended || video.ended, seen_playing:state.seen_playing,
     muted:video.muted, volume:video.volume, error:video.error?video.error.code:0};
 })()

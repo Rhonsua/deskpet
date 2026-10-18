@@ -153,6 +153,7 @@ with tempfile.TemporaryDirectory() as scratch:
         pet.panel.progress_timer.stop()
         pet.panel.player.stop()
         pet.panel.player.setSource(QUrl())
+        pet.panel.shutdown_audio()
         pet.tray.hide()
         pet.panel.store.close()
         pet.panel.hide()

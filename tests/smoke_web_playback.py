@@ -71,5 +71,6 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-test-') as scratch:
             panel._audio_router.poll.stop()
         if panel._player is not None:
             panel._player.stop()
+        panel.shutdown_audio()
         panel.store.close()
         panel.hide()

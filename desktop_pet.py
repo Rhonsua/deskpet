@@ -148,7 +148,10 @@ class PetToolbar(QFrame):
                 self.content.addWidget(button)
         elif name == 'music':
             title = self.pet.panel.song_title.text()
-            self.content.addWidget(QLabel(title[:24]))
+            self.music_title = QLabel(title)
+            self.music_title.setWordWrap(True)
+            self.music_title.setTextFormat(Qt.TextFormat.PlainText)
+            self.content.addWidget(self.music_title)
             self.add_button('上一首', lambda: self.pet.panel.step(-1))
             self.add_button('播放 / 暂停', self.pet.panel.toggle)
             self.add_button('下一首', lambda: self.pet.panel.step(1))
@@ -259,6 +262,7 @@ class DesktopPet(QWidget):
         self.hit_region = QRegion()
         self.phase = 0
         self.panel = panel_factory(self)
+        self.panel.songChanged.connect(self.refresh_music_title)
         self.behavior.set_mode(self.panel.settings.value('activity_mode', 'idle')
                                if self.panel.settings.value('activity_mode', 'idle') in MODES else 'idle')
         self.variant = self.panel.settings.value('visual_variant', 'refined')
@@ -286,6 +290,9 @@ class DesktopPet(QWidget):
         menu.addAction('互动菜单', self.toolbar.toggle)
         menu.addAction('歌单', lambda: self.open_tools(0))
         menu.addAction('设置', lambda: self.open_tools(2))
+        menu.addAction('显示 B站播放网页', lambda: self.panel.bilibili.send({'cmd': 'show'})
+                       if self.panel.bilibili.active else self.open_tools(3))
+        menu.addAction('B站网页最小化到托盘', lambda: self.panel.bilibili.send({'cmd': 'hide'}))
         self.passthrough_action = menu.addAction('鼠标穿透')
         self.passthrough_action.setCheckable(True)
         self.passthrough_action.toggled.connect(self.set_mouse_passthrough)
@@ -330,6 +337,14 @@ class DesktopPet(QWidget):
         self.restore()
         self.reveal_dock()
         self.bubble.say('鼠标穿透已关闭，可以继续拖动和互动。')
+
+    def refresh_music_title(self, *_):
+        if self.toolbar.isVisible() and self.toolbar.mode == 'music':
+            title = self.panel.song_title.text()
+            if title != self.toolbar.music_title.text():
+                self.toolbar.music_title.setText(title)
+                self.toolbar.adjustSize()
+                clamp_near(self, self.toolbar)
 
     def set_variant(self, variant):
         self.variant = variant
