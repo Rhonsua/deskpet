@@ -155,6 +155,7 @@ class PetToolbar(QFrame):
             self.add_button('拿麦克风唱歌 / 收麦', self.pet.toggle_singing)
             self.add_button('拿麦克风转个身', self.pet.turn_body)
             self.add_button('打开歌单 / 添加 MP3', lambda: self.pet.open_tools(0))
+            self.add_button('B站网页歌单 / 添加链接', lambda: self.pet.open_tools(3))
         elif name == 'rest':
             self.add_button('盖被子睡觉', self.pet.toggle_sleep)
             self.add_button('熬夜玩手机', self.pet.toggle_phone)

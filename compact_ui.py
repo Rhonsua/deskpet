@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 from music_library import MODES
 from pet_store import FOODS
 from ui_theme import CONTROL_STYLE, style_combo
+from bilibili_player import BilibiliPlayer
 
 
 COMPACT_STYLE = """
@@ -125,6 +126,7 @@ def build(panel):
     search.addWidget(panel.search, 1)
     search.addWidget(action('+ 歌曲', panel.add_files))
     search.addWidget(action('文件夹', panel.add_folder))
+    search.addWidget(action('B站', lambda: panel.tabs.setCurrentIndex(3)))
     layout.addLayout(search)
     panel.queue_label = text('歌单', True)
     layout.addWidget(panel.queue_label)
@@ -194,6 +196,8 @@ def build(panel):
     tip = text('摸头：点头部\n戳一戳：点身体\n提起：按住后拖动\n边缘探头：拖到边缘松手，靠近展开，移开缩回\n离开边缘：按住角色拖回桌面\n打开菜单：右键或双击天依', True)
     settings.addWidget(tip)
     settings.addStretch()
+    panel.bilibili = BilibiliPlayer(panel)
+    panel.tabs.addTab(panel.bilibili, 'B站')
     panel.status = text('右键天依，打开互动菜单', True)
     panel.status.setWordWrap(True)
     outer.addWidget(panel.status)

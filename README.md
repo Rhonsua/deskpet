@@ -1,6 +1,6 @@
 # 洛天依桌宠
 
-Windows 本地音乐桌宠，默认使用经典 V3 公式服精致 Q 版。
+Windows 音乐桌宠，支持本地 MP3 与 B站网页歌单，默认使用经典 V3 公式服精致 Q 版。
 
 ![互动演示](docs/interaction-demo.gif)
 
@@ -70,9 +70,22 @@ Windows 本地音乐桌宠，默认使用经典 V3 公式服精致 Q 版。
 
 实现依据 [Qt QMediaDevices 设备变化通知](https://doc.qt.io/qtforpython-6.8/PySide6/QtMultimedia/QMediaDevices.html) 和 [QAudioOutput 输出设备接口](https://doc.qt.io/qtforpython-6.8/PySide6/QtMultimedia/QAudioOutput.html)。本机已识别 EDIFIER K710W，静音 MP3 的实际输出设备切换、暂停进度、恢复和单曲循环检查通过；未进行耳机实际听音确认。
 
+## B站网页歌单
+
+右键天依 → 音乐 → B站网页歌单，或在音乐窗口点击“B站”。粘贴视频完整链接后点“添加链接”，双击歌单项开始播放。
+
+- 只接受 `bilibili.com/video/BV…` 或 `…/video/av…` 的 HTTP/HTTPS 视频地址，支持 `?p=2` 指定分 P；会移除分享追踪参数。`b23.tv` 短链接请先在浏览器打开，复制展开后的完整地址。直播、番剧及其他网站不会加入歌单。
+- 使用桌宠自己的 WebView2 播放窗口。暂停、继续、上一首、下一首及播放方式在 B站页控制；同一窗口切换歌曲，顺序播放到最后一首会关闭。点击“停止”或手动关闭网页也会停止，不会自动重开。
+- 切歌依据网页视频的真实结束事件。登录、验证码、网络故障或播放失败时保留网页提示，由用户处理或手动切歌。网站自动播放限制可能需要先在网页点一次播放；未开始播放不会被当作歌曲结束。
+- B站歌单与本地 MP3 歌单分别保存，启动不自动打开网页。播放 B站视频会暂停 MP3，播放本地歌曲会停止网页；实际播放可带动唱歌和听歌计时，静音不发成长奖励。
+- **网页声音使用 Windows 默认输出**，音乐页音量滑块可控制视频音量；应用内指定蓝牙耳机的设置只作用于本地 MP3。网页需用耳机时，请把 Windows 默认输出切到耳机。
+- 需要联网及 Microsoft Edge WebView2 Runtime，首次运行脚本会补装 Python 网页依赖。登录与验证在网页内完成；网页登录缓存保存在 `%LOCALAPPDATA%\TianyiPet\WebPlayer`，独立于 Edge 浏览器。程序不解析或下载视频音频。
+
+网页窗口使用 [pywebview 的 Windows Edge Chromium 后端](https://pywebview.flowrl.com/guide/web_engine.html)。B站页面结构和播放策略可能变化；若无法识别视频，使用“显示网页”查看提示并手动切歌。
+
 ## 运行
 
-Python 3.10 或更高版本，双击“启动桌宠.bat”。首次运行自动安装项目虚拟环境中的 PySide6，需要网络。手动启动：
+Python 3.10 或更高版本，双击“启动桌宠.bat”。首次运行自动安装项目虚拟环境中的 PySide6 与网页播放依赖，需要网络。手动启动：
 
 依赖检查完成后，启动脚本使用窗口模式 Python，不留下控制台窗口。
 
@@ -93,6 +106,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe tests/smoke_ui.py
 .\.venv\Scripts\python.exe tests/smoke_edges.py
 .\.venv\Scripts\python.exe tests/smoke_performance.py
+.\.venv\Scripts\python.exe tests/smoke_web_playback.py
 ```
 
 音频和预览测试另外需要开发依赖：
@@ -103,9 +117,11 @@ python -m venv .venv
 .\.venv\Scripts\python.exe tests/render_interaction_preview.py
 ```
 
-41 项逻辑测试、离屏交互检查、本地生成静音 MP3 的解码、计时、跳转、暂停恢复和单曲循环检查已通过。停靠检查在离屏及 Windows 窗口后端均通过，覆盖四边探头、按住推入吸附与反向拉回、展开/缩回、缩放、恢复、拖出停靠、连续绘制清屏，以及深色系统配色下的下拉选项。新增音频检查覆盖默认设备切换、指定设备、断线回退与重连策略、真实输出切换中的歌曲和进度保留。新姿势检查覆盖横向睡眠、手机与睡眠互斥、点击起床以及音乐不强制唤醒。自启测试使用独立测试注册表位置；实际注销/登录、桌面长时间显示与点击穿透、真实多屏拖拽、蓝牙设备实际断线重连与耳机听感尚待验证。
+47 项逻辑测试、离屏交互检查、本地生成静音 MP3 的解码、计时、跳转、暂停恢复和单曲循环检查已通过。停靠检查在离屏及 Windows 窗口后端均通过，覆盖四边探头、按住推入吸附与反向拉回、展开/缩回、缩放、恢复、拖出停靠、连续绘制清屏，以及深色系统配色下的下拉选项。新增音频检查覆盖默认设备切换、指定设备、断线回退与重连策略、真实输出切换中的歌曲和进度保留。新姿势检查覆盖横向睡眠、手机与睡眠互斥、点击起床以及音乐不强制唤醒。自启测试使用独立测试注册表位置；实际注销/登录、桌面长时间显示与点击穿透、真实多屏拖拽、蓝牙设备实际断线重连与耳机听感尚待验证。
 
-Windows 使用 Qt 原生多媒体后端，见 [Qt 6.8 官方说明](https://doc.qt.io/qt-6.8/qtmultimedia-index.html)。
+网页专项测试使用本地静音视频，覆盖 WebView2 启动、暂停/继续、真实结束事件切歌、同窗复用、播完关闭及听歌计时。真实 B站页面已通过静音方式验证视频识别、播放、跳至结尾后自动切下一首、同窗复用及手动关闭停止；登录验证及网站结构变化仍需实际使用中确认。
+
+Windows 本地 MP3 使用 Qt 原生多媒体后端，见 [Qt 6.8 官方说明](https://doc.qt.io/qt-6.8/qtmultimedia-index.html)。
 
 角色和状态素材用内置 imagegen 生成，参考与实际提示词在 assets/character/；参考图仅保留本地，不随仓库分发。素材为洛天依同人改绘。
 
