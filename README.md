@@ -15,7 +15,7 @@ Windows 音乐桌宠，支持本地 MP3 与 B站网页歌单，默认使用经�
 | 按住约 0.28 秒或拖动 | 提起，松开后落地回弹 |
 | 拖到屏幕边缘后松手 | 自动吸附，稍后缩成探头；左右、上下边缘均支持 |
 | 拖到边缘后继续往边缘推 | 不必松手，直接缩成探头吸附；按住往桌面拉回可立即解除 |
-| 鼠标靠近探头 / 移开 | 平滑展开 / 稍后缩回；按住拖回桌面可解除吸附 |
+| 鼠标经过、单击或原地按住探头 | 保持吸附，不自动展开；按住并向桌面内拖动才拉出 |
 | 右键或双击 | 展开/收起贴身菜单 |
 | 菜单 → 投喂 | 使用音符兑换点心，播放抱包子动作 |
 | 菜单 → 休息 → 盖被子睡觉 | 背对观众侧躺、盖被子、轻轻呼吸，点击唤醒 |
@@ -50,6 +50,14 @@ Windows 音乐桌宠，支持本地 MP3 与 B站网页歌单，默认使用经�
 在“右键天依 → 设置 → 开机自启”打开，或在更多设置中勾选“登录 Windows 后启动桌宠”。默认关闭。
 
 自启只显示桌宠，不打开歌单，也不自动播放音乐，可随时取消。仅使用当前用户的 Windows 登录启动项，无需管理员权限；源码版通过项目虚拟环境的 pythonw.exe 和绝对路径启动，不显示控制台。移动项目或虚拟环境后，需重新开启一次自启。
+
+## 鼠标穿透
+
+在“右键天依 → 设置”或“更多设置”中勾选“鼠标穿透”，也可从 Windows 系统托盘的桌宠图标右键菜单切换。默认关闭，开启状态会保存。
+
+开启后鼠标点击会穿过角色窗口，角色继续显示和播放动画。此时无法直接点击、拖动或右键角色；请右键系统托盘图标取消“鼠标穿透”，或选择“关闭鼠标穿透并找回天依”。歌单与设置窗口仍可操作，切换穿透不改变睡觉、唱歌等持续状态。
+
+使用 [Qt 的 WindowTransparentForInput](https://doc.qt.io/qt-6.8/qt.html#WindowType-enum) 设置窗口输入穿透。离屏及 Windows 原生窗口检查覆盖开关同步、状态保存、重启恢复、托盘解除，以及原生穿透样式的设置与清除；不同桌面软件下的实际点击透传和长时间使用仍待确认。
 
 ## 音乐与成长
 
@@ -111,6 +119,8 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 .\.venv\Scripts\python.exe tests/smoke_ui.py
 .\.venv\Scripts\python.exe tests/smoke_edges.py
+.\.venv\Scripts\python.exe tests/smoke_input.py
+.\.venv\Scripts\python.exe tests/smoke_input.py --native
 .\.venv\Scripts\python.exe tests/smoke_performance.py
 .\.venv\Scripts\python.exe tests/smoke_web_playback.py
 .\.venv\Scripts\python.exe tests/benchmark_startup.py

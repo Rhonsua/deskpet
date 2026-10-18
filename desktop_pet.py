@@ -170,6 +170,10 @@ class PetToolbar(QFrame):
             startup.toggled.connect(self.pet.panel.toggle_startup)
             startup.toggled.connect(lambda: self.page('settings'))
             self.content.addWidget(startup)
+            passthrough = QCheckBox('鼠标穿透（可从系统托盘关闭）')
+            passthrough.setChecked(self.pet.mouse_passthrough)
+            passthrough.toggled.connect(self.pet.set_mouse_passthrough)
+            self.content.addWidget(passthrough)
             self.content.addWidget(QLabel('桌宠大小'))
             scale = QSlider(Qt.Orientation.Horizontal)
             scale.setRange(75, 150)
@@ -235,6 +239,8 @@ class DesktopPet(QWidget):
         self.behavior = PetBehavior()
         self.last_interaction = time.monotonic()
         self.press_point = None
+        self.dock_press = False
+        self.mouse_passthrough = False
         self.drag_offset = None
         self.dragging = False
         self.drag_dock_edge = ''
@@ -280,11 +286,50 @@ class DesktopPet(QWidget):
         menu.addAction('互动菜单', self.toolbar.toggle)
         menu.addAction('歌单', lambda: self.open_tools(0))
         menu.addAction('设置', lambda: self.open_tools(2))
+        self.passthrough_action = menu.addAction('鼠标穿透')
+        self.passthrough_action.setCheckable(True)
+        self.passthrough_action.toggled.connect(self.set_mouse_passthrough)
+        menu.addAction('关闭鼠标穿透并找回天依', self.recover_input)
         menu.addAction('退出', QApplication.instance().quit)
         self.tray.setContextMenu(menu)
         self.tray.setToolTip('洛天依 · 右键打开菜单')
         self.tray.show()
         self.restore()
+        self.set_mouse_passthrough(self.panel.settings.value('mouse_passthrough', False, type=bool))
+
+    def set_mouse_passthrough(self, enabled):
+        enabled = bool(enabled)
+        self.mouse_passthrough = enabled
+        self.panel.settings.setValue('mouse_passthrough', enabled)
+        for control in (self.panel.passthrough_toggle, self.passthrough_action):
+            control.blockSignals(True)
+            control.setChecked(enabled)
+            control.blockSignals(False)
+        if enabled:
+            self.hold_timer.stop()
+            self.click_timer.stop()
+            self.press_point = None
+            if self.dragging:
+                self.behavior.end_drag(landing=False)
+            self.dragging = False
+            self.drag_dock_edge = ''
+            self.toolbar.hide()
+            self.bubble.hide()
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        flag = Qt.WindowType.WindowTransparentForInput
+        if bool(self.windowFlags() & flag) != enabled:
+            visible, position = self.isVisible(), self.pos()
+            self.setWindowFlag(flag, enabled)
+            self.move(position)
+            if visible:
+                self.show()
+        self.tray.setToolTip('洛天依 · 鼠标穿透中，右键托盘可关闭' if enabled else '洛天依 · 右键打开菜单')
+
+    def recover_input(self):
+        self.set_mouse_passthrough(False)
+        self.restore()
+        self.reveal_dock()
+        self.bubble.say('鼠标穿透已关闭，可以继续拖动和互动。')
 
     def set_variant(self, variant):
         self.variant = variant
@@ -375,14 +420,13 @@ class DesktopPet(QWidget):
     def fold_dock(self):
         if not self.dock_edge or self.dragging:
             return
-        if (self.sleeping or self.using_phone or self.underMouse() or self.toolbar.isVisible() or self.panel.isVisible() or
+        if (self.sleeping or self.using_phone or self.press_point is not None or self.toolbar.isVisible() or self.panel.isVisible() or
                 self.bubble.isVisible() or self.behavior.layers):
             self.fold_timer.start(700)
             return
         self.dock_target = 0.0
 
     def enterEvent(self, event):
-        self.reveal_dock()
         super().enterEvent(event)
 
     def leaveEvent(self, event):
@@ -659,19 +703,25 @@ class DesktopPet(QWidget):
         # Keep a single rectangular backing surface instead of changing native masks.
 
     def mousePressEvent(self, event):
+        if self.mouse_passthrough:
+            event.ignore()
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             if not self.hit_region.contains(event.position().toPoint()):
                 event.ignore()
                 return
-            self.reveal_dock()
+            self.dock_press = bool(self.dock_edge)
+            if not self.dock_press:
+                self.reveal_dock()
             self.press_point = event.globalPosition().toPoint()
             self.drag_offset = self.press_point - self.pos()
             self.touch_head = (bool(self.dock_edge and self.dock_reveal < 0.9) or
                                event.position().y() < self.height() * 0.57)
-            self.hold_timer.start(280)
+            if not self.dock_press:
+                self.hold_timer.start(280)
 
     def mouseMoveEvent(self, event):
-        if self.press_point is None:
+        if self.mouse_passthrough or self.press_point is None:
             return
         point = event.globalPosition().toPoint()
         if not self.dragging and (point - self.press_point).manhattanLength() > 8:
@@ -703,6 +753,9 @@ class DesktopPet(QWidget):
 
     def mouseReleaseEvent(self, event):
         self.hold_timer.stop()
+        if self.mouse_passthrough:
+            event.ignore()
+            return
         if event.button() != Qt.MouseButton.LeftButton:
             return
         had_press = self.press_point is not None
@@ -724,16 +777,22 @@ class DesktopPet(QWidget):
                 return
             self.behavior.end_drag()
             self.snap_to_edge()
-        else:
+        elif not self.dock_press:
             self.click_timer.start(220)
         self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def mouseDoubleClickEvent(self, event):
+        if self.mouse_passthrough:
+            event.ignore()
+            return
         self.click_timer.stop()
         self.ignore_release = True
         self.toolbar.toggle()
 
     def contextMenuEvent(self, event):
+        if self.mouse_passthrough:
+            event.ignore()
+            return
         self.toolbar.toggle()
 
     def hideEvent(self, event):
