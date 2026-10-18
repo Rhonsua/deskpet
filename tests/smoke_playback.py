@@ -111,6 +111,12 @@ with tempfile.TemporaryDirectory(prefix='天依 音乐 ') as scratch, ExitStack(
                         settings=QSettings(settings_file, QSettings.Format.IniFormat))
     cleanup.callback(dispose, second)
     second.volume.setValue(0)
+    assert second._player is None, 'restoring metadata must not initialize audio at startup'
+    second.sample()
+    second.save()
+    assert second._player is None, 'idle sampling and saving must keep audio lazy'
+    assert int(second.settings.value('current_position')) == saved_position
+    second.ensure_audio()
     try:
         wait_for(lambda: second.pending_seek is None and second.player.duration() > 11000)
     except AssertionError:

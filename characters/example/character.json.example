@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "id": "my-character",
+  "name": "我的角色",
+  "author": "填写作者",
+  "source": "填写素材来源及授权说明",
+  "states": {"idle": "idle.png"},
+  "anchors": {"head": [0.5, 0.28], "feet": [0.5, 0.98]}
+}

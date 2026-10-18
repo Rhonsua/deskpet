@@ -57,6 +57,7 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-test-') as scratch:
         assert '播完' in web.note.text()
         assert not panel.pet.playing
         assert panel.store.stats()['total'] > 0
+        assert panel._player is None and panel._audio is None, 'Bilibili must not initialize local audio'
         assert len(__import__('bilibili_links').load_web_tracks(settings.value('bilibili_tracks'))) == 2
         web.list.setCurrentRow(1)
         web.remove()
@@ -66,7 +67,9 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-test-') as scratch:
         web.watchdog.stop()
         web.shutdown()
         panel.progress_timer.stop()
-        panel.audio_router.poll.stop()
-        panel.player.stop()
+        if panel._audio_router is not None:
+            panel._audio_router.poll.stop()
+        if panel._player is not None:
+            panel._player.stop()
         panel.store.close()
         panel.hide()

@@ -54,46 +54,82 @@ class MusicPanel(QWidget):
         self.library = MusicLibrary(self.settings.value('library_v1', ''),
                                     legacy if isinstance(legacy, list) else [legacy])
         self.queue = PlaybackQueue(self.settings.value('play_mode', 'order'))
-        self.audio = QAudioOutput(self)
-        self.player = QMediaPlayer(self)
-        self.player.setAudioOutput(self.audio)
+        self._audio = self._player = self._audio_router = None
+        self._restore_request = None
         build(self)
         self.bilibili.starting.connect(self.activate_web)
         self.bilibili.playbackChanged.connect(self.web_playback_changed)
         self.volume.valueChanged.connect(lambda value: self.bilibili.send({'cmd': 'volume', 'value': value / 100}))
-        self.audio_router = AudioRouter(self.audio, self.settings, self)
-        self.audio_router.changed.connect(self.refresh_audio_outputs)
-        self.audio_router.routeWillChange.connect(self.prepare_audio_route)
-        self.audio_router.routeChanged.connect(self.finish_audio_route)
-        self.audio_router.refresh()
         self.progress_timer = QTimer(self)
         self.progress_timer.timeout.connect(self.sample)
         self.progress_timer.start(1000)
-        self.player.durationChanged.connect(self.duration_changed)
-        self.player.seekableChanged.connect(lambda _: self.duration_changed(self.player.duration()))
-        self.player.positionChanged.connect(self.position_changed)
-        self.player.playbackStateChanged.connect(self.state_changed)
-        self.player.mediaStatusChanged.connect(self.media_changed)
-        self.player.errorOccurred.connect(self.audio_error)
         self.list.itemDoubleClicked.connect(lambda _: self.play_row(self.list.currentRow()))
         self.setAcceptDrops(True)
         self.render_library()
         self.refresh_startup()
         self.refresh_growth()
         self.restore_playback()
+        self.tabs.currentChanged.connect(lambda index: self.ensure_audio() if index == 2 else None)
+
+    def ensure_audio(self):
+        """Windows endpoint discovery can be slow; perform it on first use."""
+        if self._player is not None:
+            return
+        self._audio = QAudioOutput(self)
+        self._audio.setVolume(self.volume.value() / 100)
+        self._player = QMediaPlayer(self)
+        self._player.setAudioOutput(self._audio)
+        self._player.durationChanged.connect(self.duration_changed)
+        self._player.seekableChanged.connect(lambda _: self.duration_changed(self._player.duration()))
+        self._player.positionChanged.connect(self.position_changed)
+        self._player.playbackStateChanged.connect(self.state_changed)
+        self._player.mediaStatusChanged.connect(self.media_changed)
+        self._player.errorOccurred.connect(self.audio_error)
+        self._audio_router = AudioRouter(self._audio, self.settings, self)
+        self._audio_router.changed.connect(self.refresh_audio_outputs)
+        self._audio_router.routeWillChange.connect(self.prepare_audio_route)
+        self._audio_router.routeChanged.connect(self.finish_audio_route)
+        self._audio_router.refresh()
+        if self._restore_request:
+            path, position = self._restore_request
+            self._restore_request = None
+            self.pending_seek = position
+            self._player.setSource(QUrl.fromLocalFile(path))
+
+    @property
+    def player(self):
+        self.ensure_audio()
+        return self._player
+
+    @property
+    def audio(self):
+        self.ensure_audio()
+        return self._audio
+
+    @property
+    def audio_router(self):
+        self.ensure_audio()
+        return self._audio_router
+
+    def set_volume(self, value):
+        if self._audio is not None:
+            self._audio.setVolume(value / 100)
 
     @property
     def paths(self):
         return self.library.paths
 
     def current_path(self):
-        path = self.player.source().toLocalFile()
+        if self._player is None:
+            return self._restore_request[0] if self._restore_request else ''
+        path = self._player.source().toLocalFile()
         return str(Path(path).resolve()) if path else ''
 
     def activate_web(self):
         self.playback_source = 'web'
         self.autoplay_requested = False
-        self.player.pause()
+        if self._player is not None:
+            self._player.pause()
         self.last_source = self.last_position = None
         self.pet.playing = False
 
@@ -161,7 +197,7 @@ class MusicPanel(QWidget):
         self.output_note.setToolTip(router.summary)
 
     def choose_audio_output(self, index):
-        if index >= 0 and hasattr(self, 'audio_router'):
+        if index >= 0:
             self.audio_router.choose(self.output_choice.itemData(index))
 
     def refresh_startup(self):
@@ -305,8 +341,9 @@ class MusicPanel(QWidget):
         if path not in paths:
             paths.append(path)
         self.queue.reset(paths, paths.index(path))
-        self.start_track(self.queue.index, autoplay=False,
-                         position=int(self.settings.value('current_position', 0)))
+        self.pending_seek = max(0, int(self.settings.value('current_position', 0)))
+        self._restore_request = (path, self.pending_seek)
+        self.song_title.setText(Path(path).stem)
         self.status.setText('已恢复上次歌曲，点击播放继续')
 
     def seek_to(self):
@@ -345,10 +382,10 @@ class MusicPanel(QWidget):
         now = time.monotonic()
         elapsed = now - self.last_tick
         self.last_tick = now
-        position = self.player.position()
+        position = self._player.position() if self._player is not None else 0
         source = self.current_path()
-        playing = self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
-        audible = self.audio.volume() > 0 and not self.audio.isMuted()
+        playing = self._player is not None and self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+        audible = self._audio is not None and self._audio.volume() > 0 and not self._audio.isMuted()
         if self.playback_source == 'web':
             metrics = self.bilibili.metrics
             source = self.bilibili.current_url
@@ -420,6 +457,7 @@ class MusicPanel(QWidget):
     def start_track(self, index, autoplay=True, position=0):
         if not 0 <= index < len(self.queue.paths):
             return False
+        self.ensure_audio()
         path = self.queue.paths[index]
         if not Path(path).is_file():
             self.failed_paths.add(path)
@@ -486,11 +524,12 @@ class MusicPanel(QWidget):
                               self.current_path() == path else None)
 
     def position_changed(self, position):
-        if self.playback_source == 'web' and self.sender() is self.player:
+        if self.playback_source == 'web' and self._player is not None and self.sender() is self._player:
             return
         if not self.seek.isSliderDown():
             self.seek.setValue(position)
-        self.time.setText(f"{clock(position)} / {clock(self.player.duration())}")
+        duration = self._player.duration() if self._player is not None else 0
+        self.time.setText(f"{clock(position)} / {clock(duration)}")
 
     def state_changed(self, state):
         if self.playback_source == 'web':
@@ -515,7 +554,8 @@ class MusicPanel(QWidget):
         self.settings.setValue('library_v1', self.library.dumps())
         self.settings.setValue('play_mode', self.queue.mode)
         self.settings.setValue('current_path', self.current_path())
-        self.settings.setValue('current_position', self.pending_seek if self.pending_seek is not None else self.player.position())
+        self.settings.setValue('current_position', self.pending_seek if self.pending_seek is not None
+                               else self._player.position() if self._player is not None else 0)
         self.settings.setValue('current_queue', json.dumps(self.queue.paths, ensure_ascii=False))
         self.settings.setValue("volume", self.volume.value())
         self.settings.sync()

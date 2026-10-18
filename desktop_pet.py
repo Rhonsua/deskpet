@@ -2,7 +2,6 @@
 import math
 import random
 import time
-from pathlib import Path
 
 from PySide6.QtCore import QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPixmap, QRegion, QTransform, QPainterPath, QPen
@@ -17,6 +16,7 @@ from ui_theme import CONTROL_STYLE
 from edge_docking import EDGES, clamp_position, dock_position, nearest_edge, edge_gap, pushed_edge
 from pet_behavior import MODES, PetBehavior
 from singing_motion import SingingRig, singing_pose
+from character_packs import builtin_sources
 
 
 POPUP_STYLE = """
@@ -288,14 +288,9 @@ class DesktopPet(QWidget):
 
     def set_variant(self, variant):
         self.variant = variant
-        directory = Path(__file__).resolve().parent / 'assets' / 'character'
-        filename = directory / ('tianyi-simple-v3-costume.png' if variant == 'simple' else 'tianyi-refined-v3-smooth.png')
         self.frames = {}
-        sources = {'idle': filename}
-        if variant == 'refined':
-            for state in ('blink', 'happy', 'eat', 'lift', 'sleep', 'phone',
-                          'sing-front', 'sing-left', 'sing-right'):
-                sources[state] = directory / 'states' / ('sleep-back.png' if state == 'sleep' else state + '.png')
+        sources = builtin_sources(variant)
+        filename = sources['idle']
         for state, path in sources.items():
             cache_key = str(path)
             if cache_key in self.pixmap_cache:
@@ -307,7 +302,7 @@ class DesktopPet(QWidget):
                 self.pixmap_cache[cache_key] = self.frames[state]
         self.sprite = self.frames.get('idle', QPixmap())
         self.prepare_frames()
-        update_cover(self.panel, filename)
+        update_cover(self.panel, filename, self.sprite)
         self.panel.settings.setValue('visual_variant', variant)
         self.panel.appearance.blockSignals(True)
         self.panel.appearance.setCurrentIndex(self.panel.appearance.findData(variant))
