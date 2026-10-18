@@ -1,7 +1,7 @@
 """Three directional singing poses with independent, continuous leg deformation."""
 import math
-from PySide6.QtCore import QPoint, QPointF, QRect
-from PySide6.QtGui import QPolygonF, QRegion, QTransform
+from PySide6.QtCore import QPoint, QRect, QRectF, Qt
+from PySide6.QtGui import QBitmap, QImage, QPainter, QRegion
 
 
 def singing_pose(seconds):
@@ -26,8 +26,7 @@ class SingingRig:
         self.mask = mask
         self.hem = round(pixmap.height() * 0.64)
         self.upper = QRect(0, 0, pixmap.width(), self.hem)
-        self.upper_mask = mask.intersected(QRegion(self.upper))
-        self.bands = []
+        self.splits = []
         middle = pixmap.width() // 2
         image = pixmap.toImage()
         for y in range(self.hem, pixmap.height(), 4):
@@ -45,30 +44,49 @@ class SingingRig:
             gaps = [(a[1] + b[0]) // 2 for a, b in zip(runs, runs[1:])]
             if gaps:
                 middle = min(gaps, key=lambda x: abs(x - middle))
-            for side, (x, width) in enumerate(((0, middle), (middle, pixmap.width() - middle))):
-                rect = QRect(x, y, width, min(4, pixmap.height() - y))
-                self.bands.append((side, rect, mask.intersected(QRegion(rect))))
+            self.splits.extend([middle] * height)
+        self.padding = 8
+        self.surface = QImage(pixmap.width() + self.padding * 2,
+                              pixmap.height() + self.padding * 2,
+                              QImage.Format.Format_ARGB32_Premultiplied)
 
     def draw(self, painter, seconds, scale):
-        painter.drawPixmap(QPoint(0, 0), self.pixmap, self.upper)
-        result = QRegion(self.upper_mask)
+        # Rasterize continuous source sampling into complete destination rows.
+        # Transforming/clipping many antialiased bands separately makes their
+        # fractional edges partially transparent, even inside an opaque leg.
+        # Compose in local pixel space first, then transform the finished image
+        # once with the outer body transform.
+        self.surface.fill(Qt.GlobalColor.transparent)
+        local = QPainter(self.surface)
+        local.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        pad = self.padding
+        local.drawPixmap(QPoint(pad, pad), self.pixmap, self.upper)
         span = max(1, self.pixmap.height() - self.hem)
-        for side, rect, mask in self.bands:
-            top, bottom = rect.y(), rect.y() + rect.height()
-            dx1, dy1 = leg_offset(seconds, (top - self.hem) / span, side, scale)
-            dx2, dy2 = leg_offset(seconds, (bottom - self.hem) / span, side, scale)
-            left, right = rect.x(), rect.x() + rect.width()
-            source = QPolygonF([QPointF(left, top), QPointF(right, top),
-                                QPointF(right, bottom), QPointF(left, bottom)])
-            target = QPolygonF([QPointF(left + dx1, top + dy1), QPointF(right + dx1, top + dy1),
-                                QPointF(right + dx2, bottom + dy2), QPointF(left + dx2, bottom + dy2)])
-            warp = QTransform()
-            if not QTransform.quadToQuad(source, target, warp):
-                continue
-            painter.save()
-            painter.setTransform(warp, True)
-            painter.setClipRect(rect)
-            painter.drawPixmap(0, 0, self.pixmap)
-            painter.restore()
-            result = result.united(warp.map(mask))
-        return result
+        for side in (0, 1):
+            phase = seconds * 5 + side * math.pi
+            horizontal = math.sin(phase) * 3.2 * scale
+            lift = max(0, math.sin(phase)) * 2.4 * scale
+            for y in range(self.hem, self.pixmap.height()):
+                destination = y + 0.5 - self.hem
+                source = destination
+                # Invert y = source - lift*smoothstep(source/span).
+                # The derivative stays positive for the supported pet scales.
+                for _ in range(3):
+                    fraction = max(0, min(1, source / span))
+                    weight = fraction * fraction * (3 - 2 * fraction)
+                    derivative = 1 - lift * 6 * fraction * (1 - fraction) / span
+                    source -= (source - lift * weight - destination) / derivative
+                if source >= span:
+                    continue
+                fraction = source / span
+                dx = horizontal * fraction * fraction * (3 - 2 * fraction)
+                split = self.splits[min(len(self.splits) - 1, int(source))]
+                left, width = (0, split) if side == 0 else (split, self.pixmap.width() - split)
+                local.drawPixmap(QRectF(pad + left + dx, pad + y, width, 1), self.pixmap,
+                                 QRectF(left, self.hem + source - .5, width, 1))
+        local.end()
+        painter.drawImage(QPoint(-pad, -pad), self.surface)
+        # Derive hit testing from the same completed pixels rather than a union
+        # of rounded strip transforms, so it follows the displayed feet.
+        mask = QBitmap.fromImage(self.surface.createAlphaMask())
+        return QRegion(mask).translated(-pad, -pad)

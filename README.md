@@ -29,6 +29,8 @@ Windows 音乐桌宠，支持本地 MP3 与 B站网页歌单，默认使用经�
 
 [查看唱歌动作演示](docs/singing-demo.gif)。
 
+已修复腿部运动的条带接缝漏底：腿部先连续采样合成，再随身体整体转动，避免运动时出现横向切割线。检查覆盖三个缩放比例、四个运动阶段和身体旋转，保留左右腿独立动作与对应点击区域。
+
 ## 持续状态与临时动作
 
 待机、睡觉、玩手机、手动唱歌、收麦陪听是持续状态，会保存在设置中。提起、落地、摸头、戳一戳、投喂和转身是临时动作，结束后恢复持续状态。
@@ -122,6 +124,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe tests/smoke_input.py
 .\.venv\Scripts\python.exe tests/smoke_input.py --native
 .\.venv\Scripts\python.exe tests/smoke_performance.py
+.\.venv\Scripts\python.exe tests/smoke_singing.py
 .\.venv\Scripts\python.exe tests/smoke_web_playback.py
 .\.venv\Scripts\python.exe tests/benchmark_startup.py
 ```
