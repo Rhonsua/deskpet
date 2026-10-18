@@ -3,8 +3,9 @@
 window.addEventListener('ended', event => {
   const state = window.__tianyiVideoState;
   if (!state || event.target !== state.video) return;
-  state.ended = true;
   event.stopImmediatePropagation();
   event.stopPropagation();
+  if (state.restarting) return;
+  state.ended = true;
   state.video.pause();
 }, true);

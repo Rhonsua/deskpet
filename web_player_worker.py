@@ -8,6 +8,7 @@ import threading
 import time
 
 from bilibili_links import video_url
+from web_playback_guard import TailCompletion, ReplayRecovery
 
 
 PREFIX = 'TIANYI_WEB '
@@ -23,7 +24,7 @@ def run():
     closed = threading.Event()
     script = (Path(__file__).parent / 'bilibili_probe.js').read_text(encoding='utf-8')
     self_test = '--self-test' in sys.argv
-    fixture = ''
+    fixture = reload_fixture = ''
     if self_test:
         import base64
         import io
@@ -35,6 +36,37 @@ def run():
         fixture = ('<title>天依网页播放测试</title><div class="bpx-player-video-wrap">'
                    '<video autoplay muted loop controls width="640" src="data:audio/wav;base64,' +
                    base64.b64encode(audio.getvalue()).decode() + '"></video></div>')
+        reload_fixture = fixture
+        if '--self-test-faults' in sys.argv:
+            # Reproduce missing ended and a site ignoring the first seek to zero.
+            # This fixture is reachable only in the isolated self-test mode.
+            fixture += '''<script>
+              const v = document.querySelector('video');
+              const clock = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime');
+              const end = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'ended');
+              const play = v.play.bind(v);
+              let stuck = false, ignoreReset = true;
+              Object.defineProperty(v, 'currentTime', {
+                get() { return clock.get.call(v); },
+                set(t) {
+                  if (stuck && t === 0 && ignoreReset) { ignoreReset = false; return; }
+                  if (t === 0) stuck = false;
+                  clock.set.call(v, t);
+                }
+              });
+              Object.defineProperty(v, 'ended', {get() { return !stuck && end.get.call(v); }});
+              v.play = () => stuck ? Promise.resolve() : play();
+              v.addEventListener('timeupdate', () => {
+                if (!stuck && !v.seeking && v.currentTime > v.duration - .35) {
+                  stuck = true;
+                  v.pause();
+                  clock.set.call(v, v.duration - .06);
+                }
+              });
+            </script>'''
+            if '--self-test-reload' in sys.argv:
+                fixture = fixture.replace('ignoreReset = true', 'ignoreReset = 4').replace(
+                    'ignoreReset = false; return;', 'ignoreReset -= 1; return;')
     window = webview.create_window('天依 · B站播放', html='<p>正在准备播放窗口…</p>',
                                    width=1024, height=720, min_size=(640, 480), focus=not self_test)
     window.events.closed += lambda: closed.set()
@@ -74,8 +106,10 @@ def run():
             window.destroy()
             return
         current, token, command, volume, seek_position = '', '', None, 0.6, None
+        desired_volume = 0.6
         started, next_probe, requested_play = 0, 0, False
         hidden, last_playing = False, False
+        tail, replay = TailCompletion(), ReplayRecovery()
         emit({'type': 'ready'})
         while not closed.is_set():
             try:
@@ -101,9 +135,15 @@ def run():
                 current = selected
                 token = str(item.get('token', ''))
                 volume = max(0, min(1, float(item.get('volume', 0.6))))
+                desired_volume = volume
+                last_playing = False
                 requested_play = True
                 started = time.monotonic()
                 command = 'restart' if restart else 'play'
+                tail.reset()
+                replay.cancel()
+                if restart:
+                    replay.start(started)
                 if restart:
                     pass
                 elif self_test:
@@ -116,15 +156,19 @@ def run():
                 command = kind
                 seek_position = item.get('position') if kind == 'seek' else None
                 requested_play = kind == 'play' if kind != 'seek' else requested_play
+                tail.reset()
+                if kind in ('pause', 'seek'):
+                    replay.cancel()
             elif kind == 'volume':
                 volume = max(0, min(1, float(item.get('value', 0.6))))
+                desired_volume = volume
             elif kind == 'show':
                 hidden = False
                 window.show()
                 window.restore()
                 emit({'type': 'visibility', 'hidden': False})
             elif kind == 'hide':
-                if requested_play:
+                if requested_play and command is None:
                     command = 'resume'
                 hidden = True
                 window.hide()
@@ -171,12 +215,45 @@ def run():
                         emit({'type': 'waiting', 'token': token, 'message': '未检测到视频，请在网页完成登录/验证，或手动切下一首'})
                     continue
                 command, volume, seek_position = None, None, None
-                if (not hidden and not minimizing.is_set() and applied_command is None and
-                        last_playing and not value.get('playing') and not value.get('ended')):
+                recovering = replay.active
+                action = replay.update(value, time.monotonic())
+                if recovering:
+                    # An old ended bit must not complete the new iteration.
+                    value['ended'] = False
+                    tail.reset()
+                if action == 'restart':
+                    command = 'restart'
+                elif action == 'reload':
+                    # One bounded page reload if all same-page seeks failed.
+                    # Keep the window hidden and retain the selected token.
+                    started = time.monotonic()
+                    command, volume = 'restart', desired_volume
+                    replay.start(started, allow_reload=False)
+                    last_playing = False
+                    if self_test:
+                        window.load_html(reload_fixture)
+                    else:
+                        window.load_url(current)
+                    emit({'type': 'waiting', 'token': token,
+                          'message': '重播未能回到开头，正在重新载入当前视频…'})
+                    continue
+                elif action == 'failed':
                     requested_play = False
-                if requested_play and not value.get('seen_playing') and now - started < 15:
+                    emit({'type': 'waiting', 'token': token,
+                          'message': '重播仍未成功，请显示网页检查网络、登录或播放提示'})
+                    continue
+                if (not hidden and not minimizing.is_set() and applied_command is None and
+                        not recovering and last_playing and not value.get('playing') and not value.get('ended')):
+                    requested_play = False
+                if not recovering and tail.update(value, time.monotonic(), requested_play):
+                    value['ended'] = True
+                    value['completion_reason'] = 'tail_stalled'
+                if not requested_play:
+                    # A pause command wins even when it races the end of media.
+                    value['ended'] = False
+                if command is None and requested_play and not value.get('seen_playing') and now - started < 15:
                     command = 'resume'
-                if hidden and requested_play and value.get('paused') and not value.get('ended'):
+                if command is None and hidden and requested_play and value.get('paused') and not value.get('ended'):
                     command = 'resume'
                 last_playing = bool(value.get('playing'))
                 emit({'type': 'state', **value})

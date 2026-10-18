@@ -20,7 +20,16 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-loops-', ignore_cleanup_erro
                        data_dir=Path(scratch)/'data',
                        settings=QSettings(str(Path(scratch)/'test.ini'), QSettings.Format.IniFormat))
     web = panel.bilibili
+    if '--packaged' in sys.argv:
+        import bilibili_player
+        worker = Path(__file__).resolve().parents[1] / 'dist' / 'TianyiPet' / 'TianyiWorker.exe'
+        assert worker.is_file()
+        bilibili_player.worker_command = lambda _: (str(worker), ['--web-worker'])
     web.worker_args = [] if '--live' in sys.argv else ['--self-test']
+    if '--faults' in sys.argv:
+        web.worker_args.append('--self-test-faults')
+    if '--reload' in sys.argv:
+        web.worker_args.append('--self-test-reload')
     panel.volume.setValue(0)
     def wait(condition, timeout=25):
         deadline = time.monotonic()+timeout
@@ -56,6 +65,18 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-loops-', ignore_cleanup_erro
         assert not web.playing and web.latch.token == paused_token, 'background resume must respect explicit pause'
         web.toggle()
         wait(lambda: web.playing)
+        fallback_seen = reload_seen = False
+        def record_completion(value):
+            global fallback_seen, reload_seen
+            if value.get('completion_reason') == 'tail_stalled':
+                fallback_seen = True
+            if value.get('type') == 'waiting' and '重新载入' in value.get('message', ''):
+                reload_seen = True
+        original_handle = web.handle_event
+        def handle_with_record(value):
+            record_completion(value)
+            original_handle(value)
+        web.handle_event = handle_with_record
         for _ in range(2):
             token = web.latch.token
             finish()
@@ -79,6 +100,10 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-loops-', ignore_cleanup_erro
         wait(lambda: not web.active)
         wait(lambda: web.process.state() == QProcess.ProcessState.NotRunning)
         assert panel._player is None
+        if '--faults' in sys.argv:
+            assert fallback_seen, 'missing-ended fixture must exercise the host completion fallback'
+        if '--reload' in sys.argv:
+            assert reload_seen, 'failed same-page seeks must recover by reloading once'
         print('PASS: single loops twice from zero, native minimize->tray, show/hide, hidden list wrap, order final close')
     finally:
         web.watchdog.stop()
