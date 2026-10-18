@@ -113,7 +113,7 @@ with tempfile.TemporaryDirectory(prefix='tianyi-input-') as scratch:
         finally:
             dispose(second)
         recovery = next(action for action in pet.tray.contextMenu().actions()
-                        if action.text() == '关闭鼠标穿透并找回天依')
+                        if action.text() == '关闭鼠标穿透并找回角色')
         recovery.trigger()
         app.processEvents()
         assert not pet.mouse_passthrough and not pet.windowFlags() & flag

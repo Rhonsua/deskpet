@@ -28,6 +28,7 @@ from music_library import MusicLibrary, PlaybackQueue, MODES
 from windows_startup import WindowsStartup
 from audio_routing import device_id
 from remote_audio import AudioEngine
+from character_packs import character_directory
 
 
 class MusicPanel(QWidget):
@@ -37,7 +38,7 @@ class MusicPanel(QWidget):
         self.song_title.setText(title)
         self.songChanged.emit(title)
 
-    def __init__(self, pet, data_dir=None, startup=None, settings=None):
+    def __init__(self, pet, data_dir=None, startup=None, settings=None, characters_dir=None):
         super().__init__()
         self.pet = pet
         self.settings = settings if settings is not None else QSettings("TianyiPet", "Prototype")
@@ -45,6 +46,7 @@ class MusicPanel(QWidget):
         data_dir = Path(data_dir) if data_dir else Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation))
         data_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir = data_dir
+        self.characters_dir = Path(characters_dir) if characters_dir is not None else character_directory()
         self.engine = None
         self.store = PetStore(data_dir / "pet.db")
         self.last_tick = time.monotonic()
@@ -78,6 +80,8 @@ class MusicPanel(QWidget):
         self.refresh_growth()
         self.restore_playback()
         self.tabs.currentChanged.connect(lambda index: self.ensure_audio() if index == 2 else None)
+        self.tabs.currentChanged.connect(lambda index: self.pet.refresh_characters() if index == 2
+                                        and hasattr(self.pet, 'refresh_characters') else None)
 
     def ensure_audio(self):
         """Windows endpoint discovery can be slow; perform it on first use."""
@@ -559,8 +563,8 @@ class MusicPanel(QWidget):
 
 
 class Pet(DesktopPet):
-    def __init__(self, data_dir=None, startup=None, settings=None):
-        super().__init__(lambda owner: MusicPanel(owner, data_dir, startup, settings))
+    def __init__(self, data_dir=None, startup=None, settings=None, characters_dir=None):
+        super().__init__(lambda owner: MusicPanel(owner, data_dir, startup, settings, characters_dir))
 
 
 def main():

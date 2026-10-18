@@ -3,8 +3,8 @@ import math
 import random
 import time
 
-from PySide6.QtCore import QPoint, QPointF, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QPixmap, QRegion, QTransform, QPainterPath, QPen
+from PySide6.QtCore import QPoint, QPointF, QRect, Qt, QTimer, QUrl
+from PySide6.QtGui import QColor, QPainter, QPixmap, QRegion, QTransform, QPainterPath, QPen, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
     QProgressBar, QSlider, QStyle, QSystemTrayIcon, QVBoxLayout, QWidget, QCheckBox,
@@ -16,7 +16,8 @@ from ui_theme import CONTROL_STYLE
 from edge_docking import EDGES, clamp_position, dock_position, nearest_edge, edge_gap, pushed_edge
 from pet_behavior import MODES, PetBehavior
 from singing_motion import SingingRig, singing_pose
-from character_packs import builtin_sources
+from character_packs import (builtin_sources, STATES, DEFAULT_ANCHORS, read_pack,
+                             validate_images, selected_folder, discover_packs)
 
 
 POPUP_STYLE = """
@@ -86,6 +87,8 @@ class PetToolbar(QFrame):
         outer.setSpacing(9)
         title = QHBoxLayout()
         self.name = QLabel('洛天依')
+        self.name.setTextFormat(Qt.TextFormat.PlainText)
+        self.name.setWordWrap(True)
         self.name.setStyleSheet('font-weight: 600; color: #3C7A92;')
         title.addWidget(self.name)
         title.addStretch()
@@ -127,7 +130,7 @@ class PetToolbar(QFrame):
 
     def refresh(self):
         data = self.pet.panel.store.pet()
-        self.name.setText(f"洛天依  Lv.{data['level']}     音符 {data['notes']}")
+        self.name.setText(f"{self.pet.character_name}  Lv.{data['level']}     音符 {data['notes']}")
         self.bars['xp'].setRange(0, 50 + 20 * (data['level'] - 1))
         self.bars['xp'].setValue(data['xp'])
         for key in ('hunger', 'mood'):
@@ -188,7 +191,7 @@ class PetToolbar(QFrame):
             hint = QLabel('点头部摸摸 · 拖动提起 · 双击/右键菜单')
             hint.setObjectName('Muted')
             self.content.addWidget(hint)
-            self.add_button('和天依说：一起加油吧', lambda: self.pet.reply())
+            self.add_button('一起加油吧', lambda: self.pet.reply())
         self.refresh()
         self.adjustSize()
         if self.isVisible():
@@ -261,6 +264,10 @@ class DesktopPet(QWidget):
         self.frame_masks = {}
         self.hit_region = QRegion()
         self.phase = 0
+        self.character_name = '洛天依'
+        self.character_pack = None
+        self.anchors = dict(DEFAULT_ANCHORS)
+        self.head_region = QRegion()
         self.panel = panel_factory(self)
         self.panel.songChanged.connect(self.refresh_music_title)
         self.behavior.set_mode(self.panel.settings.value('activity_mode', 'idle')
@@ -273,7 +280,11 @@ class DesktopPet(QWidget):
         self.bubble = Bubble(self)
         self.toolbar = PetToolbar(self)
         self.set_scale(self.scale)
-        self.set_variant(self.variant)
+        selected = self.panel.settings.value('character_selection', self.variant)
+        if not self.set_variant(selected):
+            failure = self.panel.character_note.text()
+            self.set_variant('refined')
+            self.panel.character_note.setText('已恢复内置洛天依。' + failure)
         self.click_timer = QTimer(self)
         self.click_timer.setSingleShot(True)
         self.click_timer.timeout.connect(self.touch)
@@ -286,7 +297,7 @@ class DesktopPet(QWidget):
         self.tray = QSystemTrayIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_MediaVolume), self)
         menu = QMenu()
         menu.setStyleSheet(CONTROL_STYLE)
-        menu.addAction('显示天依', self.restore)
+        menu.addAction('显示桌宠', self.restore)
         menu.addAction('互动菜单', self.toolbar.toggle)
         menu.addAction('歌单', lambda: self.open_tools(0))
         menu.addAction('设置', lambda: self.open_tools(2))
@@ -296,7 +307,7 @@ class DesktopPet(QWidget):
         self.passthrough_action = menu.addAction('鼠标穿透')
         self.passthrough_action.setCheckable(True)
         self.passthrough_action.toggled.connect(self.set_mouse_passthrough)
-        menu.addAction('关闭鼠标穿透并找回天依', self.recover_input)
+        menu.addAction('关闭鼠标穿透并找回角色', self.recover_input)
         menu.addAction('退出', QApplication.instance().quit)
         self.tray.setContextMenu(menu)
         self.tray.setToolTip('洛天依 · 右键打开菜单')
@@ -330,7 +341,7 @@ class DesktopPet(QWidget):
             self.move(position)
             if visible:
                 self.show()
-        self.tray.setToolTip('洛天依 · 鼠标穿透中，右键托盘可关闭' if enabled else '洛天依 · 右键打开菜单')
+        self.tray.setToolTip(self.character_name + (' · 鼠标穿透中，右键托盘可关闭' if enabled else ' · 右键打开菜单'))
 
     def recover_input(self):
         self.set_mouse_passthrough(False)
@@ -347,27 +358,98 @@ class DesktopPet(QWidget):
                 clamp_near(self, self.toolbar)
 
     def set_variant(self, variant):
-        self.variant = variant
-        self.frames = {}
-        sources = builtin_sources(variant)
+        # Decode and validate completely before touching the displayed character.
+        pack = None
+        try:
+            if variant in ('refined', 'simple'):
+                sources = builtin_sources(variant)
+                frames = {}
+                for state, path in sources.items():
+                    cache_key = str(path)
+                    if cache_key not in self.pixmap_cache:
+                        pixmap = QPixmap(cache_key)
+                        if not pixmap.isNull():
+                            self.pixmap_cache[cache_key] = pixmap.copy(sprite_bounds(pixmap))
+                    if cache_key in self.pixmap_cache:
+                        frames[state] = self.pixmap_cache[cache_key]
+            else:
+                pack = read_pack(selected_folder(self.panel.characters_dir, variant))
+                images = validate_images(pack)
+                loaded = {path: QPixmap.fromImage(images[state]) for state, path in pack.states.items()}
+                sources = {state: pack.state_path(state) for state in STATES}
+                # Keep the common canvas: independent cropping destroys pose alignment.
+                frames = {state: loaded[path] for state, path in sources.items()}
+            if 'idle' not in frames or frames['idle'].isNull():
+                raise ValueError('角色缺少可显示的 idle 素材')
+        except (ValueError, OSError) as error:
+            self.panel.character_note.setText('角色加载失败，保留当前角色：' + str(error))
+            self.panel.appearance.blockSignals(True)
+            self.panel.appearance.setCurrentIndex(self.panel.appearance.findData(getattr(self, 'variant', 'refined')))
+            self.panel.appearance.blockSignals(False)
+            return False
+        self.character_pack, self.frames, self.variant = pack, frames, variant
+        self.character_name = pack.name if pack else '洛天依'
+        self.anchors = dict(pack.anchors) if pack else dict(DEFAULT_ANCHORS)
         filename = sources['idle']
-        for state, path in sources.items():
-            cache_key = str(path)
-            if cache_key in self.pixmap_cache:
-                self.frames[state] = self.pixmap_cache[cache_key]
-                continue
-            pixmap = QPixmap(cache_key)
-            if not pixmap.isNull():
-                self.frames[state] = pixmap.copy(sprite_bounds(pixmap))
-                self.pixmap_cache[cache_key] = self.frames[state]
         self.sprite = self.frames.get('idle', QPixmap())
         self.prepare_frames()
         update_cover(self.panel, filename, self.sprite)
-        self.panel.settings.setValue('visual_variant', variant)
+        self.panel.settings.setValue('character_selection', variant)
+        if pack is None:
+            self.panel.settings.setValue('visual_variant', variant)
+        self.panel.settings.sync()
         self.panel.appearance.blockSignals(True)
+        if self.panel.appearance.findData(variant) < 0:
+            self.panel.appearance.addItem(self.character_name + ' · 自定义', variant)
         self.panel.appearance.setCurrentIndex(self.panel.appearance.findData(variant))
         self.panel.appearance.blockSignals(False)
+        self.panel.character_note.setText(
+            f'当前：{pack.name}；作者：{pack.author or "未填写"}。来源与授权：{pack.source or "请自行确认"}'
+            if pack else '当前使用内置洛天依。添加角色后点击“刷新角色”。')
+        self.setWindowTitle(self.character_name + ' · 桌宠')
+        self.panel.setWindowTitle(self.character_name + ' · 歌单与设置')
+        if hasattr(self, 'tray'):
+            self.tray.setToolTip(self.character_name + (' · 鼠标穿透中，右键托盘可关闭' if self.mouse_passthrough else ' · 右键打开菜单'))
+        self.toolbar.refresh()
+        self.head_region = self.hit_region = QRegion()
         self.update()
+        return True
+
+    def refresh_characters(self, reload_current=False):
+        try:
+            packs, errors = discover_packs(self.panel.characters_dir)
+        except OSError as error:
+            self.panel.character_note.setText('角色目录无法读取：' + str(error))
+            return
+        choice = self.panel.appearance
+        choice.blockSignals(True)
+        choice.clear()
+        choice.addItem('精致 Q 版 · 经典 V3', 'refined')
+        choice.addItem('圆润 Q 版 · 经典 V3', 'simple')
+        for selection, pack in packs.items():
+            choice.addItem(pack.name + ' · ' + pack.root.name, selection)
+        if choice.findData(self.variant) < 0:
+            choice.addItem(self.character_name + '（当前已加载，文件夹不可用）', self.variant)
+        choice.setCurrentIndex(choice.findData(self.variant))
+        choice.blockSignals(False)
+        if reload_current:
+            self.set_variant(self.variant)
+        result = f'找到 {len(packs)} 个自定义角色。目录：{self.panel.characters_dir}'
+        if self.character_pack and not reload_current:
+            pack = self.character_pack
+            result += f'\n当前：{pack.name}；作者：{pack.author or "未填写"}。来源与授权：{pack.source or "请自行确认"}'
+        if errors:
+            result += '\n未载入：' + '\n'.join(errors[:8])
+        if not reload_current or errors:
+            self.panel.character_note.setText(result + ('\n' + self.panel.character_note.text() if reload_current else ''))
+
+    def open_character_folder(self):
+        try:
+            self.panel.characters_dir.mkdir(parents=True, exist_ok=True)
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.panel.characters_dir.resolve()))):
+                raise OSError('系统未能打开文件夹')
+        except OSError as error:
+            self.panel.character_note.setText('打开失败：' + str(error) + '\n目录：' + str(self.panel.characters_dir))
 
     def set_scale(self, scale):
         anchor = self.frameGeometry().bottomLeft() if self.isVisible() else None
@@ -385,14 +467,23 @@ class DesktopPet(QWidget):
         self.update()
 
     def prepare_frames(self):
+        max_width, max_height = 236 * self.scale, 270 * self.scale
+        if self.character_pack:
+            feet_x, feet_y = self.anchors['feet']
+            max_width = min(max_width, self.width() / (2 * max(feet_x, 1 - feet_x)))
+            if feet_y > 0:
+                max_height = min(max_height, 280 * self.scale / feet_y)
+            if feet_y < 1:
+                max_height = min(max_height, (self.height() - 280 * self.scale) / (1 - feet_y))
         self.scaled_frames = {
-            name: pixmap.scaled(round(236 * self.scale), round((154 if name in ('sleep', 'phone') else 270) * self.scale),
+            name: pixmap.scaled(max(1, round(max_width)), max(1, round(154 * self.scale if self.character_pack is None and name in ('sleep', 'phone') else max_height)),
                                 Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             for name, pixmap in self.frames.items()
         }
         self.frame_masks = {name: QRegion(pixmap.mask()) for name, pixmap in self.scaled_frames.items()}
         self.singing_rigs = {name: SingingRig(pixmap, self.frame_masks[name])
-                             for name, pixmap in self.scaled_frames.items() if name.startswith('sing-')}
+                             for name, pixmap in self.scaled_frames.items()
+                             if self.character_pack is None and name.startswith('sing-')}
 
     def restore(self):
         screen = QApplication.primaryScreen().availableGeometry()
@@ -449,12 +540,19 @@ class DesktopPet(QWidget):
             self.fold_timer.start(900)
         super().leaveEvent(event)
 
+    def character_head(self):
+        image = self.scaled_frames.get('idle')
+        if self.character_pack and image is not None:
+            return QPointF(self.width() / 2 + (self.anchors['head'][0] - self.anchors['feet'][0]) * image.width(),
+                           280 * self.scale + (self.anchors['head'][1] - self.anchors['feet'][1]) * image.height())
+        return QPointF(self.width() / 2, 93 * self.scale)
+
     def dock_transform(self):
         transform = QTransform()
         if not self.dock_edge:
             return transform
         amount = 1.0 - self.dock_reveal
-        head = QPointF(self.width() / 2, 93 * self.scale)
+        head = self.character_head()
         targets = {
             'left': (QPointF(22 * self.scale, self.height() / 2), 90),
             'right': (QPointF(self.width() - 22 * self.scale, self.height() / 2), -90),
@@ -577,7 +675,7 @@ class DesktopPet(QWidget):
         self.dock_reveal = self.dock_target = 1.0
         if was_docked:
             # Keep the head close to the held pointer as it unfolds from the edge.
-            desired = self.press_point - QPoint(self.width() // 2, round(93 * self.scale))
+            desired = self.press_point - self.character_head().toPoint()
             self.move(clamp_position(desired, self.size(), self.screen_bounds()))
             self.drag_offset = self.press_point - self.pos()
         self.behavior.begin_drag()
@@ -650,7 +748,8 @@ class DesktopPet(QWidget):
         transform.translate(self.width() / 2, 280 * scale + y * scale)
         transform.rotate(angle)
         transform.scale(sx, sy)
-        transform.translate(-image.width() / 2, -image.height())
+        transform.translate(-image.width() * (self.anchors['feet'][0] if self.character_pack else .5),
+                            -image.height() * (self.anchors['feet'][1] if self.character_pack else 1))
         resting = key in ('sleep', 'phone')
         if not resting:
             transform *= self.dock_transform()
@@ -662,7 +761,7 @@ class DesktopPet(QWidget):
             local_mask = self.singing_rigs[key].draw(painter, motion_time, scale)
         else:
             painter.drawPixmap(0, 0, image)
-        if key == 'phone':
+        if key == 'phone' and self.character_pack is None:
             # A gentle screen-light pulse and small tap ring, clipped to the sprite.
             painter.save()
             painter.setClipRegion(self.frame_masks[key])
@@ -679,6 +778,11 @@ class DesktopPet(QWidget):
             painter.restore()
         painter.resetTransform()
         mask = transform.map(local_mask)
+        if self.character_pack:
+            head_x, head_y = self.anchors['head']
+            head_box = QRect(round((head_x - .24) * image.width()), round((head_y - .2) * image.height()),
+                             round(.48 * image.width()), round(.4 * image.height()))
+            self.head_region = transform.map(QRegion(head_box, QRegion.RegionType.Ellipse))
         if (not self.dock_edge or self.dock_reveal > 0.95) and activity in ('happy', 'sing', 'turn', 'sleep'):
             color = QColor('#C87991') if activity == 'happy' else QColor('#69A3BA')
             for i in range(3):
@@ -731,7 +835,8 @@ class DesktopPet(QWidget):
             self.press_point = event.globalPosition().toPoint()
             self.drag_offset = self.press_point - self.pos()
             self.touch_head = (bool(self.dock_edge and self.dock_reveal < 0.9) or
-                               event.position().y() < self.height() * 0.57)
+                               (self.head_region.contains(event.position().toPoint()) if self.character_pack
+                                else event.position().y() < self.height() * 0.57))
             if not self.dock_press:
                 self.hold_timer.start(280)
 

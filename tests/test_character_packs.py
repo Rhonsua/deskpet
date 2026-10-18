@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from PySide6.QtGui import QImage
-from character_packs import read_pack, validate_images, builtin_sources
+from character_packs import read_pack, validate_images, builtin_sources, discover_packs, selected_folder
 
 
 class CharacterPackTests(unittest.TestCase):
@@ -18,6 +18,8 @@ class CharacterPackTests(unittest.TestCase):
     def image(self, path, width=16, alpha=True):
         image = QImage(width, 16, QImage.Format.Format_ARGB32 if alpha else QImage.Format.Format_RGB32)
         image.fill(0 if alpha else 0xffffffff)
+        if alpha:
+            image.setPixelColor(width // 2, 8, 0xffffffff)
         assert image.save(str(path))
 
     def load(self):
@@ -82,3 +84,46 @@ class CharacterPackTests(unittest.TestCase):
     def test_builtins_keep_current_state_files(self):
         self.assertEqual(builtin_sources('refined')['sleep'].name, 'sleep-back.png')
         self.assertEqual(len(builtin_sources('simple')), 1)
+
+    def test_png_only_folder_needs_no_manifest(self):
+        pack = read_pack(self.root)
+        self.assertEqual(pack.name, 'pet')
+        self.assertEqual(pack.states, {'idle': self.root / 'idle.png'})
+        validate_images(pack)
+
+    def test_side_singing_falls_back_to_front(self):
+        self.image(self.root / 'sing-front.png')
+        self.data['states']['sing-front'] = 'sing-front.png'
+        pack = self.load()
+        self.assertEqual(pack.state_path('sing-left'), self.root / 'sing-front.png')
+        self.assertEqual(pack.state_path('sleep'), self.root / 'idle.png')
+
+    def test_discovery_isolates_invalid_pack_without_decoding_images(self):
+        bad = self.root.parent / 'bad'
+        bad.mkdir()
+        (bad / 'character.json').write_text('{broken', encoding='utf-8')
+        # Metadata scanning is intentionally lazy; decoding happens on selection.
+        (self.root / 'idle.png').write_bytes(b'bad PNG')
+        packs, errors = discover_packs(self.root.parent)
+        self.assertIn('external:pet', packs)
+        self.assertEqual(len(errors), 1)
+        with self.assertRaises(ValueError):
+            validate_images(packs['external:pet'])
+
+    def test_selection_cannot_escape_root(self):
+        for value in ('external:../pet', 'external:C:pet', 'external:', 'refined'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                selected_folder(self.root.parent, value)
+
+    def test_blank_and_fully_opaque_rgba_are_rejected(self):
+        for fill in (0, 0xffffffff):
+            image = QImage(16, 16, QImage.Format.Format_ARGB32)
+            image.fill(fill)
+            image.save(str(self.root / 'idle.png'))
+            with self.subTest(fill=fill), self.assertRaises(ValueError):
+                validate_images(read_pack(self.root))
+
+    def test_head_must_be_above_feet(self):
+        self.data['anchors'] = {'head': [.5, .9], 'feet': [.5, .8]}
+        with self.assertRaises(ValueError):
+            self.load()
