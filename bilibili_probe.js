@@ -41,7 +41,14 @@
     if (config.volume > 0) video.muted = false;
   }
   if (config.command === 'pause') video.pause();
-  if (config.command === 'seek' && Number.isFinite(config.position)) video.currentTime = config.position;
+  if ((config.command === 'seek' && Number.isFinite(config.position)) || state.user_interacted) {
+    state.restarting = false;
+    if (state.onSeeked) video.removeEventListener('seeked', state.onSeeked);
+    if (config.command === 'seek') {
+      state.ended = false;
+      video.currentTime = config.position;
+    }
+  }
   if (config.command === 'restart') {
     state.ended = false;
     state.restarting = true;
@@ -74,6 +81,7 @@
     playing:!video.paused && !video.ended && video.readyState>=2, paused:video.paused,
     ended:!state.restarting && (state.ended || video.ended), seen_playing:state.seen_playing,
     media_id:state.media_id, seeking:video.seeking, ready_state:video.readyState,
+    playback_rate:video.playbackRate || 1, user_interacted:!!state.user_interacted,
     buffered_to_end:!!video.buffered && Array.from({length:video.buffered.length}, (_,i) => i).some(i =>
       video.buffered.start(i) <= video.currentTime + .05 && video.buffered.end(i) >= video.duration - .05),
     muted:video.muted, volume:video.volume, error:video.error?video.error.code:0};

@@ -30,6 +30,8 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-loops-', ignore_cleanup_erro
         web.worker_args.append('--self-test-faults')
     if '--reload' in sys.argv:
         web.worker_args.append('--self-test-reload')
+    if '--history' in sys.argv:
+        web.worker_args.append('--self-test-history')
     panel.volume.setValue(0)
     def wait(condition, timeout=25):
         deadline = time.monotonic()+timeout
@@ -55,6 +57,18 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-loops-', ignore_cleanup_erro
         pid = web.process.processId()
         web.send({'cmd': 'minimize'})
         wait(lambda: web.hidden)
+        if '--history' in sys.argv:
+            history_token = web.latch.token
+            wait(lambda: web.metrics.get('title') == '历史进度恢复到末尾' and
+                 web.playing and web.metrics.get('position', 999) < 2)
+            assert web.latch.token == history_token, 'history tail must not complete the newly selected track'
+            assert web.metrics['duration'] == 210
+            stable_until = time.monotonic() + 2
+            while time.monotonic() < stable_until:
+                app.processEvents()
+                assert web.latch.token == history_token
+                assert web.metrics.get('position', 0) < 10, 'history restore must not win after the first zero report'
+                time.sleep(.01)
         web.toggle()
         wait(lambda: not web.playing)
         paused_token = web.latch.token

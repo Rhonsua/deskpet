@@ -271,6 +271,8 @@ class BilibiliPlayer(QWidget):
             self.note.setText('视频正在静音播放，请在网页取消静音；结束后会自动切歌。')
         elif self.playing:
             self.note.setText('网页正在播放，结束后自动切下一首；声音使用 Windows 默认输出。')
+        elif value.get('starting_from_zero'):
+            self.note.setText('正在从头播放，纠正网页历史续播进度…')
         elif not value.get('ended'):
             self.note.setText('视频已暂停；若网页阻止自动播放，请在网页点一次播放。')
         if self.latch.accept(value):

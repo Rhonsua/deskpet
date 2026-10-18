@@ -31,12 +31,28 @@ def run():
         import wave
         audio = io.BytesIO()
         with wave.open(audio, 'wb') as wav:
-            wav.setparams((1, 2, 8000, 0, 'NONE', 'not compressed'))
-            wav.writeframes(bytes(8000 * 2 * 4))
+            if '--self-test-history' in sys.argv:
+                wav.setparams((1, 1, 4000, 0, 'NONE', 'not compressed'))
+                wav.writeframes(bytes([128]) * (4000 * 210))
+            else:
+                wav.setparams((1, 2, 8000, 0, 'NONE', 'not compressed'))
+                wav.writeframes(bytes(8000 * 2 * 4))
         fixture = ('<title>天依网页播放测试</title><div class="bpx-player-video-wrap">'
                    '<video autoplay muted loop controls width="640" src="data:audio/wav;base64,' +
                    base64.b64encode(audio.getvalue()).decode() + '"></video></div>')
         reload_fixture = fixture
+        if '--self-test-history' in sys.argv:
+            fixture += '''<script>
+              const v = document.querySelector('video');
+              v.addEventListener('loadedmetadata', () => {
+                v.currentTime = v.duration - 3;
+                setTimeout(() => {
+                  v.currentTime = v.duration - 3;
+                  document.title = '历史进度恢复到末尾';
+                }, 1500);
+              }, {once:true});
+            </script>'''
+            reload_fixture = fixture
         if '--self-test-faults' in sys.argv:
             # Reproduce missing ended and a site ignoring the first seek to zero.
             # This fixture is reachable only in the isolated self-test mode.
@@ -139,11 +155,11 @@ def run():
                 last_playing = False
                 requested_play = True
                 started = time.monotonic()
-                command = 'restart' if restart else 'play'
+                # Every explicitly selected track starts at zero, including
+                # navigation/reopening, which can restore Bilibili history.
+                command = 'restart'
                 tail.reset()
-                replay.cancel()
-                if restart:
-                    replay.start(started)
+                replay.start(started, settle_for=15)
                 if restart:
                     pass
                 elif self_test:
@@ -215,11 +231,16 @@ def run():
                         emit({'type': 'waiting', 'token': token, 'message': '未检测到视频，请在网页完成登录/验证，或手动切下一首'})
                     continue
                 command, volume, seek_position = None, None, None
-                recovering = replay.active
+                if value.get('user_interacted') or not requested_play:
+                    replay.cancel()
+                recovering = replay.blocking
                 action = replay.update(value, time.monotonic())
+                recovering = recovering or replay.blocking
                 if recovering:
                     # An old ended bit must not complete the new iteration.
                     value['ended'] = False
+                    value['playing'] = False
+                    value['starting_from_zero'] = True
                     tail.reset()
                 if action == 'restart':
                     command = 'restart'
@@ -228,7 +249,7 @@ def run():
                     # Keep the window hidden and retain the selected token.
                     started = time.monotonic()
                     command, volume = 'restart', desired_volume
-                    replay.start(started, allow_reload=False)
+                    replay.start(started, allow_reload=False, settle_for=15)
                     last_playing = False
                     if self_test:
                         window.load_html(reload_fixture)

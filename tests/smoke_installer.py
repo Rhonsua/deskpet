@@ -9,7 +9,7 @@ import time
 root = Path(__file__).resolve().parents[1]
 preview = root / 'preview'
 preview.mkdir(exist_ok=True)
-setup = root / 'dist' / 'TianyiPet-0.2.0-Setup.exe'
+setup = root / 'dist' / 'TianyiPet-0.2.1-Setup.exe'
 assert setup.read_bytes()[:2] == b'MZ', 'installer must be an executable'
 with tempfile.TemporaryDirectory(prefix='installer-check-', dir=preview, ignore_cleanup_errors=True) as scratch:
     folder = Path(scratch).resolve()

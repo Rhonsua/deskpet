@@ -31,10 +31,16 @@ class ReplayRecovery:
     """Require playback near zero before accepting the next completion."""
     def __init__(self):
         self.active = False
+        self.origin = None
 
-    def start(self, now, allow_reload=True):
+    @property
+    def blocking(self):
+        return self.active and self.origin is None
+
+    def start(self, now, allow_reload=True, settle_for=0):
         self.active, self.deadline, self.attempts = True, now + 2, 0
         self.allow_reload = allow_reload
+        self.origin, self.settle_for = None, settle_for
 
     def cancel(self):
         self.active = False
@@ -43,9 +49,23 @@ class ReplayRecovery:
         if not self.active:
             return None
         duration, position = value.get('duration', 0), value.get('position', 0)
+        if self.origin is not None:
+            previous_position, previous_time = self.origin
+            rate = max(.1, min(16, value.get('playback_rate', 1)))
+            # Bilibili can restore history AFTER a successful seek to zero.
+            # Keep checking for jumps during the opening of a selected track.
+            if position > previous_position + (now - previous_time) * rate + 1.25:
+                self.origin, self.deadline = None, now
+            else:
+                self.origin = (position, now)
+                if now >= self.settled_at or value.get('ended'):
+                    self.active = False
+                return None
         if (value.get('playing') and not value.get('seeking') and
                 duration > 0 and 0 <= position < min(2, duration / 2)):
-            self.active = False
+            self.origin = (position, now)
+            self.settled_at = now + self.settle_for
+            self.active = self.settle_for > 0
             return None
         if now < self.deadline:
             return None

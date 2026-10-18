@@ -1,6 +1,6 @@
 # Windows 试用安装包
 
-安装包版本为 0.2.0，面向 Windows 10 / 11 x64。包含 Python、Qt、内置角色图片、本地音频辅助程序及 B站网页辅助程序，无需用户安装 Python。B站仍需系统安装 Microsoft Edge WebView2 Runtime；网页登录、验证码与网站播放限制由用户在网页处理。
+安装包版本为 0.2.1，修复 B站历史进度导致反复播放末尾的问题，面向 Windows 10 / 11 x64。包含 Python、Qt、内置角色图片、本地音频辅助程序及 B站网页辅助程序，无需用户安装 Python。B站仍需系统安装 Microsoft Edge WebView2 Runtime；网页登录、验证码与网站播放限制由用户在网页处理。
 
 默认安装到当前用户的 `%LOCALAPPDATA%\Programs\TianyiPet`，无需管理员权限，可选桌面快捷方式，并添加开始菜单及 Windows 卸载入口。关闭旧桌宠后再安装。开机自启仍在桌宠设置中由用户选择。
 
@@ -23,8 +23,8 @@
 
 输出文件：
 
-- `dist/TianyiPet-0.2.0-Setup.exe`：有安装进度、位置选择、快捷方式和卸载入口。
-- `dist/TianyiPet-0.2.0-portable.zip`：解压后运行 `TianyiPet.exe`，保持辅助程序及 `_internal` 目录完整。
+- `dist/TianyiPet-0.2.1-Setup.exe`：有安装进度、位置选择、快捷方式和卸载入口。
+- `dist/TianyiPet-0.2.1-portable.zip`：解压后运行 `TianyiPet.exe`，保持辅助程序及 `_internal` 目录完整。
 - `dist/SHA256SUMS.txt`：这两个文件的 SHA-256。
 - `dist/TEST-REPORT.json`：本机安装、启动和卸载检查结果。
 

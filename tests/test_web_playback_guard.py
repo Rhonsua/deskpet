@@ -46,6 +46,56 @@ class TailTests(unittest.TestCase):
 
 
 class ReplayTests(unittest.TestCase):
+    def test_delayed_history_restore_after_zero_is_rewound(self):
+        guard = ReplayRecovery()
+        guard.start(0, settle_for=15)
+        value = report()
+        value.update(duration=210, position=.1, playing=True, paused=False)
+        guard.update(value, .1)
+        self.assertTrue(guard.active)
+        self.assertFalse(guard.blocking)
+        value.update(position=207, ended=True)
+        self.assertEqual(guard.update(value, 1.5), 'restart')
+        self.assertTrue(guard.blocking)
+        value.update(position=.2, ended=False)
+        guard.update(value, 2)
+        self.assertFalse(guard.blocking)
+        value.update(position=1)
+        guard.update(value, 3)
+        self.assertFalse(guard.blocking)
+
+    def test_continuous_playback_and_natural_end_are_not_rewound(self):
+        guard = ReplayRecovery()
+        guard.start(0, settle_for=15)
+        value = report()
+        value.update(duration=4, position=.1, playing=True, paused=False)
+        guard.update(value, .1)
+        for now in (1, 2, 3):
+            value.update(position=now)
+            self.assertIsNone(guard.update(value, now))
+            self.assertFalse(guard.blocking)
+        value.update(position=4, ended=True, playing=False)
+        self.assertIsNone(guard.update(value, 4))
+        self.assertFalse(guard.active)
+
+    def test_manual_seek_cancels_opening_history_protection(self):
+        guard = ReplayRecovery()
+        guard.start(0, settle_for=15)
+        value = report()
+        value.update(position=.1, playing=True)
+        guard.update(value, .1)
+        guard.cancel()
+        value.update(position=99)
+        self.assertIsNone(guard.update(value, 1))
+
+    def test_opening_at_remembered_tail_never_confirms_start(self):
+        guard = ReplayRecovery()
+        guard.start(0, settle_for=15)
+        value = report()
+        value.update(duration=210, position=207, playing=True)
+        self.assertEqual(guard.update(value, 2), 'restart')
+        self.assertTrue(guard.blocking)
+
     def test_stuck_seek_retries_then_one_reload(self):
         guard = ReplayRecovery()
         guard.start(0)
