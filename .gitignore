@@ -15,3 +15,18 @@ assets/references/
 .env.*
 *.db-wal
 *.db-shm
+
+# Local character art, model projects and redistribution packages stay private.
+assets/live2d/
+experiments/
+character-packages/
+docs/model-issues/
+characters/*
+!characters/README.md
+!characters/example/
+characters/example/*
+!characters/example/character.json.example
+*.cmo3
+*.moc3
+*.psd
+*.psb

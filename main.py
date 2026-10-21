@@ -585,6 +585,7 @@ def main():
     app.aboutToQuit.connect(pet.panel.bilibili.shutdown)
     app.aboutToQuit.connect(pet.panel.shutdown_audio)
     app.aboutToQuit.connect(pet.panel.store.close)
+    app.aboutToQuit.connect(pet.close_live2d)
     return app.exec()
 
 

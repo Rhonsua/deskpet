@@ -17,6 +17,11 @@ class PetBehavior:
         self.mode = mode if mode in MODES else 'idle'
         self.playing = False
         self.layers = []
+        self.mode_elapsed = 0.0
+
+    @property
+    def activity_elapsed(self):
+        return self.elapsed if self.layers else self.mode_elapsed
 
     @property
     def dragging(self):
@@ -41,6 +46,8 @@ class PetBehavior:
     def set_mode(self, mode):
         if mode not in MODES:
             raise ValueError('Unknown activity: ' + str(mode))
+        if mode != self.mode:
+            self.mode_elapsed = 0.0
         self.mode = mode
         # A new explicit choice wins after the current physical drag finishes.
         self.layers = self.layers[-1:] if self.dragging else []
@@ -80,3 +87,5 @@ class PetBehavior:
                 self.layers.pop()
             else:
                 return
+        if not self.layers:
+            self.mode_elapsed += seconds

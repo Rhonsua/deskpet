@@ -66,7 +66,7 @@ with tempfile.TemporaryDirectory(prefix='tianyi-character-') as scratch:
         return Pet(data_dir=root / 'data', startup=NoStartup(), settings=settings, characters_dir=packs)
     pet = create()
     try:
-        assert pet.panel.appearance.count() == 2, 'do not scan unselected packs at startup'
+        assert pet.panel.appearance.count() == 3, 'do not scan unselected packs at startup'
         pet.refresh_characters()
         selection = 'external:我的角色'
         index = pet.panel.appearance.findData(selection)

@@ -9,6 +9,7 @@ from music_library import MODES
 from pet_store import FOODS
 from ui_theme import CONTROL_STYLE, style_combo
 from bilibili_player import BilibiliPlayer
+from visual_style import BUILTIN_APPEARANCES, preferred_variant
 
 
 COMPACT_STYLE = """
@@ -180,12 +181,26 @@ def build(panel):
     panel.passthrough_toggle = QCheckBox('鼠标穿透（从系统托盘可关闭）')
     panel.passthrough_toggle.toggled.connect(lambda enabled: panel.pet.set_mouse_passthrough(enabled))
     settings.addWidget(panel.passthrough_toggle)
+    panel.pointer_toggle = QCheckBox('靠近时看向鼠标（拖动时暂停）')
+    panel.pointer_toggle.setChecked(panel.settings.value('pointer_follow', True, type=bool))
+    panel.pointer_toggle.setToolTip('动态模型在附近自动看向鼠标，提起、休息和打开菜单时暂停。')
+    panel.pointer_toggle.toggled.connect(lambda enabled: panel.settings.setValue('pointer_follow', enabled))
+    settings.addWidget(panel.pointer_toggle)
+    panel.interactions_toggle = QCheckBox('鼠标互动（轻抚头部／手边停留挥手）')
+    panel.interactions_toggle.setChecked(panel.settings.value('mouse_interactions', True, type=bool))
+    panel.interactions_toggle.setToolTip('动态模型：来回轻抚头部会眯眼回应，手边停留一会儿会挥手；带冷却，不影响拖拽与休息。')
+    panel.interactions_toggle.toggled.connect(lambda enabled: panel.settings.setValue('mouse_interactions', enabled))
+    settings.addWidget(panel.interactions_toggle)
+    panel.effects_toggle = QCheckBox('动作背景效果（音符、爱心、柔光）')
+    panel.effects_toggle.setChecked(panel.settings.value('background_effects', True, type=bool))
+    panel.effects_toggle.toggled.connect(lambda enabled: panel.settings.setValue('background_effects', enabled))
+    settings.addWidget(panel.effects_toggle)
     settings.addWidget(text('角色外观'))
     panel.appearance = QComboBox()
     style_combo(panel.appearance)
-    panel.appearance.addItem('精致 Q 版 · 经典 V3', 'refined')
-    panel.appearance.addItem('圆润 Q 版 · 经典 V3', 'simple')
-    panel.appearance.setCurrentIndex(0 if panel.settings.value('visual_variant', 'refined') == 'refined' else 1)
+    for caption, variant in BUILTIN_APPEARANCES:
+        panel.appearance.addItem(caption, variant)
+    panel.appearance.setCurrentIndex(max(0, panel.appearance.findData(preferred_variant(panel.settings))))
     panel.appearance.currentIndexChanged.connect(lambda: panel.pet.set_variant(panel.appearance.currentData()))
     settings.addWidget(panel.appearance)
     character_tools = QHBoxLayout()

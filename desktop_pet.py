@@ -4,18 +4,23 @@ import random
 import time
 
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt, QTimer, QUrl
-from PySide6.QtGui import QColor, QPainter, QPixmap, QRegion, QTransform, QPainterPath, QPen, QDesktopServices
+from PySide6.QtGui import QColor, QPainter, QPixmap, QRegion, QTransform, QPen, QDesktopServices, QCursor
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
     QProgressBar, QSlider, QStyle, QSystemTrayIcon, QVBoxLayout, QWidget, QCheckBox,
 )
 
 from pet_store import FOODS
-from visual_style import sprite_bounds, update_cover
+from visual_style import (sprite_bounds, update_cover, preferred_variant,
+                          APPEARANCE_REVISION, BUILTIN_APPEARANCES)
 from ui_theme import CONTROL_STYLE
 from edge_docking import EDGES, clamp_position, dock_position, nearest_edge, edge_gap, pushed_edge
 from pet_behavior import MODES, PetBehavior
 from singing_motion import SingingRig, singing_pose
+from drag_motion import DragSway, interaction_pose
+from pointer_follow import PointerFollow
+from mouse_interactions import MouseInteractions, REACTION_SECONDS
+from pet_effects import PetEffects
 from character_packs import (builtin_sources, STATES, DEFAULT_ANCHORS, read_pack,
                              validate_images, selected_folder, discover_packs)
 
@@ -250,6 +255,12 @@ class DesktopPet(QWidget):
         self.drag_offset = None
         self.dragging = False
         self.drag_dock_edge = ''
+        self.drag_sway = DragSway()
+        self.drag_anchor = QPointF(130, 82)
+        self.drag_sample_point = None
+        self.drag_sample_time = 0.0
+        self.pointer_follow = PointerFollow()
+        self.mouse_interactions = MouseInteractions()
         self.dock_edge = ''
         self.dock_reveal = 1.0
         self.dock_target = 1.0
@@ -266,25 +277,27 @@ class DesktopPet(QWidget):
         self.phase = 0
         self.character_name = '洛天依'
         self.character_pack = None
+        self.live2d_renderer = None
+        self.live2d_frame_key = None
+        self.live2d_pixmap = None
         self.anchors = dict(DEFAULT_ANCHORS)
         self.head_region = QRegion()
         self.panel = panel_factory(self)
         self.panel.songChanged.connect(self.refresh_music_title)
         self.behavior.set_mode(self.panel.settings.value('activity_mode', 'idle')
                                if self.panel.settings.value('activity_mode', 'idle') in MODES else 'idle')
-        self.variant = self.panel.settings.value('visual_variant', 'refined')
-        if self.panel.settings.value('appearance_revision', '') != 'refined-smooth-v1':
-            self.variant = 'refined'
-            self.panel.settings.setValue('appearance_revision', 'refined-smooth-v1')
+        self.variant = preferred_variant(self.panel.settings)
         self.scale = float(self.panel.settings.value('pet_scale', 1.0))
         self.bubble = Bubble(self)
         self.toolbar = PetToolbar(self)
+        self.effects = PetEffects(self)
         self.set_scale(self.scale)
-        selected = self.panel.settings.value('character_selection', self.variant)
-        if not self.set_variant(selected):
+        if not self.set_variant(self.variant):
             failure = self.panel.character_note.text()
             self.set_variant('refined')
             self.panel.character_note.setText('已恢复内置洛天依。' + failure)
+        self.panel.settings.setValue('appearance_revision', APPEARANCE_REVISION)
+        self.panel.settings.sync()
         self.click_timer = QTimer(self)
         self.click_timer.setSingleShot(True)
         self.click_timer.timeout.connect(self.touch)
@@ -360,9 +373,10 @@ class DesktopPet(QWidget):
     def set_variant(self, variant):
         # Decode and validate completely before touching the displayed character.
         pack = None
+        renderer = None
         try:
-            if variant in ('refined', 'simple'):
-                sources = builtin_sources(variant)
+            if variant in ('refined', 'simple', 'live2d'):
+                sources = builtin_sources('refined' if variant == 'live2d' else variant)
                 frames = {}
                 for state, path in sources.items():
                     cache_key = str(path)
@@ -372,6 +386,13 @@ class DesktopPet(QWidget):
                             self.pixmap_cache[cache_key] = pixmap.copy(sprite_bounds(pixmap))
                     if cache_key in self.pixmap_cache:
                         frames[state] = self.pixmap_cache[cache_key]
+                if variant == 'live2d':
+                    from live2d_renderer import Live2DRenderer
+                    # Load completely before replacing the last successful renderer.
+                    renderer = self.live2d_renderer or Live2DRenderer()
+                    first_frame = renderer.frame('idle', 0)
+                    if first_frame.isNull():
+                        raise RuntimeError('Live2D 没有生成有效画面')
             else:
                 pack = read_pack(selected_folder(self.panel.characters_dir, variant))
                 images = validate_images(pack)
@@ -381,12 +402,19 @@ class DesktopPet(QWidget):
                 frames = {state: loaded[path] for state, path in sources.items()}
             if 'idle' not in frames or frames['idle'].isNull():
                 raise ValueError('角色缺少可显示的 idle 素材')
-        except (ValueError, OSError) as error:
+        except (ValueError, OSError, RuntimeError, ImportError) as error:
+            if renderer is not None and renderer is not self.live2d_renderer:
+                renderer.close()
             self.panel.character_note.setText('角色加载失败，保留当前角色：' + str(error))
             self.panel.appearance.blockSignals(True)
             self.panel.appearance.setCurrentIndex(self.panel.appearance.findData(getattr(self, 'variant', 'refined')))
             self.panel.appearance.blockSignals(False)
             return False
+        if self.live2d_renderer is not None and renderer is not self.live2d_renderer:
+            self.live2d_renderer.close()
+        self.live2d_renderer = renderer
+        self.live2d_frame_key = None
+        self.live2d_pixmap = None
         self.character_pack, self.frames, self.variant = pack, frames, variant
         self.character_name = pack.name if pack else '洛天依'
         self.anchors = dict(pack.anchors) if pack else dict(DEFAULT_ANCHORS)
@@ -395,7 +423,7 @@ class DesktopPet(QWidget):
         self.prepare_frames()
         update_cover(self.panel, filename, self.sprite)
         self.panel.settings.setValue('character_selection', variant)
-        if pack is None:
+        if pack is None and variant != 'live2d':
             self.panel.settings.setValue('visual_variant', variant)
         self.panel.settings.sync()
         self.panel.appearance.blockSignals(True)
@@ -403,9 +431,12 @@ class DesktopPet(QWidget):
             self.panel.appearance.addItem(self.character_name + ' · 自定义', variant)
         self.panel.appearance.setCurrentIndex(self.panel.appearance.findData(variant))
         self.panel.appearance.blockSignals(False)
+        self.panel.pointer_toggle.setEnabled(renderer is not None)
+        self.panel.interactions_toggle.setEnabled(renderer is not None)
         self.panel.character_note.setText(
             f'当前：{pack.name}；作者：{pack.author or "未填写"}。来源与授权：{pack.source or "请自行确认"}'
-            if pack else '当前使用内置洛天依。添加角色后点击“刷新角色”。')
+            if pack else '当前使用 Live2D 洛天依；睡姿按头部尺度放大，拖动后恢复原状态。'
+            if renderer else '当前使用内置洛天依。添加角色后点击“刷新角色”。')
         self.setWindowTitle(self.character_name + ' · 桌宠')
         self.panel.setWindowTitle(self.character_name + ' · 歌单与设置')
         if hasattr(self, 'tray'):
@@ -424,8 +455,8 @@ class DesktopPet(QWidget):
         choice = self.panel.appearance
         choice.blockSignals(True)
         choice.clear()
-        choice.addItem('精致 Q 版 · 经典 V3', 'refined')
-        choice.addItem('圆润 Q 版 · 经典 V3', 'simple')
+        for caption, variant in BUILTIN_APPEARANCES:
+            choice.addItem(caption, variant)
         for selection, pack in packs.items():
             choice.addItem(pack.name + ' · ' + pack.root.name, selection)
         if choice.findData(self.variant) < 0:
@@ -465,6 +496,71 @@ class DesktopPet(QWidget):
             self.move(dock_position(self.pos(), self.size(), self.screen_bounds(), self.dock_edge))
             self.save_position()
         self.update()
+
+    def close_live2d(self):
+        if self.live2d_renderer is not None:
+            self.live2d_renderer.close()
+            self.live2d_renderer = None
+
+    def update_live2d_geometry(self, activity):
+        # The same-sized person lying down needs a wider window, not a smaller head.
+        base_width = 400 if activity == 'sleep' else 320 if activity == 'phone' else 260
+        width, height = round(base_width * self.scale), round(310 * self.scale)
+        if self.size().width() == width and self.height() == height:
+            return
+        previous_position = self.pos()
+        center, bottom = self.x() + self.width() / 2, self.y() + self.height()
+        self.resize(width, height)
+        self.move(clamp_position(QPoint(round(center - width / 2), bottom - height),
+                                 self.size(), self.screen_bounds()))
+        if self.dock_edge:
+            self.move(dock_position(self.pos(), self.size(), self.screen_bounds(), self.dock_edge))
+        if self.dragging and self.drag_offset is not None:
+            self.drag_offset += previous_position - self.pos()
+            self.drag_anchor += QPointF(previous_position - self.pos())
+
+    def interaction_transform(self, activity):
+        transform = QTransform()
+        if activity not in ('lift', 'land') or self.dock_edge:
+            return transform
+        anchor = self.drag_anchor if activity == 'lift' else QPointF(self.width() / 2, 280 * self.scale)
+        angle, sx, sy = interaction_pose(activity, self.behavior.activity_elapsed, self.drag_sway.angle)
+        transform.translate(anchor.x(), anchor.y())
+        transform.rotate(angle)
+        transform.scale(sx, sy)
+        transform.translate(-anchor.x(), -anchor.y())
+        return transform
+
+    def paint_live2d(self, painter, activity):
+        from live2d_renderer import POSE_SCALE
+        elapsed = self.behavior.activity_elapsed
+        key = (activity, round(elapsed * 30), *(round(v, 3) for v in self.live2d_renderer.pointer))
+        try:
+            if self.live2d_frame_key != key:
+                image = self.live2d_renderer.frame(activity, elapsed)
+                self.live2d_pixmap = QPixmap.fromImage(image)
+                self.live2d_frame_key = key
+            pixmap = self.live2d_pixmap
+        except Exception as error:
+            self.panel.character_note.setText('Live2D 渲染失败，已恢复精致版：' + str(error))
+            QTimer.singleShot(0, lambda: self.set_variant('refined'))
+            return
+        transform = QTransform()
+        transform.translate(self.width() / 2, 280 * self.scale)
+        factor = .5 * self.scale * POSE_SCALE.get(activity, 1)
+        transform.scale(factor, factor)
+        transform.translate(-192, -560)
+        if activity not in ('sleep', 'phone'):
+            transform *= self.dock_transform()
+        transform *= self.interaction_transform(activity)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.setTransform(transform)
+        painter.drawPixmap(0, 0, pixmap)
+        painter.resetTransform()
+        self.hit_region = transform.map(QRegion(pixmap.mask())).intersected(QRegion(self.rect()))
+        head = (QRect(42, 405, 118, 140) if activity == 'sleep' else
+                QRect(13, 384, 166, 163) if activity == 'phone' else QRect(75, 15, 230, 220))
+        self.head_region = transform.map(QRegion(head, QRegion.RegionType.Ellipse))
 
     def prepare_frames(self):
         max_width, max_height = 236 * self.scale, 270 * self.scale
@@ -541,6 +637,8 @@ class DesktopPet(QWidget):
         super().leaveEvent(event)
 
     def character_head(self):
+        if self.live2d_renderer is not None:
+            return QPointF(self.width() / 2, 82 * self.scale)
         image = self.scaled_frames.get('idle')
         if self.character_pack and image is not None:
             return QPointF(self.width() / 2 + (self.anchors['head'][0] - self.anchors['feet'][0]) * image.width(),
@@ -679,6 +777,10 @@ class DesktopPet(QWidget):
             self.move(clamp_position(desired, self.size(), self.screen_bounds()))
             self.drag_offset = self.press_point - self.pos()
         self.behavior.begin_drag()
+        self.drag_anchor = QPointF(self.press_point - self.pos())
+        self.drag_sample_point = QPoint(self.press_point)
+        self.drag_sample_time = time.monotonic()
+        self.drag_sway.start()
         self.toolbar.hide()
         self.bubble.hide()
         self.setCursor(Qt.CursorShape.ClosedHandCursor)
@@ -695,8 +797,46 @@ class DesktopPet(QWidget):
                 not self.fold_timer.isActive()):
             self.fold_timer.start(900)
         self.phase = now
+        self.drag_sway.step(delta)
         self.behavior.tick(delta)
+        if self.live2d_renderer is not None:
+            activity = 'idle' if self.drag_dock_edge else self.behavior.activity
+            self.update_live2d_geometry(activity)
+            global_pointer = QCursor.pos()
+            pointer = self.mapFromGlobal(global_pointer)
+            head = self.character_head()
+            enabled = (self.panel.pointer_toggle.isChecked() and not self.dragging
+                       and not self.dock_edge and self.press_point is None
+                       and not self.panel.isVisible() and not self.toolbar.isVisible()
+                       and activity not in ('sleep', 'phone', 'lift', 'land'))
+            self.live2d_renderer.pointer = self.pointer_follow.step(
+                pointer.x()-head.x(), pointer.y()-head.y(), delta,
+                enabled=enabled, scale=self.scale)
+            local = pointer
+            in_head = self.head_region.contains(local)
+            # The free singing hand is extended; natural hands are lower. Keep
+            # the dwell target with the visible pose rather than over a thigh.
+            hands = (((self.width()/2-62*self.scale, 185*self.scale),)
+                     if activity in ('sing', 'turn') else
+                     tuple((self.width()/2+side*46*self.scale, 213*self.scale)
+                           for side in (-1, 1)))
+            near_hand = any(math.hypot(local.x()-x, local.y()-y) < 27*self.scale
+                            for x, y in hands) and not in_head
+            reaction = self.mouse_interactions.step(
+                global_pointer.x(), global_pointer.y(), delta,
+                in_head=in_head, near_hand=near_hand, scale=self.scale,
+                enabled=(self.panel.interactions_toggle.isChecked() and not self.mouse_passthrough
+                         and not self.dragging and not self.dock_edge and self.press_point is None
+                         and not self.click_timer.isActive() and not self.hold_timer.isActive()
+                         and not self.behavior.layers and not self.sleeping and not self.using_phone
+                         and not self.panel.isVisible() and not self.toolbar.isVisible()
+                         and not self.hit_region.isEmpty()))
+            if reaction:
+                self.react(reaction, REACTION_SECONDS[reaction])
+        elif self.width() != round(260 * self.scale):
+            self.resize(round(260 * self.scale), round(310 * self.scale))
         self.update()
+        self.effects.sync()
 
     def paintEvent(self, event):
         # Replace the backing buffer, including pixels occupied by the previous pose.
@@ -708,20 +848,23 @@ class DesktopPet(QWidget):
         now = self.phase or time.monotonic()
         elapsed = self.behavior.elapsed
         activity = 'idle' if self.drag_dock_edge else self.behavior.activity
+        if self.live2d_renderer is not None:
+            self.paint_live2d(painter, activity)
+            painter.end()
+            return
         state = 'idle'
         angle, y, sx, sy = 0.0, 0.0, 1.0, 1.0
         if activity == 'lift':
-            state, angle, y = 'lift', math.sin(elapsed * 5) * 5, -5
+            state = 'lift'
         elif activity == 'eat':
             state, y = 'eat', math.sin(elapsed * 13) * 1.5
             sx = 1 + math.sin(elapsed * 13) * 0.008
-        elif activity in ('happy', 'poke'):
-            state = 'happy' if activity == 'happy' else 'lift'
+        elif activity in ('happy', 'poke', 'head_rub', 'mouse_wave'):
+            state = 'lift' if activity == 'poke' else 'happy'
             angle = math.sin(elapsed * 11) * (2 if activity == 'happy' else 4)
             y = -abs(math.sin(elapsed * 7)) * 7
         elif activity == 'land':
-            sy = 1 - max(0, 1 - elapsed / 0.6) * math.sin(elapsed * 14) * 0.10
-            sx = 2 - sy
+            pass  # Shared pickup/drop transform below also covers PNG models.
         elif activity == 'sleep':
             state = 'sleep' if 'sleep' in self.scaled_frames else 'blink'
             sy = 1 + math.sin(now * 1.5) * 0.008
@@ -753,6 +896,7 @@ class DesktopPet(QWidget):
         resting = key in ('sleep', 'phone')
         if not resting:
             transform *= self.dock_transform()
+        transform *= self.interaction_transform(activity)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setTransform(transform)
@@ -783,39 +927,6 @@ class DesktopPet(QWidget):
             head_box = QRect(round((head_x - .24) * image.width()), round((head_y - .2) * image.height()),
                              round(.48 * image.width()), round(.4 * image.height()))
             self.head_region = transform.map(QRegion(head_box, QRegion.RegionType.Ellipse))
-        if (not self.dock_edge or self.dock_reveal > 0.95) and activity in ('happy', 'sing', 'turn', 'sleep'):
-            color = QColor('#C87991') if activity == 'happy' else QColor('#69A3BA')
-            for i in range(3):
-                phase = (now * 0.8 + i / 3) % 1
-                x = (35 + i * 76 + math.sin(now + i) * 6) * scale
-                y = ((190 if resting else 120) - phase * 60) * scale
-                painter.setOpacity((1 - phase) * 0.9)
-                painter.save()
-                painter.translate(x, y)
-                painter.scale(scale * 0.65, scale * 0.65)
-                path = QPainterPath()
-                if activity == 'happy':
-                    path.moveTo(0, -4)
-                    path.cubicTo(-11, -15, -17, 0, 0, 11)
-                    path.cubicTo(17, 0, 11, -15, 0, -4)
-                    painter.setPen(Qt.PenStyle.NoPen)
-                    painter.setBrush(color)
-                    painter.drawPath(path)
-                elif activity == 'sleep':
-                    path.moveTo(0, -9)
-                    path.lineTo(10, -9)
-                    path.lineTo(0, 0)
-                    path.lineTo(10, 0)
-                    painter.setPen(QPen(color, 2))
-                    painter.drawPath(path)
-                else:
-                    painter.setPen(QPen(color, 2))
-                    painter.drawLine(4, 3, 4, -12)
-                    painter.drawLine(4, -12, 11, -8)
-                    painter.setBrush(color)
-                    painter.drawEllipse(-3, 0, 7, 5)
-                painter.restore()
-                mask = mask.united(QRegion(round(x) - 16, round(y) - 18, 32, 34))
         painter.end()
         self.hit_region = mask.intersected(QRegion(self.rect()))
         # Windows' layered window uses the rendered alpha for click-through.
@@ -835,7 +946,7 @@ class DesktopPet(QWidget):
             self.press_point = event.globalPosition().toPoint()
             self.drag_offset = self.press_point - self.pos()
             self.touch_head = (bool(self.dock_edge and self.dock_reveal < 0.9) or
-                               (self.head_region.contains(event.position().toPoint()) if self.character_pack
+                               (self.head_region.contains(event.position().toPoint()) if self.character_pack or self.live2d_renderer
                                 else event.position().y() < self.height() * 0.57))
             if not self.dock_press:
                 self.hold_timer.start(280)
@@ -850,6 +961,11 @@ class DesktopPet(QWidget):
             self.drag_to(point)
 
     def drag_to(self, point):
+        now = time.monotonic()
+        if self.drag_sample_point is not None:
+            self.drag_sway.move(point.x() - self.drag_sample_point.x(),
+                                now - self.drag_sample_time, self.scale)
+        self.drag_sample_point, self.drag_sample_time = QPoint(point), now
         desired = point - self.drag_offset
         if self.drag_dock_edge:
             bounds = self.screen_bounds()
@@ -887,6 +1003,7 @@ class DesktopPet(QWidget):
             return
         if self.dragging:
             self.dragging = False
+            self.drag_sway.release()
             if self.drag_dock_edge:
                 self.drag_dock_edge = ''
                 self.behavior.end_drag(landing=False)
@@ -918,4 +1035,21 @@ class DesktopPet(QWidget):
     def hideEvent(self, event):
         self.toolbar.hide()
         self.bubble.hide()
+        if hasattr(self, 'effects'):
+            self.effects.hide()
         super().hideEvent(event)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if hasattr(self, 'effects'):
+            self.effects.sync()
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        if hasattr(self, 'effects'):
+            self.effects.sync()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'effects'):
+            self.effects.sync()

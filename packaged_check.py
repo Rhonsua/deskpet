@@ -9,17 +9,20 @@ import wave
 
 
 def run():
-    os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+    native = '--native-live2d' in sys.argv
+    if not native:
+        os.environ['QT_QPA_PLATFORM'] = 'offscreen'
     from PySide6.QtCore import QSettings, QUrl
     from PySide6.QtWidgets import QApplication
     from main import Pet
-    report = Path(sys.argv[sys.argv.index('--report') + 1])
+    report = Path(sys.argv[sys.argv.index('--report') + 1]).resolve()
+    report.parent.mkdir(parents=True, exist_ok=True)
     result = {'ok': False}
     app = QApplication([])
     class NoStartup:
         supported = False
         def enabled(self): return False
-    with tempfile.TemporaryDirectory(prefix='tianyi-packaged-', ignore_cleanup_errors=True) as scratch:
+    with tempfile.TemporaryDirectory(prefix='tianyi-packaged-', dir=report.parent, ignore_cleanup_errors=True) as scratch:
         os.environ['LOCALAPPDATA'] = scratch
         pet = None
         try:
@@ -27,6 +30,17 @@ def run():
                       settings=QSettings(str(Path(scratch) / 'test.ini'), QSettings.Format.IniFormat))
             assert len(pet.frames) == 10
             pet.grab()
+            if native:
+                assert pet.variant == 'live2d' and pet.live2d_renderer is not None, pet.panel.character_note.text()
+                for activity in ('idle', 'sing', 'sleep', 'phone', 'mouse_wave'):
+                    frame = pet.live2d_renderer.frame(activity, 1.0)
+                    assert not frame.isNull() and frame.hasAlphaChannel(), activity
+                    assert any(frame.pixelColor(x, y).alpha() > 100
+                               for x in range(0, frame.width(), 8)
+                               for y in range(0, frame.height(), 8)), activity
+                assert pet.set_variant('refined') and pet.live2d_renderer is None
+                assert pet.set_variant('live2d') and pet.live2d_renderer is not None
+                result['live2d'] = True
             song = Path(scratch) / 'test.wav'
             with wave.open(str(song), 'wb') as file:
                 file.setparams((1, 2, 8000, 0, 'NONE', 'not compressed'))
@@ -68,4 +82,5 @@ def run():
                 pet.panel.store.close()
                 pet.tray.hide()
                 pet.hide()
+                pet.close_live2d()
             report.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
