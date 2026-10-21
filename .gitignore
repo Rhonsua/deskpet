@@ -30,3 +30,20 @@ characters/example/*
 *.moc3
 *.psd
 *.psb
+local-work/
+
+# Local Cubism editing notes and user feedback stay with the model projects.
+docs/Cubism操作说明.md
+docs/Live2D动作与互动增强.md
+docs/Live2D唱歌动作增强方案.md
+docs/Live2D接入进度.md
+docs/Live2D模型问题清单.md
+docs/现有桌宠与Live2D动作对照.md
+
+# Exported model descriptors and motions are model assets too.
+*.model3.json
+*.motion3.json
+*.pose3.json
+*.physics3.json
+*.cdi3.json
+*.exp3.json

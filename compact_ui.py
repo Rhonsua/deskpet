@@ -7,30 +7,30 @@ from PySide6.QtWidgets import (
 )
 from music_library import MODES
 from pet_store import FOODS
-from ui_theme import CONTROL_STYLE, style_combo
+from ui_theme import CONTROL_STYLE, style_combo, apply_light_palette
 from bilibili_player import BilibiliPlayer
 from visual_style import BUILTIN_APPEARANCES, preferred_variant
 
 
 COMPACT_STYLE = """
-QWidget { font-family: 'Microsoft YaHei UI'; font-size: 12px; color: #394C5B; }
-QWidget#PetTools { background: #FAFCFD; }
-QDialog { background: #FAFCFD; }
+QWidget { font-family: 'Microsoft YaHei UI'; font-size: 12px; color: #000000; background: #FFFFFF; }
+QWidget#PetTools { background: #FFFFFF; }
+QDialog { background: #FFFFFF; }
 QLabel { background: transparent; }
-QLabel#Muted { color: #83929D; font-size: 11px; }
-QLabel#Song { font-weight: 600; color: #315D72; font-size: 14px; }
+QLabel#Muted { color: #000000; font-size: 11px; }
+QLabel#Song { font-weight: 600; color: #000000; font-size: 14px; }
 QPushButton { border: 1px solid #D9E4EA; background: #FFFFFF; padding: 6px 10px; border-radius: 4px; }
-QPushButton:hover { background: #E9F4F7; border-color: #9FC7D4; }
-QPushButton#Play { background: #5E9FB2; color: white; border-color: #5E9FB2; min-width: 50px; }
+QPushButton:hover { background: #FFFFFF; border-color: #000000; }
+QPushButton#Play { background: #FFFFFF; color: #000000; border-color: #5E9FB2; min-width: 50px; }
 QComboBox, QLineEdit { border: 1px solid #D9E4EA; border-radius: 4px; background: white; padding: 5px 7px; }
 QComboBox::drop-down { border: none; width: 16px; }
 QListWidget { border: 1px solid #E0E8ED; border-radius: 4px; background: white; outline: none; }
 QListWidget::item { padding: 9px; }
-QListWidget::item:selected { color: #346B7C; background: #E1F1F5; }
-QListWidget::item:hover { background: #F1F7F9; }
+QListWidget::item:selected { color: #000000; background: #FFFFFF; border: 1px solid #000000; }
+QListWidget::item:hover { background: #FFFFFF; }
 QTabWidget::pane { border: none; }
-QTabBar::tab { background: transparent; color: #86969F; padding: 8px 17px; border-bottom: 2px solid transparent; }
-QTabBar::tab:selected { color: #3A7D90; border-bottom-color: #70AAB9; }
+QTabBar::tab { background: #FFFFFF; color: #000000; padding: 8px 17px; border-bottom: 2px solid transparent; }
+QTabBar::tab:selected { color: #000000; font-weight: 600; border-bottom-color: #000000; }
 QSlider::groove:horizontal { background: #E4EBEF; height: 3px; }
 QSlider::sub-page:horizontal { background: #7AACBA; }
 QSlider::handle:horizontal { background: #6A9FAF; width: 9px; margin: -3px 0; border-radius: 4px; }
@@ -58,6 +58,7 @@ def build(panel):
     panel.setObjectName('PetTools')
     panel.setWindowTitle('天依 · 歌单与设置')
     panel.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
+    apply_light_palette(panel)
     panel.setStyleSheet(COMPACT_STYLE)
     panel.resize(400, 520)
     panel.setMinimumSize(370, 460)

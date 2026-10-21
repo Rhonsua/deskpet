@@ -141,9 +141,10 @@ with tempfile.TemporaryDirectory() as scratch:
         for combo in (pet.panel.appearance, pet.panel.mode_choice, pet.panel.playlist_choice,
                       pet.panel.output_choice):
             palette = combo.view().palette()
-            assert palette.color(QPalette.ColorRole.Text).name() == '#263e4d'
+            assert palette.color(QPalette.ColorRole.Text).name() == '#000000'
             assert palette.color(QPalette.ColorRole.Base).name() == '#ffffff'
-            assert palette.color(QPalette.ColorRole.HighlightedText).name() == '#ffffff'
+            assert palette.color(QPalette.ColorRole.HighlightedText).name() == '#000000'
+            assert palette.color(QPalette.ColorRole.Highlight).name() == '#ffffff'
         pet.panel.appearance.view().grab().save(str(output / 'dropdown-dark-theme.png'))
         pet.panel.appearance.hidePopup()
         print('PASS: four-edge peek/reveal, held push/pull docking, scale, restore, detach, clean redraw and dark-theme dropdowns')

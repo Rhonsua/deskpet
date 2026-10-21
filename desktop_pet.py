@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 from pet_store import FOODS
 from visual_style import (sprite_bounds, update_cover, preferred_variant,
                           APPEARANCE_REVISION, BUILTIN_APPEARANCES)
-from ui_theme import CONTROL_STYLE
+from ui_theme import CONTROL_STYLE, apply_light_palette
 from edge_docking import EDGES, clamp_position, dock_position, nearest_edge, edge_gap, pushed_edge
 from pet_behavior import MODES, PetBehavior
 from singing_motion import SingingRig, singing_pose
@@ -26,13 +26,13 @@ from character_packs import (builtin_sources, STATES, DEFAULT_ANCHORS, read_pack
 
 
 POPUP_STYLE = """
-QFrame#PetPopup { background: #FCFEFF; border: 1px solid #AFC8D3; border-radius: 6px; }
-QWidget { font-family: 'Microsoft YaHei UI'; font-size: 12px; color: #3C5564; }
+QFrame#PetPopup { background: #FFFFFF; border: 1px solid #AFC8D3; border-radius: 6px; }
+QWidget { font-family: 'Microsoft YaHei UI'; font-size: 12px; color: #000000; background: #FFFFFF; }
 QLabel { background: transparent; border: none; }
-QLabel#Muted { color: #869CA7; font-size: 11px; }
+QLabel#Muted { color: #000000; font-size: 11px; }
 QPushButton { background: #FFFFFF; border: 1px solid #D9E5EA; padding: 6px 9px; border-radius: 4px; }
-QPushButton:hover { background: #E1F0F5; border-color: #89B8C9; }
-QPushButton:checked { background: #D9EDF3; color: #36788E; }
+QPushButton:hover { background: #FFFFFF; border-color: #000000; }
+QPushButton:checked { background: #FFFFFF; color: #000000; border-color: #000000; }
 QProgressBar { background: #E7F0F4; border: none; border-radius: 3px; }
 QProgressBar::chunk { background: #79AEBE; border-radius: 3px; }
 QSlider::groove:horizontal { height: 3px; background: #E1EBF0; }
@@ -59,6 +59,7 @@ class Bubble(QFrame):
                          Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.WindowDoesNotAcceptFocus)
         self.pet = pet
         self.setObjectName('PetPopup')
+        apply_light_palette(self)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setStyleSheet(POPUP_STYLE)
         layout = QVBoxLayout(self)
@@ -85,6 +86,7 @@ class PetToolbar(QFrame):
                          Qt.WindowType.WindowStaysOnTopHint)
         self.pet = pet
         self.setObjectName('PetPopup')
+        apply_light_palette(self)
         self.setStyleSheet(POPUP_STYLE)
         self.setFixedWidth(336)
         outer = QVBoxLayout(self)
@@ -94,7 +96,7 @@ class PetToolbar(QFrame):
         self.name = QLabel('洛天依')
         self.name.setTextFormat(Qt.TextFormat.PlainText)
         self.name.setWordWrap(True)
-        self.name.setStyleSheet('font-weight: 600; color: #3C7A92;')
+        self.name.setStyleSheet('font-weight: 600; color: #000000;')
         title.addWidget(self.name)
         title.addStretch()
         close = QPushButton('收起')
