@@ -4,6 +4,11 @@ import subprocess
 import shutil
 import hashlib
 import zipfile
+import argparse
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--portable', action='store_true', help='另外输出免安装 ZIP')
+args = parser.parse_args()
 
 root = Path(__file__).resolve().parents[1]
 stage = root / 'build' / 'installer-stage'
@@ -14,14 +19,16 @@ if not (bundle / 'TianyiPet.exe').is_file():
 with zipfile.ZipFile(stage / 'payload.zip', 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
     for path in bundle.rglob('*'):
         if path.is_file(): archive.write(path, path.relative_to(bundle))
-portable = root / 'dist' / 'TianyiPet-0.3.0-portable.zip'
-shutil.copyfile(stage / 'payload.zip', portable)
+portable = root / 'dist' / 'TianyiPet-0.4.0-portable.zip'
+if args.portable:
+    shutil.copyfile(stage / 'payload.zip', portable)
 compiler = Path('C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe')
 subprocess.run([str(compiler), '/nologo', '/target:winexe', '/platform:x64',
+                '/win32icon:' + str(root / 'assets' / 'icons' / 'tianyi.ico'),
                 '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll',
                 '/reference:System.IO.Compression.dll', '/reference:System.IO.Compression.FileSystem.dll',
                 '/out:' + str(stage / 'Setup.exe'), str(root / 'packaging' / 'Setup.cs')], check=True)
-output = root / 'dist' / 'TianyiPet-0.3.0-Setup.exe'
+output = root / 'dist' / 'TianyiPet-0.4.0-Setup.exe'
 sed = stage / 'package.sed'
 sed.write_text('''[Version]
 Class=IEXPRESS
@@ -58,5 +65,5 @@ subprocess.run(['C:/Windows/System32/iexpress.exe', '/N', '/Q', str(sed)], check
 if not output.is_file(): raise SystemExit('IExpress 未生成安装包，请检查 build/installer-stage')
 print(output)
 with (root / 'dist' / 'SHA256SUMS.txt').open('w', encoding='ascii') as checksums:
-    for path in (output, portable):
+    for path in ([output, portable] if args.portable else [output]):
         checksums.write(hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n')

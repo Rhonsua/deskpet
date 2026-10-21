@@ -29,6 +29,7 @@ from windows_startup import WindowsStartup
 from audio_routing import device_id
 from remote_audio import AudioEngine
 from character_packs import character_directory
+from app_icon import application_icon
 
 
 class MusicPanel(QWidget):
@@ -571,6 +572,7 @@ def main():
     app = QApplication(sys.argv)
     app.setFont(QFont("Microsoft YaHei UI", 9))
     app.setApplicationName("TianyiPet")
+    app.setWindowIcon(application_icon())
     app.setOrganizationName("TianyiPet")
     data_dir = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation))
     data_dir.mkdir(parents=True, exist_ok=True)

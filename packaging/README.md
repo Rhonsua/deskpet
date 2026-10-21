@@ -1,6 +1,6 @@
 # Windows 试用安装包
 
-安装包版本为 0.3.0，默认使用 Live2D 洛天依，包含静态切换、自定义 PNG 角色接口、弹性拖拽、鼠标互动与背景效果，面向 Windows 10 / 11 x64。包含 Python、Qt、Live2D 运行依赖、当前洛天依模型与内置静态角色图片、本地音频辅助程序及 B站网页辅助程序，无需用户安装 Python。B站仍需系统安装 Microsoft Edge WebView2 Runtime；网页登录、验证码与网站播放限制由用户在网页处理。
+安装包版本为 0.4.0，默认使用 Live2D 洛天依，包含静态切换、自定义 PNG 角色接口、弹性拖拽、鼠标互动与背景效果，以及可选 API 文字聊天、洛天依人格插件、本地陪伴任务限制和头像图标，面向 Windows 10 / 11 x64。包含 Python、Qt、Live2D 运行依赖、当前洛天依模型与内置静态角色图片、本地音频辅助程序及 B站网页辅助程序，无需用户安装 Python。B站仍需系统安装 Microsoft Edge WebView2 Runtime；网页登录、验证码与网站播放限制由用户在网页处理。
 
 默认安装到当前用户的 `%LOCALAPPDATA%\Programs\TianyiPet`，无需管理员权限，可选桌面快捷方式，并添加开始菜单及 Windows 卸载入口。关闭旧桌宠后再安装。开机自启仍在桌宠设置中由用户选择。
 
@@ -23,9 +23,10 @@
 
 输出文件：
 
-- `dist/TianyiPet-0.3.0-Setup.exe`：有安装进度、位置选择、快捷方式和卸载入口。
-- `dist/TianyiPet-0.3.0-portable.zip`：解压后运行 `TianyiPet.exe`，保持辅助程序及 `_internal` 目录完整。
-- `dist/SHA256SUMS.txt`：这两个文件的 SHA-256。
+- `dist/TianyiPet-0.4.0-Setup.exe`：新版，有安装进度、位置选择、快捷方式和卸载入口。
+- `dist/TianyiPet-0.3.0-Setup.exe`：仅保留这一份旧版安装包，便于回退。
+- 默认不另外生成免安装 ZIP；确有需要时使用 `packaging/build_installer.py --portable`。
+- `dist/SHA256SUMS.txt`：本次生成安装包的 SHA-256（使用 `--portable` 时另含 ZIP）。
 - `dist/TEST-REPORT.json`：本机安装、启动和卸载检查结果。
 
-`build/` 和 `dist/` 不提交到 Git。需要分享时单独发送安装包，本次不上传 GitHub，也不自动发布安装文件。安装包仅包含洛天依，明确排除自定义角色包和历史模型工程。
+`build/` 和 `dist/` 不提交到 Git。需要分享时单独发送安装包，本次不上传 GitHub，也不自动发布安装文件。安装包仅包含洛天依，明确排除 Miku 素材、Miku 专用人格、自定义角色包和历史模型工程；保留通用角色及人格模板。用户本地已有的 Miku 目录不会因构建而删除。

@@ -79,7 +79,7 @@ class Setup {
         if (!test) {
             using (RegistryKey key = Registry.CurrentUser.CreateSubKey(Key)) {
                 key.SetValue("DisplayName", "洛天依桌宠");
-                key.SetValue("DisplayVersion", "0.3.0");
+                key.SetValue("DisplayVersion", "0.4.0");
                 key.SetValue("InstallLocation", root);
                 key.SetValue("DisplayIcon", Path.Combine(root, "TianyiPet.exe"));
                 key.SetValue("UninstallString", "\"" + Path.Combine(root, "TianyiSetup.exe") + "\" --uninstall --dir \"" + root + "\"");

@@ -196,6 +196,7 @@ def build(panel):
     panel.effects_toggle.setChecked(panel.settings.value('background_effects', True, type=bool))
     panel.effects_toggle.toggled.connect(lambda enabled: panel.settings.setValue('background_effects', enabled))
     settings.addWidget(panel.effects_toggle)
+    settings.addWidget(action('聊天与人设 / API 设置', lambda: panel.pet.open_chat(settings=True)))
     settings.addWidget(text('角色外观'))
     panel.appearance = QComboBox()
     style_combo(panel.appearance)

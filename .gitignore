@@ -13,11 +13,19 @@ assets/references/
 用户提供的素材/
 .env
 .env.*
+# Chat configuration belongs in local app data, never in a published checkout.
+**/chat/config.json
+**/chat/config-*.tmp
 *.db-wal
 *.db-shm
 
 # Local character art, model projects and redistribution packages stay private.
 assets/live2d/
+assets/icons/*.png
+assets/icons/*.ico
+# New character artwork is local; previously tracked files are unchanged.
+assets/character/**/*.png
+assets/character/*.png
 experiments/
 character-packages/
 docs/model-issues/
@@ -26,6 +34,7 @@ characters/*
 !characters/example/
 characters/example/*
 !characters/example/character.json.example
+!characters/example/personality.json.example
 *.cmo3
 *.moc3
 *.psd

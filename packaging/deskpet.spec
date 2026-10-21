@@ -12,8 +12,11 @@ datas += [(str(root / 'bilibili_probe.js'), '.'), (str(root / 'bilibili_early.js
           (str(root / 'LICENSE'), '.'), (str(root / 'README.md'), '.'),
           (str(root / 'assets' / 'README.md'), 'assets'),
           (str(root / 'characters' / 'README.md'), 'characters'),
-          (str(root / 'characters' / 'example' / 'character.json.example'), 'characters/example')]
+          (str(root / 'characters' / 'example' / 'character.json.example'), 'characters/example'),
+          (str(root / 'characters' / 'example' / 'personality.json.example'), 'characters/example')]
 datas += collect_data_files('webview')
+datas.append((str(root / 'assets' / 'icons' / 'tianyi.ico'), 'assets/icons'))
+datas.append((str(root / 'pet_chat' / 'personas' / 'luotianyi.json'), 'pet_chat/personas'))
 # Bundle exactly the active Tianyi export, never user character directories or
 # older model exports. An incomplete local export must fail the build.
 model_root = root / 'assets' / 'live2d' / 'tianyi'
@@ -45,6 +48,7 @@ a = Analysis([str(root / 'app_entry.py')], pathex=[str(root)], datas=datas, bina
                        'webview.platforms.cocoa', 'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets',
                        'tkinter', 'pytest'], noarchive=False)
 pyz = PYZ(a.pure)
-gui = EXE(pyz, a.scripts, [], exclude_binaries=True, name='TianyiPet', console=False)
+gui = EXE(pyz, a.scripts, [], exclude_binaries=True, name='TianyiPet', console=False,
+          icon=str(root / 'assets' / 'icons' / 'tianyi.ico'))
 worker = EXE(pyz, a.scripts, [], exclude_binaries=True, name='TianyiWorker', console=True)
 bundle = COLLECT(gui, worker, a.binaries, a.datas, name='TianyiPet')

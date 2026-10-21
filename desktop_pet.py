@@ -1,19 +1,21 @@
 """Character-first desktop interactions, local dialogue, state animation and a small toolbar."""
 import math
 import random
+import sqlite3
 import time
 
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QPainter, QPixmap, QRegion, QTransform, QPen, QDesktopServices, QCursor
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
-    QProgressBar, QSlider, QStyle, QSystemTrayIcon, QVBoxLayout, QWidget, QCheckBox,
+    QProgressBar, QSlider, QSystemTrayIcon, QVBoxLayout, QWidget, QCheckBox,
 )
 
 from pet_store import FOODS
 from visual_style import (sprite_bounds, update_cover, preferred_variant,
                           APPEARANCE_REVISION, BUILTIN_APPEARANCES)
 from ui_theme import CONTROL_STYLE, apply_light_palette
+from app_icon import application_icon
 from edge_docking import EDGES, clamp_position, dock_position, nearest_edge, edge_gap, pushed_edge
 from pet_behavior import MODES, PetBehavior
 from singing_motion import SingingRig, singing_pose
@@ -65,6 +67,7 @@ class Bubble(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 10, 14, 10)
         self.label = QLabel()
+        self.label.setTextFormat(Qt.TextFormat.PlainText)
         self.label.setWordWrap(True)
         self.label.setMaximumWidth(220)
         layout.addWidget(self.label)
@@ -194,11 +197,13 @@ class PetToolbar(QFrame):
             scale.valueChanged.connect(lambda value: self.pet.set_scale(value / 100))
             self.content.addWidget(scale)
             self.add_button('更多设置', lambda: self.pet.open_tools(2))
+            self.add_button('聊天 API 设置', lambda: self.pet.open_chat(settings=True))
         else:
             hint = QLabel('点头部摸摸 · 拖动提起 · 双击/右键菜单')
             hint.setObjectName('Muted')
             self.content.addWidget(hint)
             self.add_button('一起加油吧', lambda: self.pet.reply())
+            self.add_button('和我聊天', self.pet.open_chat)
         self.refresh()
         self.adjustSize()
         if self.isVisible():
@@ -245,6 +250,7 @@ class DesktopPet(QWidget):
     def __init__(self, panel_factory):
         super().__init__()
         self.setWindowTitle('洛天依桌宠')
+        self.setWindowIcon(application_icon())
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
@@ -309,12 +315,13 @@ class DesktopPet(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.animate)
         self.timer.start(33)
-        self.tray = QSystemTrayIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_MediaVolume), self)
+        self.tray = QSystemTrayIcon(self.windowIcon(), self)
         menu = QMenu()
         menu.setStyleSheet(CONTROL_STYLE)
         menu.addAction('显示桌宠', self.restore)
         menu.addAction('互动菜单', self.toolbar.toggle)
         menu.addAction('歌单', lambda: self.open_tools(0))
+        menu.addAction('聊天', self.open_chat)
         menu.addAction('设置', lambda: self.open_tools(2))
         menu.addAction('显示 B站播放网页', lambda: self.panel.bilibili.send({'cmd': 'show'})
                        if self.panel.bilibili.active else self.open_tools(3))
@@ -444,6 +451,8 @@ class DesktopPet(QWidget):
         if hasattr(self, 'tray'):
             self.tray.setToolTip(self.character_name + (' · 鼠标穿透中，右键托盘可关闭' if self.mouse_passthrough else ' · 右键打开菜单'))
         self.toolbar.refresh()
+        if getattr(self, 'chat_window', None) is not None:
+            self.chat_window.sync_character()
         self.head_region = self.hit_region = QRegion()
         self.update()
         return True
@@ -622,6 +631,8 @@ class DesktopPet(QWidget):
         self.dock_target = 1.0
 
     def fold_dock(self):
+        if getattr(self, 'chat_window', None) is not None and self.chat_window.isVisible():
+            return
         if not self.dock_edge or self.dragging:
             return
         if (self.sleeping or self.using_phone or self.press_point is not None or self.toolbar.isVisible() or self.panel.isVisible() or
@@ -709,6 +720,16 @@ class DesktopPet(QWidget):
             self.pat()
         else:
             self.react('poke', 1.0, '欸？是在叫我吗？')
+
+    def open_chat(self, checked=False, settings=False):
+        if getattr(self, 'chat_window', None) is None:
+            from pet_chat.window import ChatWindow
+            try:
+                self.chat_window = ChatWindow(self)
+            except (OSError, sqlite3.Error):
+                self.bubble.say('聊天数据无法打开，请检查磁盘空间和数据目录权限。')
+                return
+        self.chat_window.show_chat(settings=settings)
 
     def reply(self):
         self.toolbar.hide()

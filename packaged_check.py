@@ -41,6 +41,23 @@ def run():
                 assert pet.set_variant('refined') and pet.live2d_renderer is None
                 assert pet.set_variant('live2d') and pet.live2d_renderer is not None
                 result['live2d'] = True
+            # Exercise the installed chat package and resources without any API.
+            pet.open_chat()
+            chat = pet.chat_window
+            assert chat.personality.id == 'luotianyi' and not chat.personality_warning
+            assert chat.client is None
+            pet.set_mode('sleep')
+            chat.input.setPlainText(r'\int_0^5x exp(x^2)dx等于多少')
+            chat.send_message()
+            history = chat.store.history(chat.character)
+            assert len(history) == 2 and '不太会解' in history[-1]['content']
+            assert chat.client is None and pet.behavior.mode == 'sleep'
+            chat.close()
+            from app_icon import application_icon
+            icon = application_icon()
+            assert len(icon.availableSizes()) == 9
+            assert pet.tray.icon().pixmap(32).toImage() == icon.pixmap(32).toImage()
+            result.update(chat=True, local_scope=True, avatar_icon=True)
             song = Path(scratch) / 'test.wav'
             with wave.open(str(song), 'wb') as file:
                 file.setparams((1, 2, 8000, 0, 'NONE', 'not compressed'))
@@ -75,6 +92,8 @@ def run():
             result['traceback'] = traceback.format_exc()
         finally:
             if pet:
+                if getattr(pet, 'chat_window', None):
+                    pet.chat_window.shutdown()
                 pet.panel.bilibili.shutdown()
                 pet.panel.shutdown_audio()
                 pet.timer.stop()
