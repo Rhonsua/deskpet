@@ -5,6 +5,7 @@ from pathlib import Path
 import math
 from singing_choreography import apply_footwork
 from mouse_interactions import apply_mouse_reaction
+from music_tools.clock import apply_music_beat, beat_values
 
 
 class Curve:
@@ -54,7 +55,7 @@ class MotionLibrary:
             return 'Wave'
         return self.mapping['activities'].get(activity, 'Idle')
 
-    def sample(self, activity, seconds):
+    def sample(self, activity, seconds, beat=None):
         elapsed = max(0, seconds)
         group = self.group_for(activity)
         if group not in self.cache:
@@ -82,6 +83,7 @@ class MotionLibrary:
             parameters['ParamBodyAngleX'] = 10 * yaw
             parameters['ParamAngleZ'] *= .65
             parameters['ParamBodyAngleZ'] *= .7
-            parameters = apply_footwork(parameters, elapsed)
+            parameters = (apply_music_beat(parameters, beat) if activity == 'sing' and beat_values(beat)
+                          else apply_footwork(parameters, elapsed))
         parameters = apply_mouse_reaction(parameters, activity, elapsed)
         return parameters, parts

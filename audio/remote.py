@@ -1,5 +1,6 @@
 """Small Qt-compatible proxies for an isolated native audio helper."""
 import json
+import time
 from pathlib import Path
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, QUrl, Signal
 from PySide6.QtMultimedia import QMediaPlayer
@@ -106,6 +107,7 @@ class AudioEngine(QObject):
     def __init__(self, settings, data_dir, parent=None):
         super().__init__(parent)
         self.ready = self.closing = False
+        self.last_report = 0.0
         self.generation = 0
         self.pending, self.buffer = [], ''
         self.player = RemotePlayer(self)
@@ -166,6 +168,7 @@ class AudioEngine(QObject):
         self.buffer = self.buffer[-65536:]
 
     def update(self, value):
+        self.last_report = time.monotonic()
         self.audio.target = Device(value['device'])
         self.router.outputs = [Device(item) for item in value['outputs']]
         self.router.default = Device(value['default'])

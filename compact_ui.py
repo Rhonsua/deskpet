@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QComboBox, QLineEdit, QStackedWidget, QListWidget, QAbstractItemView,
     QProgressBar, QCheckBox, QScrollArea, QFrame,
 )
-from music_library import MODES
+from music_tools.library import MODES
 from pet_store import FOODS
 from ui_theme import CONTROL_STYLE, style_combo, apply_light_palette
 from bilibili_player import BilibiliPlayer
@@ -130,6 +130,11 @@ def build(panel):
     search.addWidget(action('文件夹', panel.add_folder))
     search.addWidget(action('B站', lambda: panel.tabs.setCurrentIndex(3)))
     layout.addLayout(search)
+    extras = QHBoxLayout()
+    extras.addWidget(action('网易云', lambda: panel.pet.open_music_companion(0)))
+    extras.addWidget(action('歌词字幕', lambda: panel.pet.open_music_companion(1)))
+    extras.addWidget(action('节拍跟随', lambda: panel.pet.open_music_companion(2)))
+    layout.addLayout(extras)
     panel.queue_label = text('歌单', True)
     layout.addWidget(panel.queue_label)
     panel.list_stack = QStackedWidget()
@@ -197,6 +202,7 @@ def build(panel):
     panel.effects_toggle.toggled.connect(lambda enabled: panel.settings.setValue('background_effects', enabled))
     settings.addWidget(panel.effects_toggle)
     settings.addWidget(action('聊天与人设 / API 设置', lambda: panel.pet.open_chat(settings=True)))
+    settings.addWidget(action('扩展功能 / Mod', panel.pet.open_mods))
     settings.addWidget(text('角色外观'))
     panel.appearance = QComboBox()
     style_combo(panel.appearance)

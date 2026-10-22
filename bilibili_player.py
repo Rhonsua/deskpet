@@ -9,7 +9,7 @@ from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, Signal, Qt
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                               QLabel, QListWidget, QLineEdit, QComboBox)
 from bilibili_links import video_url, load_web_tracks, EndLatch
-from music_library import PlaybackQueue, MODES
+from music_tools.library import PlaybackQueue, MODES
 from ui_theme import style_combo
 from worker_command import worker_command
 

@@ -24,10 +24,10 @@ def clock(ms):
 from pet_store import PetStore
 from compact_ui import build
 from desktop_pet import DesktopPet
-from music_library import MusicLibrary, PlaybackQueue, MODES
+from music_tools.library import MusicLibrary, PlaybackQueue, MODES
 from windows_startup import WindowsStartup
-from audio_routing import device_id
-from remote_audio import AudioEngine
+from audio.routing import device_id
+from audio.remote import AudioEngine
 from character_packs import character_directory
 from app_icon import application_icon
 
@@ -118,6 +118,11 @@ class MusicPanel(QWidget):
         self.status.setText(message)
 
     def shutdown_audio(self):
+        # This is the terminal shutdown path, shared by app exit and isolated
+        # hosts. Stop audio-dependent timers and close lyric storage as well.
+        companion = getattr(self.pet, 'music_companion', None)
+        if companion is not None:
+            companion.shutdown()
         if self.engine is not None:
             self.engine.shutdown()
 
@@ -150,7 +155,16 @@ class MusicPanel(QWidget):
         path = self._player.source().toLocalFile()
         return str(Path(path).resolve()) if path else ''
 
+    @property
+    def cloud_player(self):
+        return getattr(getattr(self.pet, 'music_companion', None), 'playback', None)
+
     def activate_web(self):
+        companion = getattr(self.pet, 'music_companion', None)
+        if companion is not None:
+            companion.preparation.cancel()
+        if self.cloud_player is not None:
+            self.cloud_player.deactivate()
         self.playback_source = 'web'
         self.autoplay_requested = False
         if self._player is not None:
@@ -159,6 +173,11 @@ class MusicPanel(QWidget):
         self.pet.playing = False
 
     def activate_local(self):
+        companion = getattr(self.pet, 'music_companion', None)
+        if companion is not None:
+            companion.preparation.cancel()
+        if self.cloud_player is not None:
+            self.cloud_player.deactivate()
         self.playback_source = 'local'
         if self.bilibili.active:
             self.bilibili.stop()
@@ -311,6 +330,8 @@ class MusicPanel(QWidget):
         self.queue.bag = []
         self.settings.setValue('play_mode', self.queue.mode)
         self.song_meta.setText('本地 MP3 · ' + MODES[self.queue.mode])
+        if self.cloud_player is not None:
+            self.cloud_player.set_mode(self.queue.mode)
 
     def duration_changed(self, duration):
         if self.playback_source == 'web':
@@ -384,6 +405,10 @@ class MusicPanel(QWidget):
         source = self.current_path()
         playing = self._player is not None and self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
         audible = self._audio is not None and self._audio.volume() > 0 and not self._audio.isMuted()
+        if self.playback_source == 'netease':
+            from music_tools.clock import playback_snapshot
+            snapshot = playback_snapshot(self, now)
+            source, position, playing = snapshot.source_key, snapshot.position_ms, snapshot.playing
         if self.playback_source == 'web':
             metrics = self.bilibili.metrics
             source = self.bilibili.current_url
@@ -461,6 +486,9 @@ class MusicPanel(QWidget):
             self.failed_paths.add(path)
             return False
         self.queue.index = index
+        companion = getattr(self.pet, 'music_companion', None)
+        if companion is not None:
+            companion.preparation.cancel()
         self.autoplay_requested = autoplay
         self.pending_seek = max(0, position)
         self.last_position = None
@@ -471,18 +499,35 @@ class MusicPanel(QWidget):
         else:
             self.player.setSource(source)
         if autoplay:
-            self.player.play()
+            if companion is not None and companion.beats.enabled:
+                self.player.pause()
+                def ready():
+                    if (self.playback_source == 'local' and self.player.source() == source
+                            and self.autoplay_requested):
+                        self.player.play()
+                companion.preparation.local(path, ready)
+            else:
+                self.player.play()
         if path in self.paths:
             self.list.setCurrentRow(self.paths.index(path))
         self.set_song_title(Path(path).stem)
         self.song_meta.setText('本地 MP3 · ' + MODES[self.queue.mode])
-        self.status.setText(('正在播放：' if autoplay else '上次听到：') + Path(path).stem)
+        preparing = companion is not None and companion.preparation.pending
+        self.status.setText(('首次准备节拍：' if preparing else '正在播放：' if autoplay else '上次听到：') + Path(path).stem)
         self.save()
         return True
 
     def toggle(self):
+        if self.playback_source == 'netease' and self.cloud_player is not None:
+            self.cloud_player.toggle()
+            return
         if self.playback_source == 'web':
             self.bilibili.toggle()
+            return
+        companion = getattr(self.pet, 'music_companion', None)
+        if companion is not None and companion.preparation.pending:
+            self.autoplay_requested = not self.autoplay_requested
+            self.status.setText('分析结束后播放。' if self.autoplay_requested else '已暂停，分析结束后不会自动播放。')
             return
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.autoplay_requested = False
@@ -494,9 +539,17 @@ class MusicPanel(QWidget):
             self.play_row(row)
         else:
             self.autoplay_requested = True
-            self.player.play()
+            if companion is not None and companion.beats.enabled and self.current_path():
+                source = self.player.source()
+                companion.preparation.local(self.current_path(), lambda: self.player.play()
+                    if self.playback_source == 'local' and self.player.source() == source and self.autoplay_requested else None)
+            else:
+                self.player.play()
 
     def step(self, direction):
+        if self.playback_source == 'netease' and self.cloud_player is not None:
+            self.cloud_player.step(direction)
+            return
         if self.playback_source == 'web':
             self.bilibili.step(direction)
             return
@@ -512,6 +565,9 @@ class MusicPanel(QWidget):
         self.status.setText('歌单中没有可播放的文件，请检查歌曲位置或格式')
 
     def audio_error(self, *_):
+        if self.playback_source == 'netease' and self.cloud_player is not None:
+            self.cloud_player.audio_error()
+            return
         if self.playback_source == 'web':
             return
         path = self.current_path()
@@ -541,6 +597,9 @@ class MusicPanel(QWidget):
             return
         if status in (QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia):
             self.duration_changed(self.player.duration())
+        if self.playback_source == 'netease' and self.cloud_player is not None:
+            self.cloud_player.media_changed(status)
+            return
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
             index = self.queue.advance(ended=True)
             if index is None:
@@ -551,9 +610,10 @@ class MusicPanel(QWidget):
     def save(self):
         self.settings.setValue('library_v1', self.library.dumps())
         self.settings.setValue('play_mode', self.queue.mode)
-        self.settings.setValue('current_path', self.current_path())
-        self.settings.setValue('current_position', self.pending_seek if self.pending_seek is not None
-                               else self._player.position() if self._player is not None else 0)
+        if self.playback_source != 'netease':
+            self.settings.setValue('current_path', self.current_path())
+            self.settings.setValue('current_position', self.pending_seek if self.pending_seek is not None
+                                   else self._player.position() if self._player is not None else 0)
         self.settings.setValue('current_queue', json.dumps(self.queue.paths, ensure_ascii=False))
         self.settings.setValue("volume", self.volume.value())
         self.settings.sync()
@@ -566,12 +626,28 @@ class MusicPanel(QWidget):
 class Pet(DesktopPet):
     def __init__(self, data_dir=None, startup=None, settings=None, characters_dir=None):
         super().__init__(lambda owner: MusicPanel(owner, data_dir, startup, settings, characters_dir))
+        self.mod_host = None
+        self.mod_startup_error = ''
+        try:
+            from pet_mods.host import ModHost
+            self.mod_host = ModHost(self)
+        except Exception:
+            # Optional extensions must never prevent the desktop pet starting.
+            self.mod_startup_error = '扩展功能暂时无法启动，请检查数据目录权限，重启后再试。'
+        self.music_companion = None
+        self.music_startup_error = ''
+        try:
+            from music_tools.companion import MusicCompanion
+            self.music_companion = MusicCompanion(self)
+        except Exception as error:
+            self.music_startup_error = '歌词与节拍暂时无法启动：' + str(error)
 
 
 def main():
     app = QApplication(sys.argv)
     app.setFont(QFont("Microsoft YaHei UI", 9))
     app.setApplicationName("TianyiPet")
+    app.setApplicationVersion("0.4.1")
     app.setWindowIcon(application_icon())
     app.setOrganizationName("TianyiPet")
     data_dir = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation))

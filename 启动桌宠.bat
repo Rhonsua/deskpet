@@ -4,7 +4,7 @@ if not exist ".venv\Scripts\python.exe" (
   python -m venv .venv
   if errorlevel 1 goto fail
 )
-".venv\Scripts\python.exe" -c "from PySide6 import QtCore; import webview, live2d; from OpenGL import GL; assert QtCore.__version__ == '6.8.3'" >nul 2>nul
+".venv\Scripts\python.exe" -c "from PySide6 import QtCore; import webview, live2d, numpy, mutagen, qrcode; from Crypto.Cipher import AES; from OpenGL import GL; assert QtCore.__version__ == '6.8.3'" >nul 2>nul
 if errorlevel 1 (
   ".venv\Scripts\python.exe" -m pip install -r requirements.txt
   if errorlevel 1 goto fail

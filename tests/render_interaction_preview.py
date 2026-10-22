@@ -104,6 +104,7 @@ with tempfile.TemporaryDirectory() as scratch:
     pet.toolbar.hide()
     pet.bubble.hide()
     pet.hide()
+    pet.panel.shutdown_audio()
     pet.panel.store.close()
     stage.hide()
     subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), '-v', 'error', '-y', '-framerate', '12',

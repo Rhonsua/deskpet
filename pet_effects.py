@@ -37,14 +37,17 @@ def _note(p, x, y, size, color):
     p.restore()
 
 
-def draw_effects(p, size, scale, activity, elapsed, now):
+def draw_effects(p, size, scale, activity, elapsed, now, music_beat=None):
+    from music_tools.clock import beat_values
+    synced = beat_values(music_beat) if activity == 'sing' else None
+    beat_clock = (synced[0] + synced[1]) if synced else elapsed / .6
     p.save()
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     p.scale(scale, scale)
     w = size.width()/scale
     center = QPointF(w/2, 280)
     if activity in ('sing', 'turn', 'sleep', 'phone', 'happy', 'head_rub', 'mouse_wave', 'eat', 'level_up'):
-        beat = .5-.5*math.cos(elapsed*math.tau/.6)
+        beat = .5+.5*math.cos(beat_clock*math.tau) if synced else .5-.5*math.cos(beat_clock*math.tau)
         color = QColor('#9acbd5' if activity not in ('happy', 'head_rub', 'eat', 'level_up') else '#e3bdcf')
         color.setAlpha(round(22 + (12*beat if activity in ('sing', 'turn') else 0)))
         glow = QRadialGradient(center, 100 if activity in ('sleep', 'phone') else 78)
@@ -58,11 +61,11 @@ def draw_effects(p, size, scale, activity, elapsed, now):
     if activity in ('sing', 'turn'):
         p.setBrush(Qt.BrushStyle.NoBrush)
         for i in range(2):
-            pulse = (elapsed/.6+i*.5) % 1
+            pulse = (beat_clock+i*.5) % 1
             p.setPen(QPen(QColor(121, 191, 206, round(48*(1-pulse))), .8))
             p.drawEllipse(center, 49+pulse*23, 7+pulse*5)
         for i in range(6):
-            phase = (elapsed*.23+i/6) % 1
+            phase = (beat_clock*.138+i/6) % 1
             x = (24 if i % 2 == 0 else w-25) + math.sin(elapsed*1.5+i)*5
             color = QColor(102, 172, 191, round(110*math.sin(math.pi*phase)))
             _note(p, x, 224-phase*152, .8+(i % 3)*.12, color)
@@ -158,5 +161,6 @@ class PetEffects(QWidget):
         if not self.pet.hit_region.isEmpty():
             p.setClipRegion(QRegion(self.rect()).subtracted(self.pet.hit_region))
             draw_effects(p, self.size(), self.pet.scale, self.pet.behavior.activity,
-                         self.pet.behavior.activity_elapsed, self.pet.phase)
+                         self.pet.behavior.activity_elapsed, self.pet.phase,
+                         self.pet.current_music_beat(self.pet.behavior.activity))
         p.end()

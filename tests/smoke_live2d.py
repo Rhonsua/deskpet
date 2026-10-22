@@ -131,6 +131,13 @@ with tempfile.TemporaryDirectory(prefix='test-', dir=output) as temp:
         b = renderer.frame('sleep', 0)
         assert a == b, 'resting pose must ignore pointer tracking'
         renderer.pointer = (0, 0, 0)
+        from music_beats import BeatSample
+        left_beat = BeatSample(0, .5, True, 120)
+        right_beat = BeatSample(1, .5, True, 120)
+        left_frame = renderer.frame('sing', .7, left_beat)
+        right_frame = renderer.frame('sing', .7, right_beat)
+        assert not left_frame.isNull() and left_frame != right_frame, 'actual beats must move the rendered feet'
+        assert renderer.frame('sleep', 0, left_beat) == renderer.frame('sleep', 0, right_beat), 'sleep must ignore beats'
         # Side-by-side, identical logical pixel scale and aligned ground line.
         comparison = QImage(660, 340, QImage.Format.Format_ARGB32)
         comparison.fill(QColor('#26303d'))

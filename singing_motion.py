@@ -50,7 +50,7 @@ class SingingRig:
                               pixmap.height() + self.padding * 2,
                               QImage.Format.Format_ARGB32_Premultiplied)
 
-    def draw(self, painter, seconds, scale):
+    def draw(self, painter, seconds, scale, beat=None):
         # Rasterize continuous source sampling into complete destination rows.
         # Transforming/clipping many antialiased bands separately makes their
         # fractional edges partially transparent, even inside an opaque leg.
@@ -66,6 +66,12 @@ class SingingRig:
             phase = seconds * 5 + side * math.pi
             horizontal = math.sin(phase) * 3.2 * scale
             lift = max(0, math.sin(phase)) * 2.4 * scale
+            from music_tools.clock import beat_values
+            synced = beat_values(beat)
+            if synced is not None:
+                index, beat_phase = synced
+                pulse = math.sin(math.pi * beat_phase) ** 2 if index % 2 == side else 0
+                horizontal, lift = (1 if side else -1) * pulse * 2.2 * scale, pulse * 3 * scale
             for y in range(self.hem, self.pixmap.height()):
                 destination = y + 0.5 - self.hem
                 source = destination

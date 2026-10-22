@@ -2,8 +2,14 @@
 import os
 import sys
 
-if '--audio-worker' in sys.argv:
+if '--beat-worker' in sys.argv:
+    from music_beats.worker import run
+    run()
+elif '--audio-worker' in sys.argv:
     from audio_player_worker import run
+    run()
+elif '--netease-worker' in sys.argv:
+    from netease_player_worker import run
     run()
 elif '--web-worker' in sys.argv:
     from web_player_worker import run

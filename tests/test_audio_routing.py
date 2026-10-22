@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from PySide6.QtCore import QCoreApplication, QObject, QSettings, Signal
-from audio_routing import AudioRouter, device_id
+from audio.routing import AudioRouter, device_id
 
 
 class Device:

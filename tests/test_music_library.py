@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from music_library import MusicLibrary, PlaybackQueue
+from music_tools.library import MusicLibrary, PlaybackQueue
 
 
 class LibraryTests(unittest.TestCase):

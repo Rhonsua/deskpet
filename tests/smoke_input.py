@@ -36,6 +36,7 @@ def dispose(pet):
     pet.tray.hide()
     pet.toolbar.hide()
     pet.bubble.hide()
+    pet.panel.shutdown_audio()
     pet.panel.store.close()
     pet.panel.hide()
     pet.hide()

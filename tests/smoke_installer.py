@@ -7,10 +7,14 @@ import tempfile
 import time
 import zipfile
 
+from PyInstaller.archive.readers import CArchiveReader
+
 root = Path(__file__).resolve().parents[1]
 preview = root / 'preview'
 preview.mkdir(exist_ok=True)
-setup = root / 'dist' / 'TianyiPet-0.4.0-Setup.exe'
+setup = root / 'dist' / 'TianyiPet-0.4.2-Setup.exe'
+goal_pack = root / 'dist' / 'TianyiPet-GoalCompanion-0.1.0.zip'
+assert goal_pack.is_file(), 'build the separate goal Mod ZIP before installer validation'
 assert setup.read_bytes()[:2] == b'MZ', 'installer must be an executable'
 with tempfile.TemporaryDirectory(prefix='installer-check-', dir=preview, ignore_cleanup_errors=True) as scratch:
     folder = Path(scratch).resolve()
@@ -31,14 +35,27 @@ with tempfile.TemporaryDirectory(prefix='installer-check-', dir=preview, ignore_
         assert not any('miku' in name.lower() for name in names)
         assert '_internal/pet_chat/personas/luotianyi.json' in names
         assert '_internal/assets/icons/tianyi.ico' in names
+        assert not any('pet_mods/goals' in name.replace('\\', '/') for name in names), names
     subprocess.run([str(extracted / 'Setup.exe'), '--quiet', '--test', '--dir', str(installed)],
                    check=True, timeout=60, creationflags=flags)
     assert (installed / 'TianyiPet.exe').is_file() and (installed / 'installed-files.txt').is_file()
+    for executable in ('TianyiPet.exe', 'TianyiWorker.exe'):
+        bundle = CArchiveReader(str(installed / executable))
+        assert not any(name == 'pet_mods.goals' or name.startswith('pet_mods.goals.') for name in bundle.toc)
+        pyz_names = [name for name in bundle.toc if name.lower().endswith('.pyz')]
+        assert pyz_names, 'missing bundled Python archive'
+        for name in pyz_names:
+            pure = bundle.open_embedded_archive(name)
+            assert not any(module == 'pet_mods.goals' or module.startswith('pet_mods.goals.')
+                           for module in pure.toc), 'goal code must not ship in the main application'
     report = folder / 'self-check.json'
-    subprocess.run([str(installed / 'TianyiPet.exe'), '--self-check', '--native-live2d', '--report', str(report)],
-                   check=True, timeout=150, creationflags=flags)
+    subprocess.run([str(installed / 'TianyiPet.exe'), '--self-check', '--native-live2d', '--report', str(report),
+                    '--mod-pack', str(goal_pack)],
+                   check=True, timeout=240, creationflags=flags)
     result = json.loads(report.read_text(encoding='utf-8'))
     assert result.get('ok') and result.get('live2d') and result.get('chat') and result.get('avatar_icon'), result
+    assert result.get('goal_code_excluded') and result.get('mods_empty_by_default') and result.get('external_goal_package'), result
+    assert all(result.get(key) for key in ('music_tools', 'netease_crypto', 'netease_browser', 'lyrics_menu', 'beat_worker')), result
     (installed / 'keep-me.txt').write_text('user file', encoding='utf-8')
     subprocess.run([str(installed / 'TianyiSetup.exe'), '--uninstall', '--quiet', '--test', '--dir', str(installed)],
                    check=True, timeout=30, creationflags=flags)
@@ -48,6 +65,7 @@ with tempfile.TemporaryDirectory(prefix='installer-check-', dir=preview, ignore_
     assert not (installed / 'TianyiPet.exe').exists()
     assert not (installed / 'installed-files.txt').exists()
     assert (installed / 'keep-me.txt').read_text(encoding='utf-8') == 'user file'
-    result.update(version='0.4.0', installer=True, uninstall=True, preserves_user_files=True, tianyi_only=True)
+    result.update(version='0.4.2', installer=True, uninstall=True, preserves_user_files=True, tianyi_only=True)
     (root / 'dist' / 'TEST-REPORT.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
-    print('PASS: installer extraction, per-user directory install, packaged assets/audio/WebView2, uninstall preserves user files')
+    print('PASS: installer extraction, standalone Mod ZIP in frozen runtime, empty default Mod host, '
+          'no bundled goal code, packaged assets/audio/WebView2, uninstall preserves user files')

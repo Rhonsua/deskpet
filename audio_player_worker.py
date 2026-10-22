@@ -9,7 +9,7 @@ os.environ.setdefault('QT_MEDIA_BACKEND', 'windows')
 from PySide6.QtCore import QSettings, QTimer, QUrl
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import QApplication
-from audio_routing import AudioRouter, device_id
+from audio.routing import AudioRouter, device_id
 
 
 def run():
@@ -76,6 +76,7 @@ def run():
 
     def report():
         emit({'type': 'state', 'generation': generation, 'position': player.position(),
+              'playback_rate': player.playbackRate(),
               'duration': player.duration(), 'state': player.playbackState().value,
               'status': player.mediaStatus().value, 'seekable': player.isSeekable(),
               'error': player.error().value, 'error_text': player.errorString(),

@@ -46,7 +46,7 @@ a = Analysis([str(root / 'app_entry.py')], pathex=[str(root)], datas=datas, bina
                             'live2d._live2d', 'OpenGL.platform.win32'],
              excludes=['webview.platforms.qt', 'webview.platforms.gtk', 'webview.platforms.cef',
                        'webview.platforms.cocoa', 'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets',
-                       'tkinter', 'pytest'], noarchive=False)
+                       'tkinter', 'pytest', 'pet_mods.goals'], noarchive=False)
 pyz = PYZ(a.pure)
 gui = EXE(pyz, a.scripts, [], exclude_binaries=True, name='TianyiPet', console=False,
           icon=str(root / 'assets' / 'icons' / 'tianyi.ico'))

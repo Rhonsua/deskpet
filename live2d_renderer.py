@@ -62,14 +62,14 @@ class Live2DRenderer:
         finally:
             self.context.doneCurrent()
 
-    def frame(self, activity, seconds):
+    def frame(self, activity, seconds, beat=None):
         if not self.context.makeCurrent(self.surface):
             raise RuntimeError('Live2D 渲染上下文已失效')
         try:
             self.fbo.bind()
             self.gl.glViewport(0, 0, 384, 576)
             self.live2d.clearBuffer(0, 0, 0, 0)
-            parameters, parts = self.motions.sample(activity, seconds)
+            parameters, parts = self.motions.sample(activity, seconds, beat)
             parameters.setdefault('ParamAngleY', 0.0)
             parameters.setdefault('ParamEyeBallY', 0.0)
             parameters = apply_pointer(parameters, activity, self.pointer)

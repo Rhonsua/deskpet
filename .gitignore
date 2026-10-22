@@ -16,6 +16,8 @@ assets/references/
 # Chat configuration belongs in local app data, never in a published checkout.
 **/chat/config.json
 **/chat/config-*.tmp
+**/netease/session.json
+**/netease/private/
 *.db-wal
 *.db-shm
 

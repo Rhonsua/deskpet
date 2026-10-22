@@ -198,6 +198,7 @@ class PetToolbar(QFrame):
             self.content.addWidget(scale)
             self.add_button('更多设置', lambda: self.pet.open_tools(2))
             self.add_button('聊天 API 设置', lambda: self.pet.open_chat(settings=True))
+            self.add_button('扩展功能 / Mod', self.pet.open_mods)
         else:
             hint = QLabel('点头部摸摸 · 拖动提起 · 双击/右键菜单')
             hint.setObjectName('Muted')
@@ -321,7 +322,9 @@ class DesktopPet(QWidget):
         menu.addAction('显示桌宠', self.restore)
         menu.addAction('互动菜单', self.toolbar.toggle)
         menu.addAction('歌单', lambda: self.open_tools(0))
+        menu.addAction('网易云 / 歌词与节拍', lambda: self.open_music_companion(0))
         menu.addAction('聊天', self.open_chat)
+        menu.addAction('扩展功能 / Mod', self.open_mods)
         menu.addAction('设置', lambda: self.open_tools(2))
         menu.addAction('显示 B站播放网页', lambda: self.panel.bilibili.send({'cmd': 'show'})
                        if self.panel.bilibili.active else self.open_tools(3))
@@ -544,11 +547,13 @@ class DesktopPet(QWidget):
 
     def paint_live2d(self, painter, activity):
         from live2d_renderer import POSE_SCALE
+        from music_tools.clock import beat_values
         elapsed = self.behavior.activity_elapsed
-        key = (activity, round(elapsed * 30), *(round(v, 3) for v in self.live2d_renderer.pointer))
+        beat = self.current_music_beat(activity)
+        key = (activity, round(elapsed * 30), beat_values(beat), *(round(v, 3) for v in self.live2d_renderer.pointer))
         try:
             if self.live2d_frame_key != key:
-                image = self.live2d_renderer.frame(activity, elapsed)
+                image = self.live2d_renderer.frame(activity, elapsed, beat)
                 self.live2d_pixmap = QPixmap.fromImage(image)
                 self.live2d_frame_key = key
             pixmap = self.live2d_pixmap
@@ -632,6 +637,12 @@ class DesktopPet(QWidget):
 
     def fold_dock(self):
         if getattr(self, 'chat_window', None) is not None and self.chat_window.isVisible():
+            return
+        host = getattr(self, 'mod_host', None)
+        if host and host.window is not None and host.window.isVisible():
+            return
+        music = getattr(self, 'music_companion', None)
+        if music and music.window is not None and music.window.isVisible():
             return
         if not self.dock_edge or self.dragging:
             return
@@ -720,6 +731,30 @@ class DesktopPet(QWidget):
             self.pat()
         else:
             self.react('poke', 1.0, '欸？是在叫我吗？')
+
+    def open_music_companion(self, page=0):
+        companion = getattr(self, 'music_companion', None)
+        if companion is None:
+            self.bubble.say(getattr(self, 'music_startup_error', '') or '歌词与节拍暂时无法使用，请重新启动桌宠。')
+            return
+        try:
+            companion.open(page)
+        except Exception as error:
+            self.bubble.say('音乐工具暂时无法打开：' + str(error))
+
+    def current_music_beat(self, activity):
+        companion = getattr(self, 'music_companion', None)
+        return companion.beat if companion and activity == 'sing' and not self.behavior.layers else None
+
+    def open_mods(self, checked=False):
+        host = getattr(self, 'mod_host', None)
+        if host is None:
+            self.bubble.say(getattr(self, 'mod_startup_error', '') or '扩展功能暂时不可用，请重启桌宠后再试。')
+            return
+        try:
+            host.open()
+        except Exception:
+            self.bubble.say('扩展页面暂时无法打开，桌宠和音乐仍可正常使用。')
 
     def open_chat(self, checked=False, settings=False):
         if getattr(self, 'chat_window', None) is None:
@@ -901,6 +936,12 @@ class DesktopPet(QWidget):
             state, residual = singing_pose(motion_time)
             sx = 1 - abs(residual) * 0.035
             angle, y = math.sin(motion_time * 3.5) * 1.4, -abs(math.sin(motion_time * 3.5)) * 2
+            from music_tools.clock import beat_values
+            values = beat_values(self.current_music_beat(activity))
+            if values is not None:
+                index, phase = values
+                pulse = math.sin(math.pi * phase) ** 2
+                angle, y = (1 if index % 2 else -1) * pulse * 1.4, -pulse * 2
         else:
             state = 'blink' if now % 4.8 < 0.15 else 'idle'
             sy = 1 + math.sin(now * 2) * 0.003
@@ -925,7 +966,7 @@ class DesktopPet(QWidget):
         painter.setTransform(transform)
         local_mask = self.frame_masks[key]
         if key in self.singing_rigs:
-            local_mask = self.singing_rigs[key].draw(painter, motion_time, scale)
+            local_mask = self.singing_rigs[key].draw(painter, motion_time, scale, self.current_music_beat(activity))
         else:
             painter.drawPixmap(0, 0, image)
         if key == 'phone' and self.character_pack is None:

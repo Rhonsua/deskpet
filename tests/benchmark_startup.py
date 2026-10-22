@@ -43,6 +43,7 @@ with tempfile.TemporaryDirectory(prefix='tianyi-startup-') as scratch:
     if pet.panel._player is not None:
         pet.panel._player.stop()
     pet.tray.hide()
+    pet.panel.shutdown_audio()
     pet.panel.store.close()
     pet.panel.hide()
     pet.hide()

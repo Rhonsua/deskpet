@@ -8,6 +8,135 @@ import time
 import wave
 
 
+def check_music_features(pet, app, scratch, result):
+    """Exercise newly frozen dependencies and workers with synthetic data only."""
+    from netease_music.direct import prepare_request
+    from netease_music.account_probe import AccountProbe
+    from netease_music.browser_login import BrowserLogin
+    import numpy as np
+    music = pet.music_companion
+    assert music is not None, pet.music_startup_error
+    music.open(0)
+    assert music.window is not None and music.tabs.count() == 3
+    music.timer.stop()
+    address, payload, header = prepare_request('https://music.163.com/api/w/nuser/account/get', {}, '')
+    assert address.endswith('/weapi/w/nuser/account/get') and len(payload['encSecKey']) == 256 and not header
+    probe = AccountProbe(lambda cookie: (dict(userId='77'), 'verified'))
+    probe.poll('MUSIC_U=synthetic-only')
+    probe.results.get(timeout=3)
+    music.lyrics.update('netease:77', 1000, True)
+    music.lyrics.import_online('77', '打包检查', '[00:01]这是清晰的测试歌词', 'netease:77')
+    music.lyrics.configure(color='#ffd666', left_passthrough=True)
+    overlay = music.lyrics.overlay
+    assert overlay.isVisible() and overlay.text_color == '#ffd666'
+    if '--native-live2d' in sys.argv:
+        assert overlay.right_click.hook
+    menu = overlay.make_menu()
+    assert menu.colors.actions()[0].text() == '白色'
+    menu.deleteLater()
+    music.lyrics.configure(enabled=False)
+    assert not overlay.isVisible() and not overlay.right_click.hook
+    music.window.hide()
+    login = BrowserLogin()
+    sessions, errors = [], []
+    login.completed.connect(sessions.append)
+    login.failed.connect(errors.append)
+    login.worker_args = ['--self-test', '--fixture-fetch']
+    try:
+        login.start()
+        deadline = time.monotonic() + 40
+        while not sessions and not errors and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(.01)
+        assert sessions and sessions[0]['uid'] == '77' and not errors, errors
+    finally:
+        login.cancel()
+    audio = Path(scratch) / 'beat-check.wav'
+    rate = 48000
+    samples = np.zeros(rate * 8, dtype=np.float32)
+    pulse = np.sin(2 * np.pi * 440 * np.arange(1600) / rate) * np.exp(-np.arange(1600) / 240)
+    for index in range(0, len(samples) - len(pulse), rate // 2):
+        samples[index:index + len(pulse)] = pulse
+    stereo = np.column_stack((samples, -samples))
+    with wave.open(str(audio), 'wb') as output:
+        output.setparams((2, 2, rate, 0, 'NONE', 'not compressed'))
+        output.writeframes((stereo * 24000).astype('<i2').tobytes())
+    music.beats.set_source('local:' + str(audio))
+    music.beats.analyze()
+    deadline = time.monotonic() + 40
+    while music.beats.analyzing and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(.01)
+    assert music.beats.analysis and abs(music.beats.analysis['bpm'] - 120) < 3, music.beats.status
+    result.update(music_tools=True, netease_crypto=True, netease_browser=True,
+                  lyrics_menu=True, beat_worker=True)
+
+
+def check_mod_package(pet, app, archive_path, result):
+    """Check an empty host first, then install only inside the disposable data root."""
+    from datetime import datetime, timedelta
+    import importlib.util
+    import zipfile
+    from PySide6.QtCore import QDateTime
+    from pet_mods.host import ModHost
+
+    host = pet.mod_host
+    assert host is not None and host.manager.manifests() == []
+    assert list(host.packages_dir.iterdir()) == []
+    assert not (pet.panel.data_dir / 'mods' / 'goals').exists()
+    if getattr(sys, 'frozen', False):
+        assert importlib.util.find_spec('pet_mods.goals') is None, 'goal code was bundled in main application'
+        result['goal_code_excluded'] = True
+    result['mods_empty_by_default'] = True
+    if archive_path is None:
+        return
+    with zipfile.ZipFile(archive_path) as archive:
+        expected = {'goals/' + name for name in ('mod.json', 'entry.py', '__init__.py', 'mod.py',
+                    'store.py', 'widget.py', 'README.txt', 'LICENSE')}
+        assert set(archive.namelist()) == expected, archive.namelist()
+        assert archive.testzip() is None
+        assert sum(item.file_size for item in archive.infolist()) < 16 * 1024 * 1024
+        # Explicit whitelist above makes archive traversal impossible.
+        archive.extractall(host.packages_dir)
+    host.shutdown()
+    host.deleteLater()
+    pet.mod_host = host = ModHost(pet)
+    manifests = host.manager.manifests()
+    assert len(manifests) == 1 and manifests[0].id == 'goals', host.discovery_warning
+    assert not host.manager.is_enabled('goals')
+    assert not (pet.panel.data_dir / 'mods' / 'goals').exists(), 'discovery executed goal package'
+    assert host.manager.set_enabled('goals', True), host.manager.error('goals')
+    editor = host.manager.create_widget('goals')
+    assert editor is not None, host.manager.error('goals')
+    try:
+        now = datetime.now()
+        editor.title_input.setText('冻结版外置目标测试')
+        editor.deadline_input.setDateTime(QDateTime(now + timedelta(hours=1)))
+        editor.steps_input.setPlainText('检查加载\n保存目标')
+        editor.save_button.click()
+        goal_id = editor.current_id
+        assert goal_id is not None and editor.mod.store.get(goal_id)['title'] == '冻结版外置目标测试'
+        delivered = []
+        host.manager._deliver = lambda text: delivered.append(text) or True
+        assert host.manager.set_policy(quiet_enabled=False, sound_enabled=False)
+        host.tick()
+        assert len(delivered) == 1 and '冻结版外置目标测试' in delivered[0]
+        assert editor.mod.store.get(goal_id)['last_reminded'] is not None
+        host.tick()
+        assert len(delivered) == 1
+    finally:
+        editor.close()
+        editor.deleteLater()
+    assert host.manager.set_enabled('goals', False)
+    assert host.manager.set_enabled('goals', True), host.manager.error('goals')
+    restored = host.manager.create_widget('goals')
+    assert restored is not None and restored.mod.store.get(goal_id)['title'] == '冻结版外置目标测试'
+    restored.close()
+    restored.deleteLater()
+    assert host.manager.set_enabled('goals', False)
+    result['external_goal_package'] = True
+
+
 def run():
     native = '--native-live2d' in sys.argv
     if not native:
@@ -18,6 +147,7 @@ def run():
     report = Path(sys.argv[sys.argv.index('--report') + 1]).resolve()
     report.parent.mkdir(parents=True, exist_ok=True)
     result = {'ok': False}
+    mod_archive = Path(sys.argv[sys.argv.index('--mod-pack') + 1]).resolve() if '--mod-pack' in sys.argv else None
     app = QApplication([])
     class NoStartup:
         supported = False
@@ -58,6 +188,8 @@ def run():
             assert len(icon.availableSizes()) == 9
             assert pet.tray.icon().pixmap(32).toImage() == icon.pixmap(32).toImage()
             result.update(chat=True, local_scope=True, avatar_icon=True)
+            check_mod_package(pet, app, mod_archive, result)
+            check_music_features(pet, app, scratch, result)
             song = Path(scratch) / 'test.wav'
             with wave.open(str(song), 'wb') as file:
                 file.setparams((1, 2, 8000, 0, 'NONE', 'not compressed'))
@@ -92,6 +224,10 @@ def run():
             result['traceback'] = traceback.format_exc()
         finally:
             if pet:
+                if getattr(pet, 'music_companion', None):
+                    pet.music_companion.shutdown()
+                if getattr(pet, 'mod_host', None):
+                    pet.mod_host.shutdown()
                 if getattr(pet, 'chat_window', None):
                     pet.chat_window.shutdown()
                 pet.panel.bilibili.shutdown()
