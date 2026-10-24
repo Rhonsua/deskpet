@@ -59,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix='test-', dir=output) as temp:
         assert pet.variant == selected and pet.character_pack is not None
         pet.timer.stop()
         assert len({image.cacheKey() for image in pet.frames.values()}) == 10
-        assert not pet.singing_rigs
+        assert bool(pet.singing_rigs) == (pet.character_pack.singing_hem is not None)
         before = dict(pet.panel.store.pet())
         sheet = QImage(320*5, 360*2, QImage.Format.Format_ARGB32)
         sheet.fill(QColor('#edf1f7'))
@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix='test-', dir=output) as temp:
                 pet.set_mode(state)
             elif state.startswith('sing-'):
                 pet.set_mode('sing')
-                pet.phase = {'sing-front':4.8,'sing-left':1.2,'sing-right':3.6}[state]
+                pet.phase = {'sing-front':4.8,'sing-left':3.6,'sing-right':1.2}[state]
             elif state == 'blink':
                 pet.phase = 4.81
             else:

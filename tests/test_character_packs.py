@@ -31,6 +31,40 @@ class CharacterPackTests(unittest.TestCase):
         validate_images(pack)
         self.assertEqual(pack.state_path('sleep'), self.root / 'idle.png')
         self.assertEqual(pack.anchors['head'], (0.5, 0.28))
+        self.assertIsNone(pack.singing_hem)
+
+    def test_explicit_singing_legs_and_custom_hem_keep_front_fallback(self):
+        self.image(self.root / 'sing-front.png')
+        self.data['states']['sing-front'] = 'sing-front.png'
+        self.data['singing_motion'] = {'legs': True, 'hem': 0.7}
+        pack = self.load()
+        self.assertEqual(pack.singing_hem, 0.7)
+        self.assertEqual(pack.state_path('sing-left'), self.root / 'sing-front.png')
+        self.data['singing_motion'] = {'legs': True}
+        self.assertEqual(self.load().singing_hem, 0.64)
+
+    def test_disabled_singing_keeps_old_pack_behavior(self):
+        for value in ({}, {'legs': False}, {'hem': 0.65}, {'legs': False, 'hem': 0.65}):
+            self.data['singing_motion'] = value
+            with self.subTest(value=value):
+                self.assertIsNone(self.load().singing_hem)
+
+    def test_enabled_singing_requires_authored_front_frame(self):
+        self.data['singing_motion'] = {'legs': True}
+        with self.assertRaisesRegex(ValueError, 'sing-front'):
+            self.load()
+
+    def test_singing_rejects_invalid_config(self):
+        self.image(self.root / 'sing-front.png')
+        self.data['states']['sing-front'] = 'sing-front.png'
+        for value in (None, True, [], {'extra': True}, {'legs': 1}, {'legs': 'true'},
+                      {'hem': True}, {'hem': '0.65'}, {'hem': float('nan')},
+                      {'hem': float('inf')}, {'hem': -float('inf')},
+                      {'hem': 10 ** 400}, {'hem': -(10 ** 400)},
+                      {'hem': 0.34}, {'hem': 0.91}):
+            self.data['singing_motion'] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.load()
 
     def test_rejects_external_paths(self):
         self.image(self.root.parent / 'outside.png')

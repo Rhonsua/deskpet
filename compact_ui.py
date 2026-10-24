@@ -164,7 +164,10 @@ def build(panel):
     panel.experience.setFixedHeight(6)
     panel.experience.setTextVisible(False)
     growth.addWidget(panel.experience)
-    growth.addWidget(text('听歌获得音符，可以给角色买点心。', True))
+    reward_help = text('每有效听歌 5 分钟获得 2 音符，每日最多 100 音符。\n'
+                       '暂停、拖动进度和播放器静音时不累计奖励进度。', True)
+    reward_help.setWordWrap(True)
+    growth.addWidget(reward_help)
     for name, (cost, *_rest) in FOODS.items():
         growth.addWidget(action(f'投喂{name} · {cost} 音符', lambda checked=False, food=name: panel.feed(food)))
     growth.addStretch()

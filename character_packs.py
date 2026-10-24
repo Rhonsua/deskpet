@@ -22,6 +22,7 @@ class CharacterPack:
     root: Path
     states: dict
     anchors: dict
+    singing_hem: float | None = None
 
     def state_path(self, state):
         if state in ('sing-left', 'sing-right') and state not in self.states:
@@ -135,7 +136,18 @@ def read_pack(folder):
         anchors[key] = tuple(pair)
     if anchors['head'][1] >= anchors['feet'][1]:
         raise ValueError('head 锚点应在 feet 锚点上方')
-    return CharacterPack(identifier, root=root, states=paths, anchors=anchors, **metadata)
+    singing = data.get('singing_motion', {})
+    if not isinstance(singing, dict) or any(key not in ('legs', 'hem') for key in singing):
+        raise ValueError('singing_motion 仅支持 legs 和 hem')
+    legs, hem = singing.get('legs', False), singing.get('hem', 0.64)
+    if type(legs) is not bool:
+        raise ValueError('singing_motion.legs 必须为 true 或 false')
+    if type(hem) not in (int, float) or not 0.35 <= hem <= 0.90 or not math.isfinite(hem):
+        raise ValueError('singing_motion.hem 需要 0.35 到 0.90 的画布高度比例')
+    if legs and 'sing-front' not in paths:
+        raise ValueError('启用唱歌腿部动画需要声明 sing-front 图片')
+    return CharacterPack(identifier, root=root, states=paths, anchors=anchors,
+                         singing_hem=float(hem) if legs else None, **metadata)
 
 
 def validate_images(pack):

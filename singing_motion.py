@@ -21,10 +21,10 @@ def leg_offset(seconds, fraction, side, scale):
 
 
 class SingingRig:
-    def __init__(self, pixmap, mask):
+    def __init__(self, pixmap, mask, hem=0.64):
         self.pixmap = pixmap
         self.mask = mask
-        self.hem = round(pixmap.height() * 0.64)
+        self.hem = max(1, min(pixmap.height() - 1, round(pixmap.height() * hem)))
         self.upper = QRect(0, 0, pixmap.width(), self.hem)
         self.splits = []
         middle = pixmap.width() // 2

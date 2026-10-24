@@ -317,12 +317,18 @@ class ChatWindow(QWidget):
 
     def request_client(self):
         if self.client is None:
-            from .client import ChatClient
+            from .remote import ChatClient
             self.client = ChatClient(self)
             self.client.partial.connect(self.on_partial)
             self.client.completed.connect(self.on_completed)
             self.client.failed.connect(self.on_failed)
+            self.client.loadingChanged.connect(self.on_client_loading)
         return self.client
+
+    def on_client_loading(self, loading):
+        if self.pending or self.testing:
+            self.status.setText('正在准备聊天连接，桌宠仍可互动…' if loading else
+                                '正在测试连接…' if self.testing else '正在回复…')
 
     def test_connection(self):
         if self.pending or self.testing:
@@ -550,6 +556,8 @@ class ChatWindow(QWidget):
     def shutdown(self):
         if not self.closed:
             self.stop()
+            if self.client is not None:
+                self.client.shutdown()
             self.save_profile(quiet=True)
             self.save_profile_drafts()
             self.store.close()

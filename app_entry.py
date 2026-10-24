@@ -14,6 +14,9 @@ elif '--netease-worker' in sys.argv:
 elif '--web-worker' in sys.argv:
     from web_player_worker import run
     run()
+elif '--chat-worker' in sys.argv:
+    from chat_player_worker import run
+    run()
 elif '--self-check' in sys.argv:
     from packaged_check import run
     run()

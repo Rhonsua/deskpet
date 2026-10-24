@@ -5,6 +5,18 @@ from PySide6.QtCore import QPoint
 EDGES = ('left', 'right', 'top', 'bottom')
 
 
+def dock_ease(reveal):
+    """Smooth endpoints without overshoot or changing transition duration."""
+    value = max(0.0, min(1.0, 1.0 - reveal))
+    return value * value * (3.0 - 2.0 * value)
+
+
+def keep_drag_docked(point, size, bounds, edge, pointer_bounds, scale=1):
+    """Stay latched until a deliberate inward pull; entering another screen wins."""
+    return (bounds == pointer_bounds and
+            edge_gap(point, size, bounds, edge) < round(36 * scale))
+
+
 def edge_gap(point, size, bounds, edge):
     """Signed room inside an edge; negative means the requested window crossed it."""
     return {'left': point.x() - bounds.left(),

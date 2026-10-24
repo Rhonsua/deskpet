@@ -7,7 +7,7 @@ import sqlite3
 import tempfile
 from unittest.mock import patch
 
-from PySide6.QtCore import QObject, QSettings, Signal
+from PySide6.QtCore import QObject, QSettings, Signal, QTimer
 from PySide6.QtWidgets import QApplication, QWidget
 from music_tools.library import MusicLibrary
 from music_lyrics import LyricsController
@@ -36,6 +36,7 @@ class Client(QObject):
 
 class Transfer(QObject):
     completed = Signal(str, str)
+    skipped = Signal()
     failed = Signal(str)
     warning = Signal(str)
     progress = Signal(int, int)
@@ -121,6 +122,33 @@ def main():
             with patch('netease_music.download_queue.QFileDialog.getExistingDirectory', side_effect=choose_directory):
                 queue.start_playlist('987')
             assert not queue.running and queue.epoch != epoch
+
+            # Exercise actual modal controls, remembering a batch choice and cancellation.
+            track = tracks[0]
+            target = root / (track['title'] + ' - ' + track['artists'] + ' [' + track['id'] + '].lrc')
+            target.write_text('original', encoding='utf-8')
+            def answer(label, remember=False):
+                box = queue.conflict_box
+                assert box is not None
+                box.checkBox().setChecked(remember)
+                next(button for button in box.buttons() if button.text() == label).click()
+            queue.start([track], True, root)
+            QTimer.singleShot(0, lambda: answer('跳过', True))
+            queue.client.completed.emit('prepare', dict(item=track, lrc='new'))
+            queue.timer.stop()
+            assert queue.skipped_count == 1 and queue.failed_count == queue.saved_count == 0
+            assert target.read_text(encoding='utf-8') == 'original'
+            assert queue._resolve_conflict([target]) == 'skip' and queue.conflict_choice == 'skip'
+            queue.start([track], True, root)
+            assert queue.conflict_choice is None and queue.skipped_count == 0
+            QTimer.singleShot(0, lambda: answer('覆盖'))
+            queue.client.completed.emit('prepare', dict(item=track, lrc='new'))
+            queue.timer.stop()
+            assert queue.saved_count == 1 and target.read_text(encoding='utf-8') == 'new'
+            queue.start([track], True, root)
+            QTimer.singleShot(0, cloud.sessionChanged.emit)
+            queue.client.completed.emit('prepare', dict(item=track, lrc='late'))
+            assert not queue.running and target.read_text(encoding='utf-8') == 'new'
             companion.lyrics.shutdown()
             restored = LyricsController(pet, root)
             try:

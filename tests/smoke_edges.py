@@ -97,6 +97,14 @@ with tempfile.TemporaryDirectory() as scratch:
             assert pet.dock_target == 0, 'hover must not unfold a held push gesture'
             pet.drag_to(edge_position - outward * 48 + offset)
             assert pet.dragging and not pet.drag_dock_edge and not pet.dock_edge
+            # Pull out, move back near the edge, then release: no magnet bounce.
+            pet.drag_to(edge_position - outward * 12 + offset)
+            QTest.mouseRelease(pet, Qt.MouseButton.LeftButton, pos=offset)
+            assert not pet.dock_edge and settings.value('dock_edge') == ''
+            pet.behavior.layers.clear()
+            pet.press_point = pet.pos() + offset
+            pet.drag_offset = offset
+            pet.begin_drag()
             pet.drag_to(pushed)
             QTest.mouseRelease(pet, Qt.MouseButton.LeftButton, pos=offset)
             assert not pet.dragging and not pet.drag_dock_edge
@@ -120,6 +128,29 @@ with tempfile.TemporaryDirectory() as scratch:
         QTest.mouseRelease(pet, Qt.MouseButton.LeftButton, pos=QPoint(130, 90))
         assert not pet.dragging and pet.dock_edge == ''
         assert settings.value('dock_edge') == ''
+        # A folded singer peeks calmly without changing music or saved intent.
+        pet.set_mode('sing')
+        pet.dock_edge, pet.dock_reveal = 'left', 0
+        assert pet.display_activity() == 'idle' and pet.behavior.mode == 'sing'
+        pet.grab()
+        assert not pet.hit_region.isEmpty()
+        for mode in ('sleep', 'phone'):
+            pet.dock_edge = ''
+            pet.set_mode(mode)
+            pet.update_live2d_geometry(mode)
+            pet.press_point = pet.pos() + QPoint(130, 90)
+            pet.drag_offset = QPoint(130, 90)
+            pet.begin_drag()
+            pet.update_live2d_geometry('lift')
+            pet.drag_to(dock_position(pet.pos(), pet.size(), bounds, 'left')
+                        + QPoint(-26, 0) + pet.drag_offset)
+            assert pet.drag_dock_edge == 'left'
+            QTest.mouseRelease(pet, Qt.MouseButton.LeftButton, pos=QPoint(130, 90))
+            assert pet.behavior.mode == mode and pet.display_activity() == mode
+            assert pet.dock_target == 1, 'resting poses must remain fully visible'
+        pet.set_mode('idle')
+        pet.dock_edge = ''
+        pet.update_live2d_geometry('idle')
         # Render different poses into the SAME image, then compare with a fresh buffer.
         # This catches retained pixels outside the next pose, including old particles.
         pet.phase = 40.8

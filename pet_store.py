@@ -3,6 +3,9 @@ import sqlite3
 from datetime import datetime, timedelta
 
 FOODS = {"小包子": (8, 15, 3, 3), "小笼包": (15, 30, 6, 6), "桂花糕": (12, 15, 10, 4)}
+REWARD_SECONDS = 300
+REWARD_NOTES = 2
+DAILY_REWARD_BLOCKS = 50
 
 
 class PetStore:
@@ -55,13 +58,13 @@ class PetStore:
                 self.db.execute("""INSERT INTO listening(day,path,seconds) VALUES(?,?,?)
                     ON CONFLICT(day,path) DO UPDATE SET seconds=seconds+excluded.seconds""", (day,path,amount))
                 daily = self.db.execute("SELECT * FROM daily WHERE day=?", (day,)).fetchone()
-                if reward and daily['blocks'] < 24:
+                if reward and daily['blocks'] < DAILY_REWARD_BLOCKS:
                     progress = self.pet()['progress'] + amount
-                    blocks = min(int(progress // 300), 24 - daily['blocks'])
-                    self.db.execute("UPDATE pet SET progress=? WHERE id=1", (progress - blocks * 300,))
+                    blocks = min(int(progress // REWARD_SECONDS), DAILY_REWARD_BLOCKS - daily['blocks'])
+                    self.db.execute("UPDATE pet SET progress=? WHERE id=1", (progress - blocks * REWARD_SECONDS,))
                     if blocks:
                         self.db.execute("UPDATE daily SET blocks=blocks+? WHERE day=?", (blocks, day))
-                        self._grant(blocks * 5, blocks * 2, '听歌奖励', stop)
+                        self._grant(blocks * 5, blocks * REWARD_NOTES, '听歌奖励', stop)
                         if not daily['bonus']:
                             self.db.execute("UPDATE daily SET bonus=1 WHERE day=?", (day,))
                             self._grant(10, 0, '每日首次听歌', stop)
@@ -106,10 +109,15 @@ class PetStore:
         now = now or datetime.now()
         today = now.date().isoformat()
         week = (now.date() - timedelta(days=now.weekday())).isoformat()
-        row = self.db.execute("SELECT seconds FROM daily WHERE day=?", (today,)).fetchone()
+        row = self.db.execute("SELECT seconds,blocks FROM daily WHERE day=?", (today,)).fetchone()
         weekly = self.db.execute("SELECT COALESCE(SUM(seconds),0) FROM daily WHERE day BETWEEN ? AND ?", (week,today)).fetchone()[0]
         total = self.db.execute("SELECT COALESCE(SUM(seconds),0) FROM daily").fetchone()[0]
-        return {'today': row[0] if row else 0, 'week': weekly, 'total': total}
+        blocks = row['blocks'] if row else 0
+        return {'today': row['seconds'] if row else 0, 'week': weekly, 'total': total,
+                'reward_notes': blocks * REWARD_NOTES,
+                'reward_limit': DAILY_REWARD_BLOCKS * REWARD_NOTES,
+                'reward_remaining': None if blocks >= DAILY_REWARD_BLOCKS else
+                    max(0, REWARD_SECONDS - self.pet()['progress'])}
 
     def interact(self, now=None):
         day = (now or datetime.now()).date().isoformat()

@@ -4,7 +4,7 @@ import random
 import sqlite3
 import time
 
-from PySide6.QtCore import QPoint, QPointF, QRect, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QPainter, QPixmap, QRegion, QTransform, QPen, QDesktopServices, QCursor
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
@@ -16,12 +16,13 @@ from visual_style import (sprite_bounds, update_cover, preferred_variant,
                           APPEARANCE_REVISION, BUILTIN_APPEARANCES)
 from ui_theme import CONTROL_STYLE, apply_light_palette
 from app_icon import application_icon
-from edge_docking import EDGES, clamp_position, dock_position, nearest_edge, edge_gap, pushed_edge
+from edge_docking import (EDGES, clamp_position, dock_position, nearest_edge,
+                          pushed_edge, keep_drag_docked, dock_ease)
 from pet_behavior import MODES, PetBehavior
 from singing_motion import SingingRig, singing_pose
 from drag_motion import DragSway, interaction_pose
 from pointer_follow import PointerFollow
-from mouse_interactions import MouseInteractions, REACTION_SECONDS
+from mouse_interactions import MouseInteractions, ActiveHeadPetting, REACTION_SECONDS
 from pet_effects import PetEffects
 from character_packs import (builtin_sources, STATES, DEFAULT_ANCHORS, read_pack,
                              validate_images, selected_folder, discover_packs)
@@ -200,7 +201,7 @@ class PetToolbar(QFrame):
             self.add_button('聊天 API 设置', lambda: self.pet.open_chat(settings=True))
             self.add_button('扩展功能 / Mod', self.pet.open_mods)
         else:
-            hint = QLabel('点头部摸摸 · 拖动提起 · 双击/右键菜单')
+            hint = QLabel('点击打招呼 · 拖动提起 · 双击/右键菜单')
             hint.setObjectName('Muted')
             self.content.addWidget(hint)
             self.add_button('一起加油吧', lambda: self.pet.reply())
@@ -216,6 +217,7 @@ class PetToolbar(QFrame):
         self.content.addWidget(button)
 
     def toggle(self):
+        self.pet.end_petting()
         if self.isVisible():
             self.hide()
         else:
@@ -264,12 +266,26 @@ class DesktopPet(QWidget):
         self.drag_offset = None
         self.dragging = False
         self.drag_dock_edge = ''
+        self.drag_dock_bounds = None
+        self.drag_detached_dock = False
         self.drag_sway = DragSway()
         self.drag_anchor = QPointF(130, 82)
         self.drag_sample_point = None
         self.drag_sample_time = 0.0
         self.pointer_follow = PointerFollow()
         self.mouse_interactions = MouseInteractions()
+        self.active_petting = ActiveHeadPetting()
+        self.petting_block_reason = 'inactive'
+        self.petting = False
+        self.glove_cursor = None
+        self.glove_overlay_alpha = 0.0
+        self.glove_overlay_position = None
+        self.glove_contact = False
+        self.glove_hand_cache = {}
+        self.glove_overlay_draw_count = 0
+        self.glove_cursor_cache = {}
+        self.glove_cursor_pose = None
+        QApplication.instance().installEventFilter(self)
         self.dock_edge = ''
         self.dock_reveal = 1.0
         self.dock_target = 1.0
@@ -349,6 +365,7 @@ class DesktopPet(QWidget):
             control.setChecked(enabled)
             control.blockSignals(False)
         if enabled:
+            self.end_petting()
             self.hold_timer.stop()
             self.click_timer.stop()
             self.press_point = None
@@ -356,6 +373,8 @@ class DesktopPet(QWidget):
                 self.behavior.end_drag(landing=False)
             self.dragging = False
             self.drag_dock_edge = ''
+            self.drag_dock_bounds = None
+            self.drag_detached_dock = False
             self.toolbar.hide()
             self.bubble.hide()
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -422,6 +441,8 @@ class DesktopPet(QWidget):
             self.panel.appearance.setCurrentIndex(self.panel.appearance.findData(getattr(self, 'variant', 'refined')))
             self.panel.appearance.blockSignals(False)
             return False
+        self.end_petting()
+        self.cancel_interrupted_drag()
         if self.live2d_renderer is not None and renderer is not self.live2d_renderer:
             self.live2d_renderer.close()
         self.live2d_renderer = renderer
@@ -549,8 +570,11 @@ class DesktopPet(QWidget):
         from live2d_renderer import POSE_SCALE
         from music_tools.clock import beat_values
         elapsed = self.behavior.activity_elapsed
+        self.live2d_renderer.resume_activity = self.behavior.mode
         beat = self.current_music_beat(activity)
-        key = (activity, round(elapsed * 30), beat_values(beat), *(round(v, 3) for v in self.live2d_renderer.pointer))
+        key = (activity, self.behavior.mode, round(elapsed * 30), beat_values(beat),
+               *(round(v, 3) for v in self.live2d_renderer.pointer),
+               *(round(v, 3) for v in self.live2d_renderer.petting))
         try:
             if self.live2d_frame_key != key:
                 image = self.live2d_renderer.frame(activity, elapsed, beat)
@@ -593,9 +617,10 @@ class DesktopPet(QWidget):
             for name, pixmap in self.frames.items()
         }
         self.frame_masks = {name: QRegion(pixmap.mask()) for name, pixmap in self.scaled_frames.items()}
-        self.singing_rigs = {name: SingingRig(pixmap, self.frame_masks[name])
+        singing_hem = 0.64 if self.character_pack is None else self.character_pack.singing_hem
+        self.singing_rigs = {name: SingingRig(pixmap, self.frame_masks[name], singing_hem)
                              for name, pixmap in self.scaled_frames.items()
-                             if self.character_pack is None and name.startswith('sing-')}
+                             if singing_hem is not None and name.startswith('sing-')}
 
     def restore(self):
         screen = QApplication.primaryScreen().availableGeometry()
@@ -621,7 +646,10 @@ class DesktopPet(QWidget):
 
     def snap_to_edge(self):
         bounds = self.screen_bounds()
-        self.dock_edge = nearest_edge(self.pos(), self.size(), bounds, round(32 * self.scale))
+        # A deliberate pull out must not be undone by the release magnet.
+        self.dock_edge = ('' if self.drag_detached_dock else
+                          nearest_edge(self.pos(), self.size(), bounds, round(20 * self.scale)))
+        self.drag_detached_dock = False
         if self.dock_edge:
             self.move(dock_position(self.pos(), self.size(), bounds, self.dock_edge))
             self.fold_timer.start(900)
@@ -644,7 +672,7 @@ class DesktopPet(QWidget):
         music = getattr(self, 'music_companion', None)
         if music and music.window is not None and music.window.isVisible():
             return
-        if not self.dock_edge or self.dragging:
+        if not self.dock_edge or self.dragging or self.petting:
             return
         if (self.sleeping or self.using_phone or self.press_point is not None or self.toolbar.isVisible() or self.panel.isVisible() or
                 self.bubble.isVisible() or self.behavior.layers):
@@ -669,17 +697,27 @@ class DesktopPet(QWidget):
                            280 * self.scale + (self.anchors['head'][1] - self.anchors['feet'][1]) * image.height())
         return QPointF(self.width() / 2, 93 * self.scale)
 
+    def display_activity(self):
+        """Peeking is temporary; keep saved modes and the music state untouched."""
+        if self.drag_dock_edge:
+            return 'idle'
+        activity = self.behavior.activity
+        if (self.dock_edge and self.dock_reveal < .99 and
+                activity not in ('sleep', 'phone')):
+            return 'idle'
+        return activity
+
     def dock_transform(self):
         transform = QTransform()
         if not self.dock_edge:
             return transform
-        amount = 1.0 - self.dock_reveal
+        amount = dock_ease(self.dock_reveal)
         head = self.character_head()
         targets = {
-            'left': (QPointF(22 * self.scale, self.height() / 2), 90),
-            'right': (QPointF(self.width() - 22 * self.scale, self.height() / 2), -90),
-            'top': (QPointF(self.width() / 2, 25 * self.scale), 180),
-            'bottom': (QPointF(self.width() / 2, self.height() - 25 * self.scale), 0),
+            'left': (QPointF(40 * self.scale, self.height() / 2), 78),
+            'right': (QPointF(self.width() - 40 * self.scale, self.height() / 2), -78),
+            'top': (QPointF(self.width() / 2, 40 * self.scale), 180),
+            'bottom': (QPointF(self.width() / 2, self.height() - 40 * self.scale), 0),
         }
         target, angle = targets[self.dock_edge]
         transform.translate(head.x() + (target.x() - head.x()) * amount,
@@ -711,13 +749,151 @@ class DesktopPet(QWidget):
     def pat(self):
         if self.behavior.has_action('eat'):
             return
+        if self.live2d_renderer is not None:
+            self.start_petting()
+            return
         self.toolbar.hide()
+        self.reward_pat()
+        self.react('happy', words=random.choice(['嘿嘿，好开心呀！', '有你在，今天也很开心！', '和你待在一起真好～']))
+
+    def reward_pat(self):
         now = time.monotonic()
         if now - self.last_pat >= 60:
             self.panel.store.interact()
             self.last_pat = now
             self.panel.refresh_growth()
-        self.react('happy', words=random.choice(['嘿嘿，头发要被摸乱啦。', '有你在，今天也很开心！', '再陪我听一首吧？']))
+
+    def start_petting(self):
+        if self.live2d_renderer is None or self.mouse_passthrough or self.dragging:
+            return
+        self.toolbar.hide()
+        if self.sleeping or self.using_phone or self.behavior.has_action('eat'):
+            self.bubble.say('等我休息或吃完，再来摸摸头吧。')
+            return
+        try:
+            from glove_cursor import hand_pixmap, make_glove_cursor
+            hand_pixmap(112)  # Validate/cache both authored poses before animation.
+            self.glove_cursor_cache[(0, 0)] = make_glove_cursor()
+        except (ImportError, OSError, ValueError, RuntimeError):
+            self.end_petting()
+            self.bubble.say('摸头手掌素材暂时没有加载成功，请更新完整程序后再试。')
+            return
+        self.petting = True
+        self.active_petting.leave()
+        self.click_timer.stop()
+        self.hold_timer.stop()
+        self.press_point = None
+        self.mouse_interactions.step(0, 0, 0, enabled=False)
+        self.reveal_dock()
+        self.update_petting_cursor()
+        self.activateWindow()
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
+        self.bubble.say(random.choice(['嘿嘿，好开心呀！', '有你在，今天也很开心！', '和你待在一起真好～']), 5000)
+
+    def end_petting(self):
+        if not self.petting:
+            return
+        self.petting = False
+        self.active_petting.leave()
+        self.press_point = None
+        self.mouse_interactions.step(0, 0, 0, enabled=False)
+        self.glove_cursor_pose = None
+        self.glove_cursor = None
+        self.glove_overlay_alpha = 0.0
+        self.glove_overlay_position = None
+        self.glove_contact = False
+        self.unsetCursor()
+        self.update()
+
+    def update_petting_cursor(self, contact=0.0, direction=0.0):
+        """Reuse a small pose atlas and change the native cursor only as needed."""
+        if not self.petting:
+            return
+        if self.glove_contact:
+            if self.glove_cursor_pose != 'overlay':
+                self.glove_cursor_pose = 'overlay'
+                self.setCursor(Qt.CursorShape.BlankCursor)
+            return
+        # The small cursor is only a preparation cue. Contact uses the palm
+        # painted in front of the model, never a second native cursor hand.
+        contact = direction = 0.0
+        press = round(max(0.0, min(1.0, contact)) * 4)
+        turn = round(max(-1.0, min(1.0, direction)) * 3) if press else 0
+        pose = (press, turn)
+        if pose == self.glove_cursor_pose:
+            return
+        cursor = self.glove_cursor_cache.get(pose)
+        if cursor is None:
+            from glove_cursor import make_glove_cursor
+            cursor = make_glove_cursor(contact=press / 4, direction=turn / 3)
+            self.glove_cursor_cache[pose] = cursor
+        self.glove_cursor_pose = pose
+        self.glove_cursor = cursor
+        self.setCursor(cursor)
+
+    def update_petting_hand(self, pointer, seconds, contact):
+        """Move a foreground palm with the real pointer; never change hit regions."""
+        self.glove_contact = bool(contact and self.active_petting.previous is not None)
+        if not self.petting:
+            self.glove_overlay_alpha = 0.0
+            self.glove_overlay_position = None
+            return
+        if self.glove_contact:
+            box = self.head_region.boundingRect()
+            # Leave the eyes visible: the near edge rests across the crown and
+            # upper fringe, with enough top padding for the wrist/cuff.
+            x = box.center().x() + box.width()*.14 + max(-box.width()*.23, min(box.width()*.23,
+                                                          (pointer.x()-box.center().x())*.55))
+            y = box.top()+box.height()*.40
+            target = QPointF(x, y)
+            if self.glove_overlay_position is None:
+                self.glove_overlay_position = target
+            else:
+                self.glove_overlay_position += (target-self.glove_overlay_position)*(1-math.exp(-seconds*15))
+        target_alpha = 1.0 if self.glove_contact else 0.0
+        rate = .065 if self.glove_contact else .11
+        self.glove_overlay_alpha += (target_alpha-self.glove_overlay_alpha)*(1-math.exp(-seconds/rate))
+        if self.glove_overlay_alpha < .01:
+            self.glove_overlay_alpha = 0.0
+            if not self.glove_contact:
+                self.glove_overlay_position = None
+
+    def paint_petting_hand(self, painter):
+        if not self.petting or self.glove_overlay_alpha <= .01 or self.glove_overlay_position is None:
+            return
+        from glove_cursor import hand_pixmap, hand_contact_anchor
+        # Visible art spans ~85% of this canvas, giving ~80% head coverage.
+        width = max(32, round(self.head_region.boundingRect().width()*.94))
+        pressure = round(self.active_petting.strength*4)
+        turn = round(self.active_petting.direction*3)
+        key = (width, pressure, turn)
+        pixmap = self.glove_hand_cache.get(key)
+        if pixmap is None:
+            # Cache generated art: each animation frame only composites a bitmap.
+            if len(self.glove_hand_cache) >= 96:
+                self.glove_hand_cache.clear()
+            pixmap = hand_pixmap(width, contact=pressure/4, direction=turn/3)
+            self.glove_hand_cache[key] = pixmap
+        anchor = hand_contact_anchor(width)
+        point = QPointF(self.glove_overlay_position)
+        point.setY(point.y()+2*self.scale*self.active_petting.strength
+                   -(1-self.glove_overlay_alpha)*8*self.scale)
+        # Keep the puffy cuff inside the existing window without expanding its
+        # hit region. The fingers remain above the eye line.
+        point.setY(max(point.y(), anchor.y()+4*self.scale))
+        painter.save()
+        painter.resetTransform()
+        painter.setOpacity(self.glove_overlay_alpha)
+        painter.drawPixmap(point-anchor, pixmap)
+        painter.restore()
+        self.glove_overlay_draw_count = getattr(self, 'glove_overlay_draw_count', 0) + 1
+
+    def eventFilter(self, watched, event):
+        if (self.petting and event.type() == QEvent.Type.KeyPress
+                and event.key() == Qt.Key.Key_Escape):
+            self.end_petting()
+            return True
+        return super().eventFilter(watched, event)
 
     def touch(self):
         self.toolbar.hide()
@@ -727,8 +903,6 @@ class DesktopPet(QWidget):
         elif self.sleeping:
             self.set_mode('idle')
             self.react('happy', words='醒啦！要一起听歌吗？')
-        elif getattr(self, 'touch_head', True):
-            self.pat()
         else:
             self.react('poke', 1.0, '欸？是在叫我吗？')
 
@@ -796,6 +970,7 @@ class DesktopPet(QWidget):
         self.react('happy', words='起来啦，继续陪你！')
 
     def set_mode(self, mode):
+        self.end_petting()
         self.behavior.set_mode(mode)
         self.panel.settings.setValue('activity_mode', mode)
         self.update()
@@ -819,19 +994,26 @@ class DesktopPet(QWidget):
             self.bubble.say(words)
 
     def begin_drag(self):
-        if self.press_point is None or self.dragging:
+        if self.petting or self.press_point is None or self.dragging:
             return
         self.hold_timer.stop()
         was_docked = bool(self.dock_edge)
+        was_folded = was_docked and self.dock_reveal < .99
+        # Invert the visible pose before clearing it, so a held cheek or hair
+        # stays attached to that point rather than jumping to the head center.
+        inverse, invertible = self.dock_transform().inverted()
+        held_point = inverse.map(QPointF(self.press_point - self.pos())).toPoint()
         self.dragging = True
         self.drag_dock_edge = ''
+        self.drag_dock_bounds = None
+        self.drag_detached_dock = was_docked
         self.click_timer.stop()
         self.fold_timer.stop()
         self.dock_edge = ''
         self.dock_reveal = self.dock_target = 1.0
-        if was_docked:
-            # Keep the head close to the held pointer as it unfolds from the edge.
-            desired = self.press_point - self.character_head().toPoint()
+        if was_folded:
+            # Unfold around the picked point, subject to the available work area.
+            desired = self.press_point - (held_point if invertible else self.character_head().toPoint())
             self.move(clamp_position(desired, self.size(), self.screen_bounds()))
             self.drag_offset = self.press_point - self.pos()
         self.behavior.begin_drag()
@@ -843,10 +1025,104 @@ class DesktopPet(QWidget):
         self.bubble.hide()
         self.setCursor(Qt.CursorShape.ClosedHandCursor)
 
+    def cancel_interrupted_drag(self):
+        """Discard a lost grab without replacing the saved activity."""
+        if not self.dragging and self.press_point is None:
+            return
+        self.hold_timer.stop()
+        self.click_timer.stop()
+        self.press_point = None
+        self.behavior.end_drag(landing=False)
+        self.dragging = False
+        self.drag_dock_edge = ''
+        self.drag_dock_bounds = None
+        self.drag_detached_dock = False
+        self.drag_sample_point = None
+        self.drag_sway.start()
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.live2d_frame_key = None
+        renderer = getattr(self, 'live2d_renderer', None)
+        if renderer is not None:
+            renderer.lift_reaction.reset()
+        self.update()
+
+    def petting_contact_region(self):
+        """Double horizontal reach about the head center, preserving height."""
+        box = self.head_region.boundingRect()
+        center_x = box.x() + box.width() / 2
+        transform = QTransform()
+        transform.translate(center_x, 0)
+        transform.scale(2, 1)
+        transform.translate(-center_x, 0)
+        return transform.map(self.head_region.intersected(self.hit_region))
+
+    def paint_petting_contact_region(self, painter):
+        if not self.petting:
+            return
+        # A nonzero alpha lets Windows receive input in the expanded transparent
+        # margin. Keep this surface limited to explicit petting mode; the native
+        # occlusion check still rejects other windows covering the pet.
+        painter.save()
+        painter.setClipRegion(self.petting_contact_region())
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 1))
+        painter.restore()
+
+    def pointer_reaches_pet(self, point):
+        """Own transparent effects may overlap; other interactive windows may not.
+
+        Qt's widgetAt only knows Qt widgets, so Windows also checks the actual
+        native window stack. Physical cursor coordinates avoid mixed-DPI errors.
+        """
+        widget = QApplication.widgetAt(point)
+        own = widget is self or (widget is not None and widget.window() is self)
+        import sys
+        if sys.platform != 'win32':
+            return own
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user = ctypes.windll.user32
+            user.WindowFromPoint.argtypes = [wintypes.POINT]
+            user.WindowFromPoint.restype = wintypes.HWND
+            user.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+            user.GetAncestor.restype = wintypes.HWND
+            user.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+            user.GetWindow.restype = wintypes.HWND
+            user.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+            user.IsWindowVisible.argtypes = [wintypes.HWND]
+            cursor = wintypes.POINT()
+            if not user.GetCursorPos(ctypes.byref(cursor)):
+                return False
+            hit = user.WindowFromPoint(cursor)
+            hit = user.GetAncestor(hit, 2) if hit else None  # GA_ROOT, not owner
+            pet_handle = int(self.winId())
+            effect_handle = int(self.effects.winId()) if self.effects.isVisible() else 0
+            if hit == pet_handle:
+                return True
+            if hit != effect_handle or not effect_handle:
+                return False
+            # Only skip our known input-transparent effect window, never an
+            # arbitrary foreign overlay. Stop at the next visible window here.
+            for _ in range(256):
+                hit = user.GetWindow(hit, 2)  # GW_HWNDNEXT
+                if not hit:
+                    return False
+                rect = wintypes.RECT()
+                if (not user.IsWindowVisible(hit) or not user.GetWindowRect(hit, ctypes.byref(rect))
+                        or not (rect.left <= cursor.x < rect.right and rect.top <= cursor.y < rect.bottom)):
+                    continue
+                return hit == pet_handle
+            return False
+        except (OSError, AttributeError, ValueError):
+            # A failed native check cannot authorize petting behind another app.
+            return False
+
     def animate(self):
         now = time.monotonic()
         delta = min(0.1, max(0, now - self.last_frame_time))
         self.last_frame_time = now
+        if self.dock_edge and not self.dragging and (self.sleeping or self.using_phone):
+            self.dock_target = 1.0
         if self.dock_reveal != self.dock_target:
             step = delta / 0.24
             difference = self.dock_target - self.dock_reveal
@@ -856,14 +1132,17 @@ class DesktopPet(QWidget):
             self.fold_timer.start(900)
         self.phase = now
         self.drag_sway.step(delta)
-        self.behavior.tick(delta)
+        # The contact is a presentation overlay: retain the previous activity's
+        # clock and playback intent, and resume it after the release has faded.
+        if self.live2d_renderer is None or self.active_petting.strength <= .01 or self.behavior.layers:
+            self.behavior.tick(delta)
         if self.live2d_renderer is not None:
-            activity = 'idle' if self.drag_dock_edge else self.behavior.activity
+            activity = self.display_activity()
             self.update_live2d_geometry(activity)
             global_pointer = QCursor.pos()
             pointer = self.mapFromGlobal(global_pointer)
             head = self.character_head()
-            enabled = (self.panel.pointer_toggle.isChecked() and not self.dragging
+            enabled = (self.panel.pointer_toggle.isChecked() and not self.petting and not self.dragging
                        and not self.dock_edge and self.press_point is None
                        and not self.panel.isVisible() and not self.toolbar.isVisible()
                        and activity not in ('sleep', 'phone', 'lift', 'land'))
@@ -871,7 +1150,8 @@ class DesktopPet(QWidget):
                 pointer.x()-head.x(), pointer.y()-head.y(), delta,
                 enabled=enabled, scale=self.scale)
             local = pointer
-            in_head = self.head_region.contains(local)
+            in_head = (self.petting_contact_region().contains(local) if self.petting else
+                       self.head_region.contains(local) and self.hit_region.contains(local))
             # The free singing hand is extended; natural hands are lower. Keep
             # the dwell target with the visible pose rather than over a thigh.
             hands = (((self.width()/2-62*self.scale, 185*self.scale),)
@@ -880,15 +1160,31 @@ class DesktopPet(QWidget):
                            for side in (-1, 1)))
             near_hand = any(math.hypot(local.x()-x, local.y()-y) < 27*self.scale
                             for x, y in hands) and not in_head
-            reaction = self.mouse_interactions.step(
-                global_pointer.x(), global_pointer.y(), delta,
-                in_head=in_head, near_hand=near_hand, scale=self.scale,
-                enabled=(self.panel.interactions_toggle.isChecked() and not self.mouse_passthrough
-                         and not self.dragging and not self.dock_edge and self.press_point is None
+            available = (not self.mouse_passthrough and self.isVisible()
+                         and not self.dragging and (not self.dock_edge or self.petting and self.dock_reveal >= .99)
+                         and self.press_point is None
                          and not self.click_timer.isActive() and not self.hold_timer.isActive()
                          and not self.behavior.layers and not self.sleeping and not self.using_phone
                          and not self.panel.isVisible() and not self.toolbar.isVisible()
-                         and not self.hit_region.isEmpty()))
+                         and not self.hit_region.isEmpty())
+            reaches_pet = self.pointer_reaches_pet(global_pointer) if available and (self.petting or self.panel.interactions_toggle.isChecked()) else False
+            self.petting_block_reason = ('inactive' if not self.petting else 'unavailable' if not available
+                                         else 'outside-head' if not in_head else 'occluded' if not reaches_pet else '')
+            credited_stroke = self.active_petting.step(
+                local.x(), local.y(), delta, scale=self.scale,
+                head_width=self.head_region.boundingRect().width(),
+                contact=self.petting and available and reaches_pet and in_head)
+            self.live2d_renderer.petting = (self.active_petting.strength, self.active_petting.direction)
+            self.update_petting_hand(local, delta, self.petting and available and reaches_pet and in_head)
+            self.update_petting_cursor(self.active_petting.strength, self.active_petting.direction)
+            if credited_stroke:
+                self.reward_pat()
+            reaction = self.mouse_interactions.step(
+                global_pointer.x(), global_pointer.y(), delta,
+                # Head petting starts only from the control panel's button.
+                in_head=False, near_hand=near_hand and not self.petting, scale=self.scale,
+                enabled=(not self.petting and self.panel.interactions_toggle.isChecked()
+                         and available and reaches_pet))
             if reaction:
                 self.react(reaction, REACTION_SECONDS[reaction])
         elif self.width() != round(260 * self.scale):
@@ -905,9 +1201,11 @@ class DesktopPet(QWidget):
         painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
         now = self.phase or time.monotonic()
         elapsed = self.behavior.elapsed
-        activity = 'idle' if self.drag_dock_edge else self.behavior.activity
+        activity = self.display_activity()
         if self.live2d_renderer is not None:
             self.paint_live2d(painter, activity)
+            self.paint_petting_contact_region(painter)
+            self.paint_petting_hand(painter)
             painter.end()
             return
         state = 'idle'
@@ -1000,6 +1298,9 @@ class DesktopPet(QWidget):
         if self.mouse_passthrough:
             event.ignore()
             return
+        if self.petting:
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             if not self.hit_region.contains(event.position().toPoint()):
                 event.ignore()
@@ -1031,20 +1332,25 @@ class DesktopPet(QWidget):
                                 now - self.drag_sample_time, self.scale)
         self.drag_sample_point, self.drag_sample_time = QPoint(point), now
         desired = point - self.drag_offset
+        screen = (QApplication.screenAt(point) or
+                  QApplication.screenAt(self.frameGeometry().center()) or QApplication.primaryScreen())
+        bounds = screen.availableGeometry()
         if self.drag_dock_edge:
-            bounds = self.screen_bounds()
-            if edge_gap(desired, self.size(), bounds, self.drag_dock_edge) < round(12 * self.scale):
-                self.move(dock_position(desired, self.size(), bounds, self.drag_dock_edge))
+            latched_bounds = self.drag_dock_bounds or self.screen_bounds()
+            if keep_drag_docked(desired, self.size(), latched_bounds,
+                                self.drag_dock_edge, bounds, self.scale):
+                self.move(dock_position(desired, self.size(), latched_bounds, self.drag_dock_edge))
                 return
             # Pull back into the desktop during the same held gesture to detach.
             self.drag_dock_edge = self.dock_edge = ''
+            self.drag_dock_bounds = None
+            self.drag_detached_dock = True
             self.dock_reveal = self.dock_target = 1.0
-        screen = QApplication.screenAt(point) or QApplication.primaryScreen()
-        bounds = screen.availableGeometry()
         self.move(clamp_position(desired, self.size(), bounds))
         edge = pushed_edge(desired, self.size(), bounds, round(24 * self.scale))
         if edge:
             self.drag_dock_edge = self.dock_edge = edge
+            self.drag_dock_bounds = QRect(bounds)
             self.fold_timer.stop()
             self.dock_target = 0.0
             self.move(dock_position(self.pos(), self.size(), bounds, edge))
@@ -1055,6 +1361,9 @@ class DesktopPet(QWidget):
         self.hold_timer.stop()
         if self.mouse_passthrough:
             event.ignore()
+            return
+        if self.petting:
+            event.accept()
             return
         if event.button() != Qt.MouseButton.LeftButton:
             return
@@ -1070,8 +1379,10 @@ class DesktopPet(QWidget):
             self.drag_sway.release()
             if self.drag_dock_edge:
                 self.drag_dock_edge = ''
+                self.drag_dock_bounds = None
+                self.drag_detached_dock = False
                 self.behavior.end_drag(landing=False)
-                self.dock_target = 0.0
+                self.dock_target = 1.0 if self.sleeping or self.using_phone else 0.0
                 self.save_position()
                 self.setCursor(Qt.CursorShape.ArrowCursor)
                 self.update()
@@ -1086,6 +1397,9 @@ class DesktopPet(QWidget):
         if self.mouse_passthrough:
             event.ignore()
             return
+        if self.petting:
+            event.accept()
+            return
         self.click_timer.stop()
         self.ignore_release = True
         self.toolbar.toggle()
@@ -1094,14 +1408,26 @@ class DesktopPet(QWidget):
         if self.mouse_passthrough:
             event.ignore()
             return
+        if self.petting:
+            self.end_petting()
+            event.accept()
+            return
         self.toolbar.toggle()
 
     def hideEvent(self, event):
+        self.end_petting()
+        self.cancel_interrupted_drag()
         self.toolbar.hide()
         self.bubble.hide()
         if hasattr(self, 'effects'):
             self.effects.hide()
         super().hideEvent(event)
+
+    def event(self, event):
+        if (event.type() == QEvent.Type.UngrabMouse
+                and getattr(self, 'dragging', False)):
+            self.cancel_interrupted_drag()
+        return super().event(event)
 
     def showEvent(self, event):
         super().showEvent(event)

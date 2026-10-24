@@ -27,17 +27,52 @@ class PetStoreTests(unittest.TestCase):
     def test_five_minutes_and_daily_cap(self):
         self.listen(300)
         self.assertEqual((self.store.pet()['notes'], self.store.pet()['xp']), (22, 15))
-        self.listen(7200, start=self.start + timedelta(seconds=300))
+        self.listen(15000, start=self.start + timedelta(seconds=300))
         pet = self.store.pet()
-        self.assertEqual(pet['notes'], 68)
-        self.assertEqual(self.store.stats(self.start)['today'], 7500)
-        self.assertEqual(self.store.db.execute('SELECT SUM(xp) FROM ledger').fetchone()[0], 130)
+        self.assertEqual(pet['notes'], 120)
+        self.assertEqual(self.store.stats(self.start)['today'], 15300)
+        self.assertEqual(self.store.db.execute('SELECT SUM(xp) FROM ledger').fetchone()[0], 260)
 
     def test_muted_counts_without_rewards(self):
         self.listen(300, reward=False)
         self.assertEqual(self.store.stats(self.start)['today'], 300)
         self.assertEqual(self.store.pet()['notes'], 20)
         self.assertEqual(self.store.pet()['progress'], 0)
+
+    def test_reward_status_tracks_earned_notes_not_balance(self):
+        self.assertEqual(self.store.stats(self.start)['reward_remaining'], 300)
+        self.listen(420)
+        self.store.feed('小包子', self.start + timedelta(seconds=421))
+        stats = self.store.stats(self.start)
+        self.assertEqual(stats['reward_notes'], 2)
+        self.assertEqual(stats['reward_limit'], 100)
+        self.assertEqual(stats['reward_remaining'], 180)
+        self.assertEqual(self.store.pet()['notes'], 14)
+        self.listen(300, reward=False, start=self.start + timedelta(seconds=425))
+        self.assertEqual(self.store.stats(self.start)['reward_remaining'], 180)
+
+    def test_daily_cap_resets_after_midnight_without_restart(self):
+        self.listen(15000)
+        self.assertIsNone(self.store.stats(self.start)['reward_remaining'])
+        self.listen(3600, start=self.start + timedelta(seconds=15000))
+        self.assertEqual(self.store.pet()['notes'], 120)
+        self.assertEqual(self.store.stats(self.start)['today'], 18600)
+        tomorrow = self.start + timedelta(days=1)
+        self.assertEqual(self.store.stats(tomorrow)['reward_notes'], 0)
+        self.assertEqual(self.store.stats(tomorrow)['reward_remaining'], 300)
+        self.listen(300, start=tomorrow)
+        self.assertEqual(self.store.pet()['notes'], 122)
+        self.assertEqual(self.store.stats(tomorrow)['reward_notes'], 2)
+        self.assertEqual(self.store.stats(self.start)['reward_notes'], 100)
+
+    def test_existing_old_cap_can_keep_earning_after_update(self):
+        self.listen(7200)
+        self.store.close()
+        self.store = PetStore(self.path)
+        self.assertEqual(self.store.stats(self.start)['reward_notes'], 48)
+        self.assertEqual(self.store.stats(self.start)['reward_remaining'], 300)
+        self.listen(300, start=self.start + timedelta(seconds=7200))
+        self.assertEqual(self.store.stats(self.start)['reward_notes'], 50)
 
     def test_restart_retains_partial_reward(self):
         self.listen(295)

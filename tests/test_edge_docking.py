@@ -1,6 +1,7 @@
 import unittest
 from PySide6.QtCore import QPoint, QRect, QSize
-from edge_docking import clamp_position, dock_position, nearest_edge, pushed_edge, edge_gap
+from edge_docking import (clamp_position, dock_position, nearest_edge, pushed_edge,
+                          edge_gap, keep_drag_docked, dock_ease)
 
 
 class EdgeGeometryTests(unittest.TestCase):
@@ -46,6 +47,29 @@ class EdgeGeometryTests(unittest.TestCase):
             point = dock_position(QPoint(-1000, 100), self.size, self.bounds, edge)
             self.assertEqual(pushed_edge(point + delta, self.size, self.bounds), edge)
             self.assertEqual(pushed_edge(point + delta, self.size, self.bounds, 25), '')
+
+    def test_pull_dead_zone_scales_and_ignores_tangential_motion(self):
+        for scale in (.75, 1, 1.5):
+            for edge, inward in [('left', QPoint(1, 0)), ('right', QPoint(-1, 0)),
+                                  ('top', QPoint(0, 1)), ('bottom', QPoint(0, -1))]:
+                origin = dock_position(QPoint(-1000, 100), self.size, self.bounds, edge)
+                threshold = round(36 * scale)
+                self.assertTrue(keep_drag_docked(origin + inward * (threshold-1),
+                    self.size, self.bounds, edge, self.bounds, scale))
+                self.assertFalse(keep_drag_docked(origin + inward * threshold,
+                    self.size, self.bounds, edge, self.bounds, scale))
+
+    def test_crossing_to_another_monitor_releases_old_edge(self):
+        origin = dock_position(QPoint(-1000, 100), self.size, self.bounds, 'right')
+        self.assertFalse(keep_drag_docked(origin, self.size, self.bounds, 'right',
+                                         QRect(0, 0, 2560, 1400)))
+
+    def test_easing_is_bounded_monotonic_and_soft_at_both_ends(self):
+        values = [dock_ease(i/100) for i in range(101)]
+        self.assertEqual((values[0], values[-1]), (1, 0))
+        self.assertTrue(all(a >= b for a, b in zip(values, values[1:])))
+        self.assertLess(1-values[1], .001)
+        self.assertLess(values[-2], .001)
 
 
 if __name__ == '__main__':

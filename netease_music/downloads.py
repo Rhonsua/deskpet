@@ -22,7 +22,11 @@ def safe_stem(value):
     if re.fullmatch(r'(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?',value):value='_'+value
     return value
 
-def _commit(part,directory,stem,extension,paired_lrc=False):
+def _commit(part,directory,stem,extension,paired_lrc=False,overwrite=False):
+    if overwrite:
+        target=directory/f'{stem}.{extension}'
+        os.replace(part,target)
+        return target
     # Both platform paths commit atomically and refuse a racing existing destination.
     for index in range(10000):
         name=f'{stem}{" ("+str(index)+")" if index else ""}.{extension}'
@@ -36,7 +40,7 @@ def _commit(part,directory,stem,extension,paired_lrc=False):
         return target
     raise OSError('可用文件名过多，请换一个名称')
 
-def export_lrc(directory,stem,lrc):
+def export_lrc(directory,stem,lrc,*,overwrite=False):
     if not isinstance(lrc,str) or not lrc.strip():raise ValueError('没有可导出的歌词')
     data=lrc.encode('utf-8')
     if len(data)>1024*1024:raise ValueError('歌词超过1MiB限制')
@@ -46,7 +50,7 @@ def export_lrc(directory,stem,lrc):
     part=Path(name)
     try:
         with os.fdopen(fd,'wb') as output:output.write(data);output.flush();os.fsync(output.fileno())
-        return str(_commit(part,directory,safe_stem(stem),'lrc'))
+        return str(_commit(part,directory,safe_stem(stem),'lrc',overwrite=overwrite))
     finally:part.unlink(missing_ok=True)
 
 def audio_extension(prefix):
@@ -60,12 +64,14 @@ def audio_extension(prefix):
 
 class Downloader(QObject):
     completed=Signal(str,str)
+    skipped=Signal()
     failed=Signal(str)
     warning=Signal(str)
     progress=Signal(int,int)
     def __init__(self,parent=None):
         super().__init__(parent)
         self.manager=QNetworkAccessManager(self);self.reply=None;self.part=None;self.file=None
+        self.resolve_conflict=None
         self.timer=QTimer(self);self.timer.setSingleShot(True);self.timer.timeout.connect(lambda:self._fail('下载超过30秒无响应，已停止'))
         self.received=0;self.total=0;self.expected_size=0;self.prefix=b'';self.directory=None;self.stem='';self.lrc='';self.started=0
     def start(self,url,directory,stem,extension,lrc='',expected_size=0):
@@ -133,7 +139,20 @@ class Downloader(QObject):
             if not self.received or (self.total and self.received!=self.total) or (self.expected_size and self.received!=self.expected_size):raise ValueError('音频长度不完整')
             extension=audio_extension(self.prefix)
             self.file.flush();os.fsync(self.file.fileno());self.file.close();self.file=None
-            audio=_commit(self.part,self.directory,self.stem,extension,paired_lrc=bool(self.lrc.strip()));self.part=None
+            self.timer.stop()
+            target=self.directory/f'{self.stem}.{extension}'
+            candidates=[target]+([target.with_suffix('.lrc')] if self.lrc.strip() else [])
+            conflicts=[path for path in candidates if path.exists()]
+            overwrite=False
+            if conflicts and self.resolve_conflict:
+                part=self.part
+                decision=self.resolve_conflict(conflicts)
+                # A modal prompt can process account changes or cancellation.
+                if self.reply is not reply or self.part!=part:return
+                if decision!='overwrite':
+                    self._cleanup();self.skipped.emit();return
+                overwrite=True
+            audio=_commit(self.part,self.directory,self.stem,extension,paired_lrc=bool(self.lrc.strip()),overwrite=overwrite);self.part=None
         except (OSError,ValueError):self._fail('音频下载未完成或返回内容不是支持的音频；已清理临时文件');return
         self.reply=None;self.timer.stop();reply.deleteLater()
         lrc_path=''
@@ -141,8 +160,8 @@ class Downloader(QObject):
             try:
                 # An audio filename may be uniquely suffixed. Keep its exact stem for lyrics.
                 target=audio.with_suffix('.lrc')
-                if target.exists():raise FileExistsError()
-                lrc_path=export_lrc(self.directory,audio.stem,self.lrc)
+                if target.exists() and not overwrite:raise FileExistsError()
+                lrc_path=export_lrc(self.directory,audio.stem,self.lrc,overwrite=overwrite)
                 if Path(lrc_path)!=target:
                     # Racing writer acquired the same lyric name; no mismatched sidecar.
                     Path(lrc_path).unlink(missing_ok=True);lrc_path='';raise FileExistsError()

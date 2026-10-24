@@ -17,6 +17,13 @@ datas += [(str(root / 'bilibili_probe.js'), '.'), (str(root / 'bilibili_early.js
 datas += collect_data_files('webview')
 datas.append((str(root / 'assets' / 'icons' / 'tianyi.ico'), 'assets/icons'))
 datas.append((str(root / 'pet_chat' / 'personas' / 'luotianyi.json'), 'pet_chat/personas'))
+# Only aligned original hand poses: exclude generation sheets and references.
+hand_root = root / 'assets' / 'ui' / 'headpat'
+for name in ('hand-hover.png', 'hand-contact.png', 'manifest.json'):
+    path = hand_root / name
+    if not path.is_file():
+        raise ValueError('Missing headpat hand asset: ' + str(path))
+    datas.append((str(path), 'assets/ui/headpat'))
 # Bundle exactly the active Tianyi export, never user character directories or
 # older model exports. An incomplete local export must fail the build.
 model_root = root / 'assets' / 'live2d' / 'tianyi'

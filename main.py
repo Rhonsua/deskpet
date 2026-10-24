@@ -375,11 +375,15 @@ class MusicPanel(QWidget):
     def refresh_growth(self):
         pet = self.store.pet()
         stats = self.store.stats()
+        remaining = stats['reward_remaining']
+        reward_status = ('今日听歌奖励已达上限，明日恢复；听歌时长仍会累计' if remaining is None else
+                         f"再有效听歌 {clock(int(remaining * 1000 + 999))} 可获得 2 音符")
         self.growth.setText(
             f"等级 {pet['level']} · 经验 {pet['xp']} · 音符 {pet['notes']}\n"
             f"饱食度 {pet['hunger']}/100 · 心情 {pet['mood']}/100\n"
             f"听歌：今日 {clock(int(stats['today'] * 1000))} / "
-            f"本周 {clock(int(stats['week'] * 1000))} / 累计 {clock(int(stats['total'] * 1000))}"
+            f"本周 {clock(int(stats['week'] * 1000))} / 累计 {clock(int(stats['total'] * 1000))}\n"
+            f"今日听歌已获 {stats['reward_notes']}/{stats['reward_limit']} 音符\n{reward_status}"
         )
         self.experience.setRange(0, 50 + 20 * (pet['level'] - 1))
         self.experience.setValue(pet['xp'])

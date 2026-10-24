@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 from pointer_follow import apply_pointer
+from mouse_interactions import apply_active_petting
+from lift_reaction import LiftReactionOverlay
 
 MODEL_ROOT = Path(__file__).resolve().parent / 'assets' / 'live2d' / 'tianyi'
 # Compare source head widths, not full canvas heights: standing 603px,
@@ -22,6 +24,8 @@ class Live2DRenderer:
         self.live2d, self.gl = live2d, GL
         self.model = self.fbo = None
         self.pointer = (0.0, 0.0, 0.0)
+        self.petting = (0.0, 0.0)
+        self.resume_activity = 'idle'
         self.context = QOpenGLContext()
         fmt = QSurfaceFormat()
         fmt.setVersion(2, 1)
@@ -49,6 +53,8 @@ class Live2DRenderer:
             self.model.SetAutoBlink(False)
             self.model.SetAutoBreath(False)
             self.parts = {key: i for i, key in enumerate(self.model.GetPartIds())}
+            self.parameter_ids = set(self.model.GetParamIds())
+            self.lift_reaction = LiftReactionOverlay()
             expected = {key for group in self.motions.mapping['poseGroups'] for key in group}
             if not expected <= self.parts.keys() or not self.model.GetParamIds():
                 raise RuntimeError('Live2D 模型未完整加载')
@@ -73,8 +79,13 @@ class Live2DRenderer:
             parameters.setdefault('ParamAngleY', 0.0)
             parameters.setdefault('ParamEyeBallY', 0.0)
             parameters = apply_pointer(parameters, activity, self.pointer)
+            parameters = apply_active_petting(parameters, activity, self.petting)
+            parameters = self.lift_reaction.apply(
+                activity, seconds, parameters, self.parameter_ids,
+                resume_activity=self.resume_activity)
             for key, value in parameters.items():
-                self.model.SetSaveParamById(key, value)
+                if key in self.parameter_ids:
+                    self.model.SetSaveParamById(key, value)
             for key, value in parts.items():
                 self.model.SetPartOpacity(self.parts[key], value)
             self.model.Update(0)

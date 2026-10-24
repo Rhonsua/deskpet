@@ -28,6 +28,8 @@ assets/icons/*.ico
 # New character artwork is local; previously tracked files are unchanged.
 assets/character/**/*.png
 assets/character/*.png
+# Locally generated head-petting artwork is distributed with other runtime art.
+assets/ui/headpat/
 experiments/
 character-packages/
 docs/model-issues/

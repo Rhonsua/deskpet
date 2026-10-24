@@ -43,15 +43,16 @@ class DownloadsTests(unittest.TestCase):
     def tearDownClass(cls):cls.server.shutdown();cls.server.server_close()
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=Path.cwd());self.directory=Path(self.temp.name)
-        self.downloader=Downloader();self.done=[];self.failed=[];self.warnings=[]
+        self.downloader=Downloader();self.done=[];self.failed=[];self.warnings=[];self.skipped=[]
+        self.downloader.skipped.connect(lambda:self.skipped.append(True))
         self.downloader.completed.connect(lambda *args:self.done.append(args));self.downloader.failed.connect(self.failed.append);self.downloader.warning.connect(self.warnings.append)
         self.patch=patch('netease_music.downloads.validate_media_url',side_effect=lambda value:value);self.patch.start()
     def tearDown(self):self.downloader.cancel();self.patch.stop();self.temp.cleanup()
     def start(self,path,**kwargs):self.downloader.start(f'http://127.0.0.1:{self.server.server_port}'+path,self.directory,'test','mp3',**kwargs)
     def wait(self):
         deadline=time.monotonic()+4
-        while not self.done and not self.failed and time.monotonic()<deadline:self.app.processEvents();time.sleep(.005)
-        self.assertTrue(self.done or self.failed,'request did not terminate')
+        while not self.done and not self.failed and not self.skipped and time.monotonic()<deadline:self.app.processEvents();time.sleep(.005)
+        self.assertTrue(self.done or self.failed or self.skipped,'request did not terminate')
     def test_audio_lrc_actual_format_unique_and_no_cookie(self):
         (self.directory/'test.wav').write_bytes(b'existing')
         self.start('/audio',lrc='[00:00.00]合成测试',expected_size=len(AUDIO));self.wait()
@@ -92,4 +93,61 @@ class DownloadsTests(unittest.TestCase):
         path=Path(export_lrc(self.directory,'LPT1','[00:00]synthetic'));self.assertEqual(path.name,'_LPT1.lrc')
         other=Path(export_lrc(self.directory,'LPT1','second'));self.assertNotEqual(path,other)
         with self.assertRaises(ValueError):export_lrc(self.directory,'empty','')
+    def test_confirm_overwrite_uses_actual_format_and_matching_lrc(self):
+        audio=self.directory/'test.wav';lrc=self.directory/'test.lrc'
+        audio.write_bytes(b'old audio');lrc.write_text('old lyrics')
+        asked=[]
+        def confirm(paths):
+            asked.extend(paths)
+            self.assertEqual(audio.read_bytes(),b'old audio')
+            self.assertEqual(lrc.read_text(),'old lyrics')
+            return 'overwrite'
+        self.downloader.resolve_conflict=confirm
+        self.start('/audio',lrc='new lyrics');self.wait()
+        self.assertEqual(asked,[audio,lrc]);self.assertEqual(self.done,[(str(audio),str(lrc))])
+        self.assertEqual(audio.read_bytes(),AUDIO);self.assertEqual(lrc.read_text(),'new lyrics')
+        self.assertEqual(set(self.directory.iterdir()),{audio,lrc})
+    def test_skip_preserves_both_files_and_cleans_partial(self):
+        audio=self.directory/'test.wav';lrc=self.directory/'test.lrc'
+        audio.write_bytes(b'old');lrc.write_text('old')
+        self.downloader.resolve_conflict=lambda paths:'skip'
+        self.start('/audio',lrc='new');self.wait()
+        self.assertTrue(self.skipped);self.assertFalse(self.done or self.failed)
+        self.assertEqual(audio.read_bytes(),b'old');self.assertEqual(lrc.read_text(),'old')
+        self.assertEqual(set(self.directory.iterdir()),{audio,lrc})
+    def test_lrc_only_collision_can_replace_pair(self):
+        lrc=self.directory/'test.lrc';lrc.write_text('old')
+        self.downloader.resolve_conflict=lambda paths:'overwrite'
+        self.start('/audio',lrc='new');self.wait()
+        self.assertEqual(Path(self.done[0][0]).name,'test.wav')
+        self.assertEqual(lrc.read_text(),'new')
+    def test_bad_download_never_prompts_or_overwrites(self):
+        audio=self.directory/'test.wav';audio.write_bytes(b'old')
+        asked=[]
+        self.downloader.resolve_conflict=lambda paths:asked.append(paths) or 'overwrite'
+        self.start('/fake-audio');self.wait()
+        self.assertTrue(self.failed);self.assertFalse(asked)
+        self.assertEqual(audio.read_bytes(),b'old')
+    def test_cancellation_inside_prompt_does_not_commit(self):
+        audio=self.directory/'test.wav';audio.write_bytes(b'old')
+        asked=[]
+        def confirm(paths):
+            asked.append(paths);self.downloader.cancel();return 'overwrite'
+        self.downloader.resolve_conflict=confirm
+        self.start('/audio')
+        deadline=time.monotonic()+4
+        while not asked and time.monotonic()<deadline:self.app.processEvents();time.sleep(.005)
+        self.assertTrue(asked);self.assertFalse(self.done or self.failed or self.skipped)
+        self.assertEqual(audio.read_bytes(),b'old');self.assertEqual(list(self.directory.iterdir()),[audio])
+    def test_failed_atomic_replace_preserves_old_audio(self):
+        audio=self.directory/'test.wav';audio.write_bytes(b'old')
+        self.downloader.resolve_conflict=lambda paths:'overwrite'
+        with patch('netease_music.downloads.os.replace',side_effect=PermissionError('in use')):
+            self.start('/audio');self.wait()
+        self.assertTrue(self.failed);self.assertEqual(audio.read_bytes(),b'old')
+        self.assertEqual(list(self.directory.iterdir()),[audio])
+    def test_lyrics_only_explicit_overwrite(self):
+        path=Path(export_lrc(self.directory,'test','old'))
+        self.assertEqual(Path(export_lrc(self.directory,'test','new',overwrite=True)),path)
+        self.assertEqual(path.read_text(),'new');self.assertEqual(list(self.directory.iterdir()),[path])
 if __name__=='__main__':unittest.main()

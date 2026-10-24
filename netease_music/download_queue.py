@@ -3,10 +3,10 @@ from pathlib import Path
 import sqlite3
 
 from PySide6.QtCore import QObject, QStandardPaths, QTimer, Qt
-from PySide6.QtWidgets import QFileDialog, QLabel, QMessageBox, QProgressDialog
+from PySide6.QtWidgets import QCheckBox, QFileDialog, QLabel, QMessageBox, QProgressDialog
 
 from netease_music.client import Client
-from netease_music.downloads import Downloader, export_lrc
+from netease_music.downloads import Downloader, export_lrc, safe_stem
 from netease_music.service import ApiError, SessionExpired
 from netease_music.playback import clean_tracks
 from netease_music.links import music_id
@@ -20,6 +20,8 @@ class NeteaseDownloads(QObject):
         self.client.completed.connect(self._prepared)
         self.client.failed.connect(self._failed)
         self.transfer.completed.connect(self._saved)
+        self.transfer.skipped.connect(self._skipped)
+        self.transfer.resolve_conflict = self._resolve_conflict
         self.transfer.failed.connect(lambda message: self._failed('transfer', message, False))
         self.transfer.warning.connect(self._warning)
         self.transfer.progress.connect(self._progress)
@@ -37,6 +39,9 @@ class NeteaseDownloads(QObject):
         self.fetching_playlist = False
         self.playlist_title = self.playlist_note = self.local_playlist_id = ''
         self.saved_count = self.bound_count = self.failed_count = 0
+        self.skipped_count = 0
+        self.conflict_choice = None
+        self.conflict_box = None
         cloud.sessionChanged.connect(self.cancel)
 
     def start_playlist(self, playlist_id, directory=None):
@@ -75,6 +80,8 @@ class NeteaseDownloads(QObject):
         self.fetching_playlist = playlist_id is not None
         self.playlist_title = self.playlist_note = self.local_playlist_id = ''
         self.saved_count = self.bound_count = self.failed_count = 0
+        self.skipped_count = 0
+        self.conflict_choice = None
         self.companion.pet.panel.settings.setValue('netease_download_directory', str(destination))
         self.dialog = QProgressDialog('', '取消下载', 0, len(items), self.cloud.window())
         label = QLabel()
@@ -156,7 +163,18 @@ class NeteaseDownloads(QObject):
                 if not lyric:
                     self._failed(kind, self.note, False)
                     return
-                path = export_lrc(self.directory, stem, lyric)
+                target = self.directory / (safe_stem(stem) + '.lrc')
+                overwrite = False
+                if target.exists():
+                    epoch = self.epoch
+                    decision = self._resolve_conflict([target])
+                    if not self.running or epoch != self.epoch:
+                        return
+                    if decision != 'overwrite':
+                        self._skipped()
+                        return
+                    overwrite = True
+                path = export_lrc(self.directory, stem, lyric, overwrite=overwrite)
                 self.saved_count += 1
                 self._record('已保存 ' + Path(path).name)
                 return
@@ -173,6 +191,40 @@ class NeteaseDownloads(QObject):
         if self.running and self.dialog:
             progress = f'{received * 100 // total}%' if total > 0 else f'{received / 1048576:.1f} MiB'
             self.dialog.setLabelText(f'{self.index + 1}/{len(self.items)} · {self.items[self.index]["title"]}\n下载中：{progress}')
+
+    def _resolve_conflict(self, paths):
+        if not self.running:
+            return 'skip'
+        if self.conflict_choice:
+            return self.conflict_choice
+        epoch = self.epoch
+        box = QMessageBox(self.dialog or self.cloud.window())
+        box.setWindowTitle('文件已存在')
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        box.setText('保存文件夹中已有同名文件：\n' + '\n'.join(path.name for path in paths))
+        box.setInformativeText('是否覆盖？歌曲和本次下载的同名歌词会一起处理；跳过会保留原文件。')
+        replace = box.addButton('覆盖', QMessageBox.ButtonRole.AcceptRole)
+        skip = box.addButton('跳过', QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(skip)
+        box.setEscapeButton(skip)
+        remember = QCheckBox('本次下载中的重名文件都这样处理', box)
+        box.setCheckBox(remember)
+        self.conflict_box = box
+        box.exec()
+        decision = 'overwrite' if box.clickedButton() is replace else 'skip'
+        if not self.running or epoch != self.epoch:
+            decision = 'skip'
+        elif remember.isChecked():
+            self.conflict_choice = decision
+        self.conflict_box = None
+        box.deleteLater()
+        return decision
+
+    def _skipped(self):
+        if self.running:
+            self.skipped_count += 1
+            self._record('已跳过同名文件，保留原文件')
 
     def _warning(self, message):
         self.note = message
@@ -241,7 +293,7 @@ class NeteaseDownloads(QObject):
         if dialog:
             dialog.close()
             dialog.deleteLater()
-        summary = f'已保存 {self.saved_count} 首，歌词绑定 {self.bound_count} 首，失败 {self.failed_count} 首。'
+        summary = f'已保存 {self.saved_count} 首，歌词绑定 {self.bound_count} 首，跳过 {self.skipped_count} 首，失败 {self.failed_count} 首。'
         self.cloud.set_playback_status(summary + self.playlist_note + f' 保存位置：{self.directory}')
         box = QMessageBox(self.cloud.window())
         box.setWindowTitle('保存结果')
@@ -261,6 +313,8 @@ class NeteaseDownloads(QObject):
         self.timer.stop()
         self.client.cancel()
         self.transfer.cancel()
+        if self.conflict_box is not None:
+            self.conflict_box.reject()
         dialog, self.dialog = self.dialog, None
         if dialog:
             dialog.close()
