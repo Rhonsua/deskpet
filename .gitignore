@@ -38,6 +38,7 @@ characters/*
 !characters/example/
 characters/example/*
 !characters/example/character.json.example
+!characters/example/character-walk.json.example
 !characters/example/personality.json.example
 *.cmo3
 *.moc3

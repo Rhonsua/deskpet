@@ -1,7 +1,6 @@
 """Build a per-user installer with Windows' built-in IExpress and C# compiler."""
 from pathlib import Path
 import subprocess
-import shutil
 import hashlib
 import zipfile
 import argparse
@@ -16,19 +15,22 @@ stage.mkdir(parents=True, exist_ok=True)
 bundle = root / 'dist' / 'TianyiPet'
 if not (bundle / 'TianyiPet.exe').is_file():
     raise SystemExit('先运行 PyInstaller 构建可执行版本')
-with zipfile.ZipFile(stage / 'payload.zip', 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+with zipfile.ZipFile(stage / 'payload.zip', 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
     for path in bundle.rglob('*'):
         if path.is_file(): archive.write(path, path.relative_to(bundle))
-portable = root / 'dist' / 'TianyiPet-0.4.2-portable.zip'
+    archive.writestr('VERSION.txt', '0.5.0\n')
+    archive.write(root / 'docs/0.5.0更新公告.txt', '更新公告.txt')
+portable = root / 'dist' / 'TianyiPet-0.5.0-portable.zip'
 if args.portable:
-    shutil.copyfile(stage / 'payload.zip', portable)
+    from build_portable import build
+    build('0.5.0')
 compiler = Path('C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe')
 subprocess.run([str(compiler), '/nologo', '/target:winexe', '/platform:x64',
                 '/win32icon:' + str(root / 'assets' / 'icons' / 'tianyi.ico'),
                 '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll',
                 '/reference:System.IO.Compression.dll', '/reference:System.IO.Compression.FileSystem.dll',
                 '/out:' + str(stage / 'Setup.exe'), str(root / 'packaging' / 'Setup.cs')], check=True)
-output = root / 'dist' / 'TianyiPet-0.4.2-Setup.exe'
+output = root / 'dist' / 'TianyiPet-0.5.0-Setup.exe'
 sed = stage / 'package.sed'
 sed.write_text('''[Version]
 Class=IEXPRESS
@@ -65,7 +67,7 @@ subprocess.run(['C:/Windows/System32/iexpress.exe', '/N', '/Q', str(sed)], check
 if not output.is_file(): raise SystemExit('IExpress 未生成安装包，请检查 build/installer-stage')
 print(output)
 with (root / 'dist' / 'SHA256SUMS.txt').open('w', encoding='ascii') as checksums:
-    artifacts = [output, portable] if args.portable else [output]
+    artifacts = [output, portable] if portable.is_file() else [output]
     goal_pack = root / 'dist' / 'TianyiPet-GoalCompanion-0.1.0.zip'
     if goal_pack.is_file():
         artifacts.append(goal_pack)

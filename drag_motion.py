@@ -2,6 +2,9 @@
 import math
 
 
+MAX_DRAG_SWAY_DEGREES = 24.0  # Original ±9° range, extended by 15° on each side.
+
+
 class DragSway:
     def __init__(self):
         self.angle = self.velocity = self.target = 0.0
@@ -10,7 +13,8 @@ class DragSway:
         self.angle = self.velocity = self.target = 0.0
 
     def move(self, dx, seconds, scale=1):
-        self.target = max(-9, min(9, -dx / max(.016, seconds) * .012 / scale))
+        self.target = max(-MAX_DRAG_SWAY_DEGREES, min(
+            MAX_DRAG_SWAY_DEGREES, -dx / max(.016, seconds) * .012 / scale))
 
     def release(self):
         self.target = 0.0
@@ -36,4 +40,5 @@ def interaction_pose(activity, seconds, sway=0):
         angle = sway * math.exp(-7*t)
     else:
         return 0.0, 1.0, 1.0
+    angle = max(-MAX_DRAG_SWAY_DEGREES, min(MAX_DRAG_SWAY_DEGREES, angle))
     return angle, sy ** -.5, sy

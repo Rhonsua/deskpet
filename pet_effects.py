@@ -1,6 +1,6 @@
 """Small vector effects on an input-transparent layer, clipped behind the pet."""
 import math
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, Qt, QRect, QRectF
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QRadialGradient, QRegion
 from PySide6.QtWidgets import QWidget
 
@@ -136,18 +136,30 @@ class PetEffects(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.teleporting = False
 
     def sync(self):
-        visible = (self.pet.isVisible() and self.pet.panel.effects_toggle.isChecked()
-                   and not self.pet.dock_edge)
+        teleporting = getattr(getattr(self.pet, 'teleport_controller', None), 'active', False)
+        raise_cloud = teleporting and not self.teleporting
+        self.teleporting = teleporting
+        visible = (self.pet.isVisible() and not self.pet.dock_edge
+                   and (teleporting or self.pet.panel.effects_toggle.isChecked()))
         if not visible:
             if self.isVisible():
                 self.hide()
             return
-        if self.geometry() != self.pet.geometry():
-            self.setGeometry(self.pet.geometry())
+        geometry = self.pet.geometry()
+        if teleporting:
+            body = self.pet.teleport_body
+            diameter = math.ceil(math.hypot(body.width(), body.height()) + 56)
+            center = QPointF(self.pet.pos()) + body.center()
+            geometry = QRect(round(center.x()-diameter/2), round(center.y()-diameter/2), diameter, diameter)
+        if self.geometry() != geometry:
+            self.setGeometry(geometry)
         if not self.isVisible():
             self.show()
+        if raise_cloud:
+            self.raise_()
         self.update()
 
     def paintEvent(self, event):
@@ -155,6 +167,12 @@ class PetEffects(QWidget):
         p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
         p.fillRect(self.rect(), Qt.GlobalColor.transparent)
         p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        if self.teleporting:
+            from teleport_effects import draw_teleport
+            draw_teleport(p, QRectF(self.rect()), self.pet.teleport_body,
+                          self.pet.teleport_controller.visual)
+            p.end()
+            return
         # The native layer stays input-transparent even where effects have alpha.
         # Cutting out the exact current body silhouette makes it appear behind
         # the character without changing the pet's hit region or window mask.

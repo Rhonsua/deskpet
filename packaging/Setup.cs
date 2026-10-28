@@ -79,7 +79,7 @@ class Setup {
         if (!test) {
             using (RegistryKey key = Registry.CurrentUser.CreateSubKey(Key)) {
                 key.SetValue("DisplayName", "洛天依桌宠");
-                key.SetValue("DisplayVersion", "0.4.2");
+                key.SetValue("DisplayVersion", "0.5.0");
                 key.SetValue("InstallLocation", root);
                 key.SetValue("DisplayIcon", Path.Combine(root, "TianyiPet.exe"));
                 key.SetValue("UninstallString", "\"" + Path.Combine(root, "TianyiSetup.exe") + "\" --uninstall --dir \"" + root + "\"");
@@ -144,7 +144,7 @@ class Setup {
                 return 0;
             }
             if (quiet) { Install(destination, false, test, value => { }); return 0; }
-            Form form = new Form { Text = "安装洛天依桌宠", ClientSize = new Size(490, 265), StartPosition = FormStartPosition.CenterScreen, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false };
+            Form form = new Form { Text = "安装洛天依桌宠 0.5.0", ClientSize = new Size(490, 265), StartPosition = FormStartPosition.CenterScreen, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false };
             Label title = new Label { Text = "洛天依桌宠", Font = new Font("Microsoft YaHei UI", 17), Bounds = new Rectangle(22, 18, 440, 36) };
             Label detail = new Label { Text = "Windows 10 / 11 64 位 · 无需安装 Python\nB站播放需要 Microsoft Edge WebView2。", Bounds = new Rectangle(24, 60, 440, 42) };
             TextBox pathBox = new TextBox { Text = destination, Bounds = new Rectangle(24, 112, 350, 25) };

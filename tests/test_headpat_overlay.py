@@ -101,6 +101,7 @@ class OverlayTests(unittest.TestCase):
     def test_missing_authored_art_is_reported_before_starting_animation(self):
         messages, exits = [], []
         state = SimpleNamespace(live2d_renderer=object(), mouse_passthrough=False,
+            stop_walk=lambda: None,
             dragging=False, sleeping=False, using_phone=False,
             toolbar=SimpleNamespace(hide=lambda: None),
             behavior=SimpleNamespace(has_action=lambda _: False),

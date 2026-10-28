@@ -8,6 +8,8 @@ from io import BytesIO
 import os
 from pathlib import Path
 import re
+import json
+import sys
 import tempfile
 import threading
 import time
@@ -134,6 +136,32 @@ def main():
                 before = player.position()
                 pump(.4)
                 assert abs(player.position() - before) <= 180, 'pause did not freeze playback position'
+                if '--route-test' in sys.argv:
+                    from audio.routing import device_id
+                    current = device_id(engine.audio.device())
+                    alternatives = [d for d in engine.router.outputs if device_id(d) != current]
+                    assert alternatives, 'Two active outputs are required for the routing test'
+                    results = []
+                    started = time.monotonic()
+                    engine.router.choose(device_id(alternatives[0]))
+                    wait(lambda: device_id(engine.audio.device()) == device_id(alternatives[0]), 'paused route')
+                    pump(.25)
+                    assert player.playbackState() == QMediaPlayer.PlaybackState.PausedState
+                    assert abs(player.position() - before) <= 180, 'paused route lost its position'
+                    results.append(dict(case='paused', seconds=round(time.monotonic()-started,3)))
+                    player.play()
+                    wait(lambda: player.position() > before + 250, 'resume on alternative output')
+                    before_switch = player.position()
+                    started = time.monotonic()
+                    engine.router.choose(current)
+                    wait(lambda: device_id(engine.audio.device()) == current and
+                         player.playbackState() == QMediaPlayer.PlaybackState.PlayingState and
+                         player.position() > before_switch + 200, 'playing route and resumed clock')
+                    assert player.position() < before_switch + 3000, 'route jumped or took too long'
+                    results.append(dict(case='playing', seconds=round(time.monotonic()-started,3)))
+                    print('Silent endpoint switch timing: ' + json.dumps(results), flush=True)
+                    player.pause()
+                    wait(lambda: player.playbackState() == QMediaPlayer.PlaybackState.PausedState, 'pause after route')
                 player.setPosition(8000)
                 wait(lambda: abs(player.position() - 8000) <= 250, 'seek while paused')
                 assert player.playbackState() == QMediaPlayer.PlaybackState.PausedState

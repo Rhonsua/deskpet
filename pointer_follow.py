@@ -21,7 +21,8 @@ class PointerFollow:
 
 def apply_pointer(parameters, activity, pointer):
     result = dict(parameters)
-    if not pointer or activity in ('sleep', 'phone', 'lift', 'land', 'head_rub', 'mouse_wave'):
+    if not pointer or activity in ('sleep', 'phone', 'lift', 'land', 'head_rub', 'mouse_wave',
+                                    'walk-left', 'walk-right'):
         return result
     x, y, weight = pointer
     weight = max(0, min(1, weight))

@@ -25,7 +25,7 @@ class AppearanceTests(unittest.TestCase):
         self.settings.setValue('character_selection', 'simple')
         self.settings.sync()
         reopened = QSettings(self.settings.fileName(), QSettings.Format.IniFormat)
-        self.assertEqual(preferred_variant(reopened), 'simple')
+        self.assertEqual(preferred_variant(reopened), 'refined')
 
     def test_upgrade_preserves_custom_character(self):
         self.settings.setValue('character_selection', 'external:my-character')

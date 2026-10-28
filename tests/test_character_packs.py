@@ -117,7 +117,7 @@ class CharacterPackTests(unittest.TestCase):
 
     def test_builtins_keep_current_state_files(self):
         self.assertEqual(builtin_sources('refined')['sleep'].name, 'sleep-back.png')
-        self.assertEqual(len(builtin_sources('simple')), 1)
+        self.assertEqual(builtin_sources('simple'), builtin_sources('refined'))
 
     def test_png_only_folder_needs_no_manifest(self):
         pack = read_pack(self.root)

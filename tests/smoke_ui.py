@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory() as scratch, ExitStack() as cleanup:
     families = QFontDatabase.applicationFontFamilies(font_id)
     app.setFont(QFont(families[0] if families else 'Microsoft YaHei UI', 9))
     app.setApplicationName('TianyiPetSmoke')
-    for filename in ('tianyi-simple-v3-costume.png', 'tianyi-refined-v3-smooth.png'):
+    for filename in ('tianyi-refined-v3-smooth.png',):
         source = QImage(str(Path(__file__).resolve().parents[1] / 'assets' / 'character' / filename))
         assert not source.isNull(), filename
         assert source.hasAlphaChannel(), filename
@@ -92,8 +92,8 @@ with tempfile.TemporaryDirectory() as scratch, ExitStack() as cleanup:
     assert not pet.panel.startup_toggle.isChecked()
     startup.fail = False
     pet.set_variant('simple')
+    assert pet.variant == 'refined'
     app.processEvents()
-    assert pet.grab().save(str(output / 'pet-simple.png'))
     pet.set_variant('refined')
     app.processEvents()
     assert pet.grab().save(str(output / 'pet-refined.png'))
@@ -102,7 +102,7 @@ with tempfile.TemporaryDirectory() as scratch, ExitStack() as cleanup:
     comparison_layout = QHBoxLayout(comparison)
     comparison_layout.setContentsMargins(24, 20, 24, 20)
     comparison_layout.setSpacing(20)
-    for variant, caption in [('simple', 'A · 圆润 Q 版 / V3公式服'), ('refined', 'B · 精致 Q 版 / V3公式服')]:
+    for variant, caption in [('refined', '精致 Q 版 / V3公式服')]:
         pet.set_variant(variant)
         app.processEvents()
         column = QVBoxLayout()

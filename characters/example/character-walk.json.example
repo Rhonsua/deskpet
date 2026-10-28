@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "id": "my-walking-character",
+  "name": "我的散步角色",
+  "author": "填写作者",
+  "source": "填写素材来源及授权说明",
+  "states": {"idle": "idle.png"},
+  "anchors": {"head": [0.5, 0.28], "feet": [0.5, 0.98]},
+  "walk": {
+    "left": ["walk/left/000.png", "walk/left/001.png", "walk/left/002.png", "walk/left/003.png"],
+    "right": ["walk/right/000.png", "walk/right/001.png", "walk/right/002.png", "walk/right/003.png"],
+    "fps": 4,
+    "stride": 128
+  }
+}

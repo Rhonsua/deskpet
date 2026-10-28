@@ -73,7 +73,7 @@ def apply_active_petting(parameters, activity, petting):
     strength, direction = petting or (0.0, 0.0)
     strength = max(0, min(1, strength))
     direction = max(-1, min(1, direction))
-    if activity in ('sleep', 'phone', 'lift', 'land', 'eat'):
+    if activity in ('sleep', 'phone', 'lift', 'land', 'eat', 'walk-left', 'walk-right'):
         strength = 0.0
     # Authored inspection motions may drive this parameter without active input.
     # Normal motion sampling resets it to zero; old models filter the unknown ID.

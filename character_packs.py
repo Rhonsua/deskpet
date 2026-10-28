@@ -14,6 +14,39 @@ DEFAULT_ANCHORS = {'head': (0.5, 0.28), 'feet': (0.5, 0.98)}
 
 
 @dataclass(frozen=True)
+class WalkSpec:
+    """One dual-step loop; stride is travel in source-canvas pixels per loop.
+
+    Movement consumes cycle_seconds/stride, independently of PNG or Live2D.
+    PNG sequences retain their full canvas and share the character's anchors.
+    """
+    left: tuple
+    right: tuple
+    fps: float
+    stride: float
+
+    @property
+    def frame_count(self):
+        return len(self.left)
+
+    @property
+    def cycle_seconds(self):
+        return self.frame_count / self.fps
+
+    def frame_key(self, direction, elapsed):
+        if direction not in ('left', 'right', -1, 1):
+            raise ValueError('散步方向必须为 left/right 或 -1/1')
+        side = 'left' if direction in ('left', -1) else 'right'
+        index = int(max(0.0, elapsed) * self.fps) % self.frame_count
+        return f'walk-{side}:{index}'
+
+    def image_paths(self):
+        return {f'walk-{side}:{index}': path
+                for side in ('left', 'right')
+                for index, path in enumerate(getattr(self, side))}
+
+
+@dataclass(frozen=True)
 class CharacterPack:
     identifier: str
     name: str
@@ -23,6 +56,7 @@ class CharacterPack:
     states: dict
     anchors: dict
     singing_hem: float | None = None
+    walk: WalkSpec | None = None
 
     def state_path(self, state):
         if state in ('sing-left', 'sing-right') and state not in self.states:
@@ -71,12 +105,55 @@ def discover_packs(root):
 def builtin_sources(variant):
     """Keep today's built-in artwork behind the same state-to-file convention."""
     root = Path(__file__).resolve().parent / 'assets' / 'character'
-    sources = {'idle': root / ('tianyi-simple-v3-costume.png' if variant == 'simple'
-                                else 'tianyi-refined-v3-smooth.png')}
-    if variant == 'refined':
-        sources.update({state: root / 'states' / ('sleep-back.png' if state == 'sleep'
-                                                 else state + '.png') for state in STATES[1:]})
+    # Legacy simple selections resolve to the remaining static character.
+    sources = {'idle': root / 'tianyi-refined-v3-smooth.png'}
+    sources.update({state: root / 'states' / ('sleep-back.png' if state == 'sleep'
+                                             else state + '.png') for state in STATES[1:]})
     return sources
+
+
+def builtin_walk():
+    """Optional built-in PNG loop; absence advertises no walking capability."""
+    root = Path(__file__).resolve().parent / 'assets' / 'character' / 'walk'
+    manifest = root / 'walk.json'
+    if not manifest.is_file():
+        return None
+    if manifest.stat().st_size > 65536:
+        raise ValueError('散步配置不能超过 64 KiB')
+    try:
+        data = json.loads(manifest.read_text(encoding='utf-8-sig'))
+    except (ValueError, RecursionError) as error:
+        raise ValueError('walk.json 需要有效的 UTF-8 JSON 配置') from error
+    return read_walk_spec(root, data)
+
+
+def read_walk_spec(root, data):
+    """Validate an explicitly declared loop without decoding during discovery."""
+    root = Path(root).resolve()
+    if (not isinstance(data, dict) or set(data) != {'left', 'right', 'fps', 'stride'}):
+        raise ValueError('walk 必须且只能包含 left、right、fps、stride')
+    for key, low, high in (('fps', 1, 30), ('stride', 1, 4096)):
+        value = data[key]
+        if (type(value) not in (int, float) or not low <= value <= high
+                or not math.isfinite(value)):
+            raise ValueError(f'walk.{key} 需要 {low} 到 {high} 的有限数值')
+    sequences = {}
+    for side in ('left', 'right'):
+        values = data[side]
+        if not isinstance(values, list) or not 2 <= len(values) <= 48:
+            raise ValueError('walk.' + side + ' 需要按播放顺序列出 2 到 48 张 PNG')
+        paths = []
+        for value in values:
+            path = _inside(root, value)
+            if path.suffix.lower() != '.png' or not path.is_file() or path.stat().st_size > 16 * 1024 * 1024:
+                raise ValueError('walk.' + side + ' 需要角色目录内不超过 16 MiB 的 PNG 文件')
+            paths.append(path)
+        if len(set(paths)) < 2:
+            raise ValueError('每个散步方向至少需要两张不同的帧文件，不能用单张站姿滑行')
+        sequences[side] = tuple(paths)
+    if len(sequences['left']) != len(sequences['right']):
+        raise ValueError('左右散步序列的帧数必须一致，以共用步频和步幅')
+    return WalkSpec(fps=float(data['fps']), stride=float(data['stride']), **sequences)
 
 
 def _inside(root, value):
@@ -147,15 +224,29 @@ def read_pack(folder):
     if legs and 'sing-front' not in paths:
         raise ValueError('启用唱歌腿部动画需要声明 sing-front 图片')
     return CharacterPack(identifier, root=root, states=paths, anchors=anchors,
-                         singing_hem=float(hem) if legs else None, **metadata)
+                         singing_hem=float(hem) if legs else None,
+                         walk=read_walk_spec(root, data['walk']) if 'walk' in data else None,
+                         **metadata)
 
 
 def validate_images(pack):
     """Return decoded images, with a shared 16-megapixel allocation budget."""
+    paths = dict(pack.states)
+    if pack.walk is not None:
+        paths.update(pack.walk.image_paths())
+    return _validate_image_paths(paths)
+
+
+def validate_walk_images(walk):
+    """Decode a standalone built-in loop, preserving its common full canvas."""
+    return _validate_image_paths(walk.image_paths()) if walk is not None else {}
+
+
+def _validate_image_paths(paths):
     from PySide6.QtGui import QImageReader, QImage
     expected = None
     decoded, images, pixels = {}, {}, 0
-    for state, path in pack.states.items():
+    for state, path in paths.items():
         if path in decoded:
             images[state] = decoded[path]
             continue

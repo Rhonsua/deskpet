@@ -35,7 +35,7 @@ class AudioRouter(QObject):
         self.devices.audioOutputsChanged.connect(self.refresh)
         # Some Windows drivers notify late when only the default endpoint changes.
         self.poll = QTimer(self)
-        self.poll.setInterval(2000)
+        self.poll.setInterval(500)
         self.poll.timeout.connect(self.refresh)
         self.poll.start()
 

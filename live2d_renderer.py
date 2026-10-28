@@ -54,6 +54,7 @@ class Live2DRenderer:
             self.model.SetAutoBreath(False)
             self.parts = {key: i for i, key in enumerate(self.model.GetPartIds())}
             self.parameter_ids = set(self.model.GetParamIds())
+            self.motions.validate_walk_model(self.parameter_ids, self.parts)
             self.lift_reaction = LiftReactionOverlay()
             expected = {key for group in self.motions.mapping['poseGroups'] for key in group}
             if not expected <= self.parts.keys() or not self.model.GetParamIds():

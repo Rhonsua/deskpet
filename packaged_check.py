@@ -162,15 +162,28 @@ def run():
             pet.grab()
             if native:
                 assert pet.variant == 'live2d' and pet.live2d_renderer is not None, pet.panel.character_note.text()
-                for activity in ('idle', 'sing', 'sleep', 'phone', 'mouse_wave'):
+                assert pet.live2d_renderer.motions.walk_spec is not None
+                for activity in ('idle', 'sing', 'sleep', 'phone', 'mouse_wave', 'lift',
+                                 'walk-left', 'walk-right'):
                     frame = pet.live2d_renderer.frame(activity, 1.0)
                     assert not frame.isNull() and frame.hasAlphaChannel(), activity
                     assert any(frame.pixelColor(x, y).alpha() > 100
                                for x in range(0, frame.width(), 8)
                                for y in range(0, frame.height(), 8)), activity
                 assert pet.set_variant('refined') and pet.live2d_renderer is None
+                assert pet.walk_spec is not None and pet.walk_frames
                 assert pet.set_variant('live2d') and pet.live2d_renderer is not None
-                result['live2d'] = True
+                result.update(live2d=True, live2d_walk=True, static_walk=True)
+            # Check the frozen chat helper can initialize its network runtime.
+            # EOF terminates it without contacting a model or reading user data.
+            import subprocess
+            from worker_command import worker_command
+            program, arguments = worker_command('chat')
+            helper = subprocess.run([program, *arguments], input=b'', capture_output=True,
+                                    timeout=30, check=True,
+                                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            assert b'"type": "ready"' in helper.stdout, 'Chat helper did not become ready'
+            result['chat_worker'] = True
             # Exercise the installed chat package and resources without any API.
             pet.open_chat()
             chat = pet.chat_window

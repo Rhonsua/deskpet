@@ -5,14 +5,25 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 root = Path(SPECPATH).parent
 datas = [(str(path), str(path.parent.relative_to(root)))
          for path in (root / 'assets' / 'character').rglob('*.png')
-         if path.name in {'tianyi-simple-v3-costume.png', 'tianyi-refined-v3-smooth.png',
+         if path.name in {'tianyi-refined-v3-smooth.png',
                           'blink.png', 'happy.png', 'eat.png', 'lift.png', 'sleep-back.png',
                           'phone.png', 'sing-front.png', 'sing-left.png', 'sing-right.png'}]
+
+# Include only validated walking frames; generation sheets/previews stay local.
+import sys
+sys.path.insert(0, str(root))
+from character_packs import builtin_walk, validate_walk_images
+walk = builtin_walk()
+if walk is not None:
+    validate_walk_images(walk)
+    walk_files = set(walk.left + walk.right) | {root / 'assets/character/walk/walk.json'}
+    datas += [(str(path), str(path.parent.relative_to(root))) for path in sorted(walk_files)]
 datas += [(str(root / 'bilibili_probe.js'), '.'), (str(root / 'bilibili_early.js'), '.'),
           (str(root / 'LICENSE'), '.'), (str(root / 'README.md'), '.'),
           (str(root / 'assets' / 'README.md'), 'assets'),
           (str(root / 'characters' / 'README.md'), 'characters'),
           (str(root / 'characters' / 'example' / 'character.json.example'), 'characters/example'),
+          (str(root / 'characters' / 'example' / 'character-walk.json.example'), 'characters/example'),
           (str(root / 'characters' / 'example' / 'personality.json.example'), 'characters/example')]
 datas += collect_data_files('webview')
 datas.append((str(root / 'assets' / 'icons' / 'tianyi.ico'), 'assets/icons'))
@@ -53,7 +64,32 @@ a = Analysis([str(root / 'app_entry.py')], pathex=[str(root)], datas=datas, bina
                             'live2d._live2d', 'OpenGL.platform.win32'],
              excludes=['webview.platforms.qt', 'webview.platforms.gtk', 'webview.platforms.cef',
                        'webview.platforms.cocoa', 'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets',
-                       'tkinter', 'pytest', 'pet_mods.goals'], noarchive=False)
+                       'tkinter', 'pytest', 'pet_mods.goals',
+                       'PIL.AvifImagePlugin', 'PIL._avif'], noarchive=False)
+# These optional Qt plugins drag in PDF/QML/virtual-keyboard engines. The app
+# uses native Windows widgets/IME and PNG artwork, not either plugin. Keep
+# software OpenGL, TLS and multimedia backends for machines unlike this one.
+unused_qt = {name.lower() for name in (
+    'Qt6Pdf.dll', 'Qt6Quick.dll', 'Qt6Qml.dll', 'Qt6QmlMeta.dll',
+    'Qt6QmlModels.dll', 'Qt6QmlWorkerScript.dll', 'Qt6VirtualKeyboard.dll',
+    'qpdf.dll', 'qtvirtualkeyboardplugin.dll')}
+filtered_binaries = [entry for entry in a.binaries
+                     if Path(entry[0]).name.lower() not in unused_qt]
+# Fail the build if a retained DLL/PYD actually needs an excluded engine.
+import pefile
+for destination, source, kind in filtered_binaries:
+    if Path(source).suffix.lower() not in ('.dll', '.pyd'):
+        continue
+    with pefile.PE(source, fast_load=True) as pe:
+        pe.parse_data_directories(directories=[
+            pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_IMPORT'],
+            pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT']])
+        imports = (getattr(pe, 'DIRECTORY_ENTRY_IMPORT', []) +
+                   getattr(pe, 'DIRECTORY_ENTRY_DELAY_IMPORT', []))
+        needed = {entry.dll.decode('ascii').lower() for entry in imports} & unused_qt
+        if needed:
+            raise ValueError(f'{destination} still needs excluded Qt engines: {needed}')
+a.binaries = filtered_binaries
 pyz = PYZ(a.pure)
 gui = EXE(pyz, a.scripts, [], exclude_binaries=True, name='TianyiPet', console=False,
           icon=str(root / 'assets' / 'icons' / 'tianyi.ico'))

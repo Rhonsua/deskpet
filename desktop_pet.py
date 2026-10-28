@@ -25,7 +25,10 @@ from pointer_follow import PointerFollow
 from mouse_interactions import MouseInteractions, ActiveHeadPetting, REACTION_SECONDS
 from pet_effects import PetEffects
 from character_packs import (builtin_sources, STATES, DEFAULT_ANCHORS, read_pack,
-                             validate_images, selected_folder, discover_packs)
+                             validate_images, selected_folder, discover_packs,
+                             builtin_walk, validate_walk_images)
+from walk_runtime import WalkRuntime
+from teleport_runtime import TeleportRuntime
 
 
 POPUP_STYLE = """
@@ -92,7 +95,7 @@ class PetToolbar(QFrame):
         self.setObjectName('PetPopup')
         apply_light_palette(self)
         self.setStyleSheet(POPUP_STYLE)
-        self.setFixedWidth(336)
+        self.setMinimumWidth(336)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 10, 12, 10)
         outer.setSpacing(9)
@@ -101,8 +104,12 @@ class PetToolbar(QFrame):
         self.name.setTextFormat(Qt.TextFormat.PlainText)
         self.name.setWordWrap(True)
         self.name.setStyleSheet('font-weight: 600; color: #000000;')
-        title.addWidget(self.name)
-        title.addStretch()
+        title.addWidget(self.name, 1)
+        self.stats = QLabel()
+        self.stats.setTextFormat(Qt.TextFormat.PlainText)
+        self.stats.setWordWrap(False)
+        self.stats.setStyleSheet('font-weight: 600; color: #000000;')
+        title.addWidget(self.stats)
         close = QPushButton('收起')
         close.clicked.connect(self.hide)
         title.addWidget(close)
@@ -141,7 +148,8 @@ class PetToolbar(QFrame):
 
     def refresh(self):
         data = self.pet.panel.store.pet()
-        self.name.setText(f"{self.pet.character_name}  Lv.{data['level']}     音符 {data['notes']}")
+        self.name.setText(self.pet.character_name)
+        self.stats.setText(f"Lv.{data['level']}   音符 {data['notes']}")
         self.bars['xp'].setRange(0, 50 + 20 * (data['level'] - 1))
         self.bars['xp'].setValue(data['xp'])
         for key in ('hunger', 'mood'):
@@ -177,6 +185,15 @@ class PetToolbar(QFrame):
             self.add_button('盖被子睡觉', self.pet.toggle_sleep)
             self.add_button('熬夜玩手机', self.pet.toggle_phone)
             self.add_button('起床 / 收手机', self.pet.wake_up)
+            walk = QPushButton('散步 / 停下')
+            walk.setEnabled(self.pet.walk_supported())
+            walk.clicked.connect(self.pet.toggle_walk)
+            self.content.addWidget(walk)
+            auto_walk = QCheckBox('空闲时随机散步（自动触发间隔至少 10 分钟）')
+            auto_walk.setChecked(self.pet.auto_walk_enabled)
+            auto_walk.setEnabled(self.pet.walk_supported())
+            auto_walk.toggled.connect(self.pet.set_auto_walk)
+            self.content.addWidget(auto_walk)
         elif name == 'settings':
             startup = QCheckBox('开机自启')
             try:
@@ -217,6 +234,7 @@ class PetToolbar(QFrame):
         self.content.addWidget(button)
 
     def toggle(self):
+        self.pet.stop_roaming()
         self.pet.end_petting()
         if self.isVisible():
             self.hide()
@@ -229,7 +247,7 @@ class PetToolbar(QFrame):
             self.close_timer.start(12000)
 
 
-class DesktopPet(QWidget):
+class DesktopPet(TeleportRuntime, WalkRuntime, QWidget):
     @property
     def playing(self):
         return self.behavior.playing
@@ -308,6 +326,8 @@ class DesktopPet(QWidget):
         self.anchors = dict(DEFAULT_ANCHORS)
         self.head_region = QRegion()
         self.panel = panel_factory(self)
+        self.init_walk()
+        self.init_teleport()
         self.panel.songChanged.connect(self.refresh_music_title)
         self.behavior.set_mode(self.panel.settings.value('activity_mode', 'idle')
                                if self.panel.settings.value('activity_mode', 'idle') in MODES else 'idle')
@@ -337,6 +357,7 @@ class DesktopPet(QWidget):
         menu.setStyleSheet(CONTROL_STYLE)
         menu.addAction('显示桌宠', self.restore)
         menu.addAction('互动菜单', self.toolbar.toggle)
+        menu.addAction('停止自动动作', self.stop_roaming)
         menu.addAction('歌单', lambda: self.open_tools(0))
         menu.addAction('网易云 / 歌词与节拍', lambda: self.open_music_companion(0))
         menu.addAction('聊天', self.open_chat)
@@ -402,11 +423,16 @@ class DesktopPet(QWidget):
                 clamp_near(self, self.toolbar)
 
     def set_variant(self, variant):
+        if variant == 'simple':
+            variant = 'refined'
         # Decode and validate completely before touching the displayed character.
         pack = None
         renderer = None
+        walk_spec = None
+        walk_frames = {}
+        walk_error = ''
         try:
-            if variant in ('refined', 'simple', 'live2d'):
+            if variant in ('refined', 'live2d'):
                 sources = builtin_sources('refined' if variant == 'live2d' else variant)
                 frames = {}
                 for state, path in sources.items():
@@ -424,6 +450,17 @@ class DesktopPet(QWidget):
                     first_frame = renderer.frame('idle', 0)
                     if first_frame.isNull():
                         raise RuntimeError('Live2D 没有生成有效画面')
+                    walk_spec = renderer.motions.walk_spec
+                    walk_error = renderer.motions.walk_error
+                else:
+                    try:
+                        walk_spec = builtin_walk()
+                        if walk_spec is not None:
+                            walk_frames = {key: QPixmap.fromImage(image)
+                                           for key, image in validate_walk_images(walk_spec).items()}
+                    except (ValueError, OSError) as error:
+                        walk_spec = None
+                        walk_error = '散步素材未启用：' + str(error)
             else:
                 pack = read_pack(selected_folder(self.panel.characters_dir, variant))
                 images = validate_images(pack)
@@ -431,6 +468,9 @@ class DesktopPet(QWidget):
                 sources = {state: pack.state_path(state) for state in STATES}
                 # Keep the common canvas: independent cropping destroys pose alignment.
                 frames = {state: loaded[path] for state, path in sources.items()}
+                walk_spec = pack.walk
+                walk_frames = {key: QPixmap.fromImage(image) for key, image in images.items()
+                               if key.startswith(('walk-left:', 'walk-right:'))}
             if 'idle' not in frames or frames['idle'].isNull():
                 raise ValueError('角色缺少可显示的 idle 素材')
         except (ValueError, OSError, RuntimeError, ImportError) as error:
@@ -441,6 +481,7 @@ class DesktopPet(QWidget):
             self.panel.appearance.setCurrentIndex(self.panel.appearance.findData(getattr(self, 'variant', 'refined')))
             self.panel.appearance.blockSignals(False)
             return False
+        self.stop_roaming()
         self.end_petting()
         self.cancel_interrupted_drag()
         if self.live2d_renderer is not None and renderer is not self.live2d_renderer:
@@ -449,6 +490,9 @@ class DesktopPet(QWidget):
         self.live2d_frame_key = None
         self.live2d_pixmap = None
         self.character_pack, self.frames, self.variant = pack, frames, variant
+        self.walk_spec, self.walk_frames = walk_spec, walk_frames
+        self.walk_canvas_height = next(iter(walk_frames.values())).height() if walk_frames else 0
+        self.frames.update(walk_frames)
         self.character_name = pack.name if pack else '洛天依'
         self.anchors = dict(pack.anchors) if pack else dict(DEFAULT_ANCHORS)
         filename = sources['idle']
@@ -470,11 +514,14 @@ class DesktopPet(QWidget):
             f'当前：{pack.name}；作者：{pack.author or "未填写"}。来源与授权：{pack.source or "请自行确认"}'
             if pack else '当前使用 Live2D 洛天依；睡姿按头部尺度放大，拖动后恢复原状态。'
             if renderer else '当前使用内置洛天依。添加角色后点击“刷新角色”。')
+        if walk_error:
+            self.panel.character_note.setText(self.panel.character_note.text() + '\n' + walk_error)
         self.setWindowTitle(self.character_name + ' · 桌宠')
         self.panel.setWindowTitle(self.character_name + ' · 歌单与设置')
         if hasattr(self, 'tray'):
             self.tray.setToolTip(self.character_name + (' · 鼠标穿透中，右键托盘可关闭' if self.mouse_passthrough else ' · 右键打开菜单'))
         self.toolbar.refresh()
+        self.refresh_walk_controls()
         if getattr(self, 'chat_window', None) is not None:
             self.chat_window.sync_character()
         self.head_region = self.hit_region = QRegion()
@@ -518,6 +565,7 @@ class DesktopPet(QWidget):
             self.panel.character_note.setText('打开失败：' + str(error) + '\n目录：' + str(self.panel.characters_dir))
 
     def set_scale(self, scale):
+        self.stop_roaming()
         anchor = self.frameGeometry().bottomLeft() if self.isVisible() else None
         self.scale = max(0.75, min(1.5, scale))
         self.resize(round(260 * self.scale), round(310 * self.scale))
@@ -533,6 +581,7 @@ class DesktopPet(QWidget):
         self.update()
 
     def close_live2d(self):
+        self.stop_roaming()
         if self.live2d_renderer is not None:
             self.live2d_renderer.close()
             self.live2d_renderer = None
@@ -570,6 +619,8 @@ class DesktopPet(QWidget):
         from live2d_renderer import POSE_SCALE
         from music_tools.clock import beat_values
         elapsed = self.behavior.activity_elapsed
+        if activity in ('walk-left', 'walk-right'):
+            elapsed = self.walk_controller.elapsed
         self.live2d_renderer.resume_activity = self.behavior.mode
         beat = self.current_music_beat(activity)
         key = (activity, self.behavior.mode, round(elapsed * 30), beat_values(beat),
@@ -623,6 +674,7 @@ class DesktopPet(QWidget):
                              if singing_hem is not None and name.startswith('sing-')}
 
     def restore(self):
+        self.stop_roaming()
         screen = QApplication.primaryScreen().availableGeometry()
         saved = self.panel.settings.value('position')
         point = saved if isinstance(saved, QPoint) else QPoint(screen.right() - self.width() - 40, screen.bottom() - self.height() - 20)
@@ -702,6 +754,8 @@ class DesktopPet(QWidget):
         if self.drag_dock_edge:
             return 'idle'
         activity = self.behavior.activity
+        if activity == 'teleport':
+            return 'idle'
         if (self.dock_edge and self.dock_reveal < .99 and
                 activity not in ('sleep', 'phone')):
             return 'idle'
@@ -727,6 +781,7 @@ class DesktopPet(QWidget):
         return transform
 
     def open_tools(self, tab=0):
+        self.stop_roaming()
         self.reveal_dock()
         self.panel.tabs.setCurrentIndex(tab)
         clamp_near(self, self.panel)
@@ -735,6 +790,7 @@ class DesktopPet(QWidget):
         self.toolbar.hide()
 
     def react(self, action, seconds=1.7, words=None):
+        self.stop_roaming()
         self.behavior.react(action, seconds)
         if self.dragging:
             return
@@ -764,6 +820,7 @@ class DesktopPet(QWidget):
             self.panel.refresh_growth()
 
     def start_petting(self):
+        self.stop_roaming()
         if self.live2d_renderer is None or self.mouse_passthrough or self.dragging:
             return
         self.toolbar.hide()
@@ -907,6 +964,7 @@ class DesktopPet(QWidget):
             self.react('poke', 1.0, '欸？是在叫我吗？')
 
     def open_music_companion(self, page=0):
+        self.stop_roaming()
         companion = getattr(self, 'music_companion', None)
         if companion is None:
             self.bubble.say(getattr(self, 'music_startup_error', '') or '歌词与节拍暂时无法使用，请重新启动桌宠。')
@@ -921,6 +979,7 @@ class DesktopPet(QWidget):
         return companion.beat if companion and activity == 'sing' and not self.behavior.layers else None
 
     def open_mods(self, checked=False):
+        self.stop_roaming()
         host = getattr(self, 'mod_host', None)
         if host is None:
             self.bubble.say(getattr(self, 'mod_startup_error', '') or '扩展功能暂时不可用，请重启桌宠后再试。')
@@ -931,6 +990,7 @@ class DesktopPet(QWidget):
             self.bubble.say('扩展页面暂时无法打开，桌宠和音乐仍可正常使用。')
 
     def open_chat(self, checked=False, settings=False):
+        self.stop_roaming()
         if getattr(self, 'chat_window', None) is None:
             from pet_chat.window import ChatWindow
             try:
@@ -970,6 +1030,7 @@ class DesktopPet(QWidget):
         self.react('happy', words='起来啦，继续陪你！')
 
     def set_mode(self, mode):
+        self.stop_roaming()
         self.end_petting()
         self.behavior.set_mode(mode)
         self.panel.settings.setValue('activity_mode', mode)
@@ -986,6 +1047,7 @@ class DesktopPet(QWidget):
         self.react('turn', 4.8, '换个角度，唱给你听。')
 
     def feed_reaction(self, success, words):
+        self.stop_roaming()
         if success:
             self.toolbar.hide()
             self.react('eat', 2.8, '啊呜……好吃！')
@@ -994,6 +1056,7 @@ class DesktopPet(QWidget):
             self.bubble.say(words)
 
     def begin_drag(self):
+        self.stop_roaming()
         if self.petting or self.press_point is None or self.dragging:
             return
         self.hold_timer.stop()
@@ -1132,6 +1195,8 @@ class DesktopPet(QWidget):
             self.fold_timer.start(900)
         self.phase = now
         self.drag_sway.step(delta)
+        self.tick_walk(delta)
+        self.tick_teleport(delta)
         # The contact is a presentation overlay: retain the previous activity's
         # clock and playback intent, and resume it after the release has faded.
         if self.live2d_renderer is None or self.active_petting.strength <= .01 or self.behavior.layers:
@@ -1143,9 +1208,10 @@ class DesktopPet(QWidget):
             pointer = self.mapFromGlobal(global_pointer)
             head = self.character_head()
             enabled = (self.panel.pointer_toggle.isChecked() and not self.petting and not self.dragging
+                       and not self.teleport_controller.active
                        and not self.dock_edge and self.press_point is None
                        and not self.panel.isVisible() and not self.toolbar.isVisible()
-                       and activity not in ('sleep', 'phone', 'lift', 'land'))
+                       and activity not in ('sleep', 'phone', 'lift', 'land', 'walk-left', 'walk-right'))
             self.live2d_renderer.pointer = self.pointer_follow.step(
                 pointer.x()-head.x(), pointer.y()-head.y(), delta,
                 enabled=enabled, scale=self.scale)
@@ -1202,15 +1268,19 @@ class DesktopPet(QWidget):
         now = self.phase or time.monotonic()
         elapsed = self.behavior.elapsed
         activity = self.display_activity()
+        painter.setOpacity(self.teleport_controller.visual.person)
         if self.live2d_renderer is not None:
             self.paint_live2d(painter, activity)
             self.paint_petting_contact_region(painter)
             self.paint_petting_hand(painter)
+            self.paint_teleport(painter)
             painter.end()
             return
         state = 'idle'
         angle, y, sx, sy = 0.0, 0.0, 1.0, 1.0
-        if activity == 'lift':
+        if activity in ('walk-left', 'walk-right') and self.walk_spec is not None:
+            state = self.walk_spec.frame_key(activity[5:], self.walk_controller.elapsed)
+        elif activity == 'lift':
             state = 'lift'
         elif activity == 'eat':
             state, y = 'eat', math.sin(elapsed * 13) * 1.5
@@ -1253,8 +1323,9 @@ class DesktopPet(QWidget):
         transform.translate(self.width() / 2, 280 * scale + y * scale)
         transform.rotate(angle)
         transform.scale(sx, sy)
-        transform.translate(-image.width() * (self.anchors['feet'][0] if self.character_pack else .5),
-                            -image.height() * (self.anchors['feet'][1] if self.character_pack else 1))
+        anchors = self.character_pack is not None or activity in ('walk-left', 'walk-right')
+        transform.translate(-image.width() * (self.anchors['feet'][0] if anchors else .5),
+                            -image.height() * (self.anchors['feet'][1] if anchors else 1))
         resting = key in ('sleep', 'phone')
         if not resting:
             transform *= self.dock_transform()
@@ -1289,8 +1360,9 @@ class DesktopPet(QWidget):
             head_box = QRect(round((head_x - .24) * image.width()), round((head_y - .2) * image.height()),
                              round(.48 * image.width()), round(.4 * image.height()))
             self.head_region = transform.map(QRegion(head_box, QRegion.RegionType.Ellipse))
-        painter.end()
         self.hit_region = mask.intersected(QRegion(self.rect()))
+        self.paint_teleport(painter)
+        painter.end()
         # Windows' layered window uses the rendered alpha for click-through.
         # Keep a single rectangular backing surface instead of changing native masks.
 
@@ -1301,6 +1373,7 @@ class DesktopPet(QWidget):
         if self.petting:
             event.accept()
             return
+        self.stop_roaming()
         if event.button() == Qt.MouseButton.LeftButton:
             if not self.hit_region.contains(event.position().toPoint()):
                 event.ignore()
@@ -1394,6 +1467,7 @@ class DesktopPet(QWidget):
         self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def mouseDoubleClickEvent(self, event):
+        self.stop_roaming()
         if self.mouse_passthrough:
             event.ignore()
             return
@@ -1405,6 +1479,7 @@ class DesktopPet(QWidget):
         self.toolbar.toggle()
 
     def contextMenuEvent(self, event):
+        self.stop_roaming()
         if self.mouse_passthrough:
             event.ignore()
             return
@@ -1415,6 +1490,7 @@ class DesktopPet(QWidget):
         self.toolbar.toggle()
 
     def hideEvent(self, event):
+        self.stop_roaming()
         self.end_petting()
         self.cancel_interrupted_drag()
         self.toolbar.hide()
@@ -1424,6 +1500,8 @@ class DesktopPet(QWidget):
         super().hideEvent(event)
 
     def event(self, event):
+        if event.type() == QEvent.Type.UngrabMouse:
+            self.stop_roaming()
         if (event.type() == QEvent.Type.UngrabMouse
                 and getattr(self, 'dragging', False)):
             self.cancel_interrupted_drag()

@@ -10,6 +10,7 @@ from PySide6.QtCore import QSettings, QTimer, QUrl
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import QApplication
 from audio.routing import AudioRouter, device_id
+from audio.output_switch import OutputSwitch
 
 
 def run():
@@ -33,51 +34,21 @@ def run():
     player = QMediaPlayer()
     player.setAudioOutput(audio)
     router = AudioRouter(audio, settings)
-    generation, restore, routing = 0, None, False
-
-    def before_route():
-        nonlocal restore, routing
-        if player.source().isEmpty():
-            return
-        restore = (player.source(), player.position(), player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
-        routing = True
-        player.stop()
-        player.setSource(QUrl())
-
-    def after_route():
-        nonlocal routing
-        if restore:
-            player.setSource(restore[0])
-        routing = False
-        restore_position()
-
-    def restore_position(*_):
-        nonlocal restore
-        ready = player.mediaStatus() in (QMediaPlayer.MediaStatus.LoadedMedia,
-                                         QMediaPlayer.MediaStatus.BufferingMedia,
-                                         QMediaPlayer.MediaStatus.BufferedMedia)
-        if restore and not routing and ready and player.duration() > 0 and player.isSeekable():
-            source, position, playing = restore
-            restore = None
-            if source == player.source():
-                player.setPosition(position)
-                if playing:
-                    player.play()
-
-    router.routeWillChange.connect(before_route)
-    router.routeChanged.connect(after_route)
-    player.durationChanged.connect(restore_position)
-    player.seekableChanged.connect(restore_position)
-    player.mediaStatusChanged.connect(restore_position)
+    generation = 0
+    switching = OutputSwitch(player, audio)
+    router.routeWillChange.connect(switching.before_change)
+    router.routeChanged.connect(switching.after_change)
     router.refresh()
 
     def device(value):
         return {'id': device_id(value), 'name': value.description()}
 
     def report():
-        emit({'type': 'state', 'generation': generation, 'position': player.position(),
+        pending = switching.pending
+        emit({'type': 'state', 'generation': generation,
+              'position': pending.position if pending else player.position(),
               'playback_rate': player.playbackRate(),
-              'duration': player.duration(), 'state': player.playbackState().value,
+              'duration': player.duration(), 'state': (pending.state if pending else player.playbackState()).value,
               'status': player.mediaStatus().value, 'seekable': player.isSeekable(),
               'error': player.error().value, 'error_text': player.errorString(),
               'volume': audio.volume(), 'muted': audio.isMuted(), 'device': device(audio.device()),
@@ -85,29 +56,28 @@ def run():
               'preferred': router.preferred, 'fallback': router.fallback, 'summary': router.summary})
 
     def poll():
-        nonlocal generation, restore
+        nonlocal generation
         while not commands.empty():
             item = commands.get_nowait()
             kind = item.get('cmd')
             if kind == 'close':
+                switching.cancel()
                 player.stop()
                 app.quit()
                 return
             if kind == 'source':
                 generation = item['generation']
-                restore = None
+                switching.cancel()
                 player.setSource(QUrl(item['url']))
             elif kind == 'play':
-                player.play()
+                switching.play()
             elif kind == 'pause':
-                if restore:
-                    restore = (restore[0], restore[1], False)
-                player.pause()
+                switching.pause()
             elif kind == 'stop':
-                restore = None
+                switching.cancel()
                 player.stop()
             elif kind == 'seek':
-                player.setPosition(int(item['position']))
+                switching.seek(int(item['position']))
             elif kind == 'volume':
                 audio.setVolume(float(item['value']))
             elif kind == 'muted':

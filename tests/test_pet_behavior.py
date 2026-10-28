@@ -3,6 +3,30 @@ from pet_behavior import PetBehavior
 
 
 class BehaviorTests(unittest.TestCase):
+    def test_walk_is_discarded_on_drag_without_changing_saved_mode(self):
+        state = PetBehavior('listen')
+        self.assertTrue(state.begin_walk('left'))
+        state.tick(.3)
+        self.assertEqual(state.activity, 'walk-left')
+        self.assertEqual(state.mode, 'listen')
+        state.begin_drag()
+        state.end_drag()
+        state.tick(1)
+        self.assertEqual(state.activity, 'idle')
+        self.assertFalse(state.layers)
+
+    def test_walk_cannot_replace_sleep_or_other_actions(self):
+        state = PetBehavior('sleep')
+        self.assertFalse(state.begin_walk('left'))
+        state.set_mode('idle')
+        state.react('eat', 2)
+        self.assertFalse(state.begin_walk('right'))
+        state.tick(2)
+        self.assertTrue(state.begin_walk('right'))
+        state.set_mode('phone')
+        state.end_walk()
+        self.assertEqual(state.activity, 'phone')
+
     def test_each_mode_survives_drag_and_landing(self):
         for mode in ('idle', 'sleep', 'phone', 'sing'):
             with self.subTest(mode=mode):

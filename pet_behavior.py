@@ -59,7 +59,29 @@ class PetBehavior:
     def has_action(self, name):
         return any(action.name == name for action in self.layers)
 
+    def begin_walk(self, direction):
+        """Walking is disposable presentation, never a saved activity."""
+        if direction not in ('left', 'right') or self.layers or self.activity != 'idle':
+            return False
+        self.layers.append(Action('walk-' + direction, None))
+        return True
+
+    def end_walk(self):
+        self.layers = [action for action in self.layers
+                       if action.name not in ('walk-left', 'walk-right')]
+
+    def begin_teleport(self):
+        if self.layers or self.activity != 'idle':
+            return False
+        self.layers.append(Action('teleport', None))
+        return True
+
+    def end_teleport(self):
+        self.layers = [action for action in self.layers if action.name != 'teleport']
+
     def begin_drag(self):
+        self.end_walk()
+        self.end_teleport()
         if not self.dragging:
             if self.action == 'land':
                 self.layers.pop()  # A new drop supersedes the interrupted landing.

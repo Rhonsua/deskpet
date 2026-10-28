@@ -8,12 +8,13 @@ APPEARANCE_REVISION = 'live2d-default-v1'
 BUILTIN_APPEARANCES = (
     ('Live2D 洛天依 · 动态模型', 'live2d'),
     ('静态模型 · 精致 Q 版 / 经典 V3', 'refined'),
-    ('静态模型 · 圆润 Q 版 / 经典 V3', 'simple'),
 )
 
 
 def preferred_variant(settings):
     selected = settings.value('character_selection', settings.value('visual_variant', 'live2d'))
+    if selected == 'simple':
+        return 'refined'
     # Switch old built-in defaults once; subsequent explicit choices persist.
     if (settings.value('appearance_revision', '') != APPEARANCE_REVISION
             and selected in ('refined', 'simple', 'live2d')):
