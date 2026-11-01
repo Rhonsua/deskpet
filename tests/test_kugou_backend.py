@@ -4,6 +4,51 @@ from deskpet.music.kugou.media import validate_media_url
 from deskpet.music.kugou.links import playlist_id
 
 class KugouBackendTests(unittest.TestCase):
+    def test_download_can_save_full_playable_mp3_when_download_has_no_url(self):
+        g=Service({'userid':'42','token':'secret'}).media({'id':'A'*32,'duration':240000},download=True)
+        request=next(g)
+        self.assertEqual(request.params['behavior'],'download')
+        request=g.send({'status':2,'priv_status':0})
+        self.assertEqual(request.params['behavior'],'play')
+        self.assertEqual(request.params['token'],'secret')
+        with self.assertRaises(StopIteration) as result:
+            g.send({'status':1,'priv_status':1,'url':['https://fsandroid.tx.kugou.com/a.mp3',
+                    'http://fsmobile.kugou.com/a.mp3'],'fileSize':3841290,'timeLength':240,'extName':'mp3'})
+        media=result.exception.value
+        self.assertFalse(media['unavailable'])
+        self.assertEqual(media['source_kind'],'playback')
+        self.assertEqual(len(media['urls']),2)
+        self.assertEqual(media['urls'][1],'https://fsmobile.kugou.com/a.mp3')
+
+    def test_download_grant_does_not_depend_on_search_only_pay_flag(self):
+        g=Service().media({'id':'A'*32},download=True);next(g)
+        with self.assertRaises(StopIteration) as result:
+            g.send({'status':1,'priv_status':1,'url':['https://fsandroid.tx.kugou.com/a.mp3'],
+                    'fileSize':100,'timeLength':100,'extName':'mp3'})
+        self.assertFalse(result.exception.value['unavailable'])
+        self.assertEqual(result.exception.value['source_kind'],'download')
+
+    def test_download_request_failure_can_try_playback_but_expiry_cannot(self):
+        from deskpet.music.kugou.service import SessionExpired
+        g=Service().media({'id':'A'*32},download=True);next(g)
+        request=g.throw(ApiError('下载入口未返回地址'))
+        self.assertEqual(request.params['behavior'],'play')
+        g.close()
+        g=Service().media({'id':'A'*32},download=True);next(g)
+        with self.assertRaises(SessionExpired): g.throw(SessionExpired('会话失效'))
+
+    def test_mp3_fallback_rejects_trial_encrypted_or_missing_audio(self):
+        full={'status':1,'priv_status':1,'url':['https://fsandroid.tx.kugou.com/a.mp3'],
+              'fileSize':100,'timeLength':240,'extName':'mp3'}
+        for changed in ({'hash_offset':{'end_ms':60000}}, {'timeLength':60},
+                        {'extName':'kgm'}, {'priv_status':0}, {'url':[]}, {'fileSize':0}):
+            with self.subTest(changed=changed):
+                g=Service().media({'id':'A'*32,'duration':240000},download=True);next(g)
+                g.send({'status':2,'priv_status':0})
+                with self.assertRaises(StopIteration) as result: g.send(dict(full,**changed))
+                self.assertTrue(result.exception.value['unavailable'])
+                self.assertFalse(result.exception.value['url'])
+
     def test_account_response_info_without_total(self):
         # Sanitized shape observed from the ordinary Kugou account endpoint.
         g=Service({'userid':'42','token':'secret'}).collections(); next(g)

@@ -200,6 +200,34 @@ class CloudProviderTests(unittest.TestCase):
         prefix = '[kugou-' + HASH + '] '
         self.assertTrue(safe_stem(prefix + '长标题'*100).startswith(prefix))
 
+    def test_kugou_retries_verified_cdn_once_and_keeps_failure_reason(self):
+        companion=QObject()
+        panel=SimpleNamespace(queue=SimpleNamespace(mode='order'),playback_source='local',
+            bilibili=SimpleNamespace(active=False),player=Mock(),_player=object(),
+            pet=SimpleNamespace(playing=False),status=Mock(),song_meta=Mock(),
+            set_song_title=Mock(),ensure_audio=Mock())
+        companion.pet=SimpleNamespace(panel=panel)
+        callbacks=[]
+        companion.preparation=SimpleNamespace(cancel=Mock(),online=lambda *a,**kw:callbacks.append(a[2]))
+        cloud=Cloud(Service())
+        with patch('deskpet.music.netease.playback.client_class',return_value=FakeClient):
+            player=NeteasePlayback(companion,cloud,'kugou')
+        try:
+            player.play([TRACK])
+            primary='https://fsandroid.tx.kugou.com/a.mp3'
+            secondary='https://fsmobile.kugou.com/a.mp3'
+            player._resolved(player._request_kind('media'),dict(id=HASH,url=primary,
+                urls=[primary,secondary,'https://example.test/a.mp3']))
+            callbacks[0]()
+            player.audio_error()
+            self.assertEqual(panel.player.setSource.call_args.args[0].toString(),secondary)
+            self.assertFalse(player.failures)
+            player.audio_error()
+            self.assertFalse(player.want_play)
+            self.assertIn('最后原因',cloud.set_playback_status.call_args.args[0])
+            self.assertEqual(player.media_urls,[])
+        finally: player.deactivate()
+
 
 if __name__ == '__main__':
     unittest.main()

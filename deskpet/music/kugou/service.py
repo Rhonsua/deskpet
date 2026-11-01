@@ -186,6 +186,31 @@ class Service:
             lrc=base64.b64decode(raw.get('content',''),validate=True).decode('utf-8-sig'); return dict(track,lrc=lrc,lrc_status='已获取歌词')
         except (ApiError,ValueError,KeyError,UnicodeError): return dict(track,lrc='',lrc_status='歌词获取失败')
     def media(self,track_or_id,download=False):
+        try:
+            result=yield from self._media(track_or_id,download)
+        except SessionExpired:
+            raise
+        except ApiError as error:
+            if not download: raise
+            h=song_id(track_or_id.get('hash') or track_or_id.get('id') if isinstance(track_or_id,dict) else track_or_id)
+            result=dict(id=h,url='',unavailable=True,trial=False,reason=str(error))
+        if download and result['unavailable']:
+            # Standard Kugou may return a complete, ordinary MP3 for playback
+            # while its separate download endpoint returns no URL. Save that
+            # stream only when this same account can obtain the full audio.
+            try:
+                playable=yield from self._media(track_or_id,False)
+            except SessionExpired:
+                raise
+            except ApiError:
+                return result
+            if (not playable['unavailable'] and not playable['trial']
+                    and playable['extension']=='mp3' and playable['size']>0
+                    and playable['duration_ms']>0):
+                return playable
+        return result
+
+    def _media(self,track_or_id,download=False):
         h=song_id(track_or_id.get('hash') or track_or_id.get('id') if isinstance(track_or_id,dict) else track_or_id)
         track=track_or_id if isinstance(track_or_id,dict) else {}
         uid=str(self.session.get('userid') or '0'); token=str(self.session.get('token') or '')
@@ -194,13 +219,24 @@ class Service:
         if token: params.update(userid=uid,token=token)
         raw=yield self.request('/v5/url',params,'trackercdn.kugou.com')
         from .media import validate_media_url
-        url=''
-        for candidate in raw.get('url') or []:
-            try: url=validate_media_url(candidate); break
+        urls=[]
+        candidates=raw.get('url') or []
+        if isinstance(candidates,str): candidates=[candidates]
+        for candidate in candidates:
+            try:
+                candidate=validate_media_url(candidate)
+                if candidate not in urls: urls.append(candidate)
             except ValueError: pass
         duration=int(raw.get('timeLength') or 0)*1000; full=int(track.get('duration') or 0)
         trial=bool(raw.get('hash_offset')) or bool(full and duration and duration+2000<full)
-        allowed=raw.get('status')==1 and raw.get('priv_status')==1 and bool(url)
-        # Require both a download request grant and explicit free metadata.
-        if download: allowed=allowed and not trial and track.get('pay_type') == 0 and duration > 0 and int(raw.get('fileSize') or 0) > 0
-        return dict(id=h,url=url if allowed else '',extension=str(raw.get('extName') or 'mp3'),size=int(raw.get('fileSize') or 0),duration_ms=duration,trial=trial,trial_start_ms=0,unavailable=not allowed,reason=('酷狗未确认免费完整下载权限' if download and not allowed else '仅提供试听' if trial else '' if allowed else '酷狗未授权此音源或仅提供试听信息'))
+        allowed=raw.get('status')==1 and raw.get('priv_status')==1 and bool(urls)
+        if download: allowed=allowed and not trial and duration>0 and int(raw.get('fileSize') or 0)>0
+        if allowed: reason='仅提供试听' if trial else ''
+        elif trial: reason='酷狗仅返回试听片段，未保存为完整 MP3。'
+        elif raw.get('status')==1 and raw.get('priv_status')==1 and candidates:
+            reason='酷狗返回的音频服务器暂未适配。'
+        else: reason='酷狗未返回可用的'+('完整 MP3' if download else '播放地址')+'，请确认当前账号可播放该曲目。'
+        return dict(id=h,url=urls[0] if allowed else '',urls=urls if allowed else [],
+                    extension=str(raw.get('extName') or 'mp3').lower(),size=int(raw.get('fileSize') or 0),
+                    duration_ms=duration,trial=trial,trial_start_ms=0,unavailable=not allowed,reason=reason,
+                    source_kind='download' if download else 'playback')

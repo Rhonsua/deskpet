@@ -33,6 +33,7 @@ class NeteasePlayback(QObject):
         self.loading = self.media_ready = self.want_play = False
         self.trial = False
         self.trial_offset = 0
+        self.media_urls = []
         self.failures = set()
         self.generation = 0
         client = Client if provider == 'netease' else client_class(provider)
@@ -89,6 +90,7 @@ class NeteasePlayback(QObject):
 
     def _load(self):
         self.generation += 1
+        self.media_urls=[]
         self.companion.preparation.cancel()
         self.advance_timer.stop()
         self.client.cancel()
@@ -123,6 +125,14 @@ class NeteasePlayback(QObject):
         except ValueError:
             self._failed(kind, '音源地址不兼容，已跳过。', False)
             return
+        self.media_urls=[]
+        if self.provider=='kugou':
+            for candidate in result.get('urls',[]):
+                try:
+                    candidate=media_validator(self.provider)(candidate)
+                    if candidate!=url and candidate not in self.media_urls:
+                        self.media_urls.append(candidate)
+                except ValueError: pass
         self.trial = bool(result.get('trial'))
         self.trial_offset = max(0, int(result.get('trial_start_ms', 0))) if self.trial else 0
         self.panel.song_meta.setText(self.provider_name + ' · ' + ('试听片段 · ' if self.trial else '') + MODES[self.queue.mode])
@@ -183,7 +193,7 @@ class NeteasePlayback(QObject):
         self.status(message)
         if len(self.failures) >= min(10, len(self.tracks)):
             self.want_play = False
-            self.status('多首歌曲不可播放，已停止自动尝试。请检查登录或选择其他歌曲。')
+            self.status('多首歌曲不可播放，已停止自动尝试。最后原因：'+message)
         elif self.want_play:
             self.advance_timer.start(350)
 
@@ -233,6 +243,15 @@ class NeteasePlayback(QObject):
 
     def audio_error(self):
         if self.active and self.media_ready:
+            if self.provider=='kugou' and self.media_urls:
+                url=self.media_urls.pop(0)
+                self.media_ready=False
+                self.panel.player.stop()
+                self.panel.player.setSource(QUrl(url))
+                self.media_ready=True
+                if self.want_play: self.panel.player.play()
+                self.status('正在尝试酷狗备用音频线路：'+self.current['title'])
+                return
             self._failed('audio', self.provider_name + '音频加载失败或链接已过期，正在尝试下一首。', False)
 
     def set_mode(self, mode):
@@ -242,6 +261,7 @@ class NeteasePlayback(QObject):
 
     def deactivate(self):
         self.generation += 1
+        self.media_urls=[]
         if self.active:
             self.companion.preparation.cancel()
         self.advance_timer.stop()

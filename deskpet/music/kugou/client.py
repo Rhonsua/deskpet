@@ -139,7 +139,9 @@ class Client(QObject):
             if not isinstance(raw, dict):
                 raise ApiError('酷狗接口没有返回JSON对象。')
             if raw.get('status') == 0 or raw.get('error_code') not in (None, 0):
-                raise ApiError('酷狗接口拒绝请求或需要安全验证，请稍后重试。')
+                code=raw.get('error_code')
+                suffix=f'（错误码 {code}）' if type(code) is int else ''
+                raise ApiError('酷狗接口拒绝请求或需要安全验证'+suffix+'，请稍后重试。')
         except (ValueError, UnicodeError) as failure:
             error = failure if isinstance(failure, ApiError) else ApiError('酷狗接口返回了无效JSON。')
             self._advance(error=error)
