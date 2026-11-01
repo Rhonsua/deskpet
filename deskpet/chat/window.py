@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
                                QLabel, QLineEdit, QPlainTextEdit, QTextBrowser, QPushButton,
-                               QCheckBox, QFormLayout, QMessageBox, QFileDialog)
+                               QCheckBox, QFormLayout, QMessageBox)
 
 from deskpet.ui.theme import apply_light_palette, CONTROL_STYLE
 from .config import ConfigFile, ProviderConfig
@@ -133,9 +133,11 @@ class ChatWindow(ChatSurface):
         from .conversation_view import ConversationView
         self.history_view = ConversationView()
         self.background_path = root / 'background.png'
-        self.set_placement(self.pet.panel.settings.value('chat/background_placement'))
-        self.set_surface(self.background_path)
-        self.background_position_button.setEnabled(not self.surface_image.isNull())
+        from deskpet.ui.background_controls import PageBackgrounds
+        self.backgrounds = PageBackgrounds(self, self.pet.panel.settings, self.background_path,
+            'chat/background', self.background_position_button,
+            notify=lambda text: self.status.setText(text))
+        self.backgrounds.activate('companion', '陪伴模式')
         self.history_view.setOpenLinks(False)
         self.history_view.setOpenExternalLinks(False)
         layout.addWidget(self.history_view, 1)
@@ -264,6 +266,9 @@ class ChatWindow(ChatSurface):
             runtime.cancel()
 
     def on_mode_changed(self, index):
+        pages = ('companion', 'api', 'persona', 'work')
+        if 0 <= index < len(pages):
+            self.backgrounds.activate(pages[index], self.tabs.tabText(index))
         if index == self.work_index:
             area = self.screen().availableGeometry()
             self.setMinimumSize(min(590, area.width() - 40), min(520, area.height() - 60))
@@ -344,39 +349,13 @@ class ChatWindow(ChatSurface):
             self.input.setFocus()
 
     def choose_background(self):
-        path,_=QFileDialog.getOpenFileName(self,'选择对话背景','','图片 (*.png *.jpg *.jpeg *.webp *.bmp)')
-        if not path:return
-        try:
-            from .conversation_view import save_background
-            save_background(path,self.background_path)
-            self.set_placement(None)
-            self.set_surface(self.background_path)
-            self.pet.panel.settings.remove('chat/background_placement')
-            self.background_position_button.setEnabled(True)
-            self.status.setText('整窗背景已更换，点击“调整位置”可以选择显示区域。')
-        except (ValueError,OSError) as error:self.status.setText(str(error))
+        self.backgrounds.choose()
 
     def adjust_background_position(self):
-        if self.surface_image.isNull():
-            return
-        from deskpet.ui.background_position import BackgroundPositionDialog
-        dialog = BackgroundPositionDialog(self)
-        try:
-            if dialog.exec() == BackgroundPositionDialog.DialogCode.Accepted:
-                self.pet.panel.settings.setValue('chat/background_placement', self.surface_placement.as_dict())
-                self.pet.panel.settings.sync()
-                self.status.setText('背景显示位置已保存。')
-        finally:
-            dialog.deleteLater()
+        self.backgrounds.adjust()
 
     def clear_background(self):
-        try:
-            self.background_path.unlink(missing_ok=True)
-            self.set_surface(None)
-            self.set_placement(None)
-            self.pet.panel.settings.remove('chat/background_placement')
-            self.background_position_button.setEnabled(False)
-        except OSError:self.status.setText('背景无法重置，请检查文件权限。')
+        self.backgrounds.clear()
 
     def restore_persona(self):
         cursor = self.persona_input.textCursor()

@@ -54,6 +54,14 @@ QListWidget::item:hover { background: rgba(227,244,252,210); }
 QListWidget::item:selected:hover { background: rgba(170,216,236,235); }
 """
 
+MUSIC_TOOL_GLASS_STYLE = COMPACT_GLASS_STYLE + """
+QTreeWidget, QSpinBox, QDoubleSpinBox { background: rgba(255,255,255,155); color: #142B36; border: 1px solid rgba(125,156,170,150); border-radius: 5px; padding: 5px; }
+QTreeWidget::item { background: transparent; padding: 4px; }
+QTreeWidget::item:selected { background: rgba(170,216,236,220); color: #102B39; }
+QHeaderView, QHeaderView::section { background: rgba(237,247,252,190); color: #142B36; border: none; padding: 5px; }
+QTreeWidget QScrollBar:vertical { background: rgba(255,255,255,80); }
+"""
+
 
 def text(value, muted=False):
     item = QLabel(value)
@@ -82,9 +90,11 @@ def build(panel):
     outer.setSpacing(6)
     background_tools = QHBoxLayout()
     panel.background_button = action('更换背景', panel.choose_background)
-    panel.background_button.setToolTip('选择本地图片作为整个歌单窗口的背景，自动居中裁剪。')
+    panel.background_button.setToolTip('歌单与网易云共用音乐背景图片，各页面可分别调整显示区域。')
+    panel.background_position_button = action('调整位置', panel.adjust_background_position)
     panel.reset_background_button = action('默认背景', panel.clear_background)
     background_tools.addWidget(panel.background_button)
+    background_tools.addWidget(panel.background_position_button)
     background_tools.addWidget(panel.reset_background_button)
     background_tools.addStretch()
     outer.addLayout(background_tools)

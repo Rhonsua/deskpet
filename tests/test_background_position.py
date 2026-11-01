@@ -84,6 +84,7 @@ class BackgroundPositionTests(unittest.TestCase):
             (root / 'chat').mkdir()
             self.make_image(root / 'chat/background.png')
             window = ChatWindow(pet)
+            window.tabs.setCurrentIndex(window.work_index)
             self.assertTrue(window.background_position_button.isEnabled())
             chosen = BackgroundPlacement(80, 25, 170)
 
@@ -95,26 +96,82 @@ class BackgroundPositionTests(unittest.TestCase):
             try:
                 QTimer.singleShot(0, lambda: finish_dialog(True))
                 window.adjust_background_position()
-                self.assertEqual(settings.value('chat/background_placement'), chosen.as_dict())
+                self.assertEqual(settings.value('chat/background_placements'), {'work': chosen.as_dict()})
+                window.tabs.setCurrentIndex(0)
+                self.assertEqual(window.surface_placement, BackgroundPlacement())
+                window.tabs.setCurrentIndex(window.work_index)
+                self.assertEqual(window.surface_placement, chosen)
             finally:
                 window.shutdown();window.close();window.deleteLater();self.app.processEvents()
             settings = QSettings(str(root / 'settings.ini'), QSettings.IniFormat)
             pet.panel.settings = settings
             window = ChatWindow(pet)
             try:
+                window.tabs.setCurrentIndex(window.work_index)
                 self.assertEqual(window.surface_placement, chosen)
                 QTimer.singleShot(0, lambda: finish_dialog(False))
                 window.adjust_background_position()
                 self.assertEqual(window.surface_placement, chosen)
-                self.assertEqual(settings.value('chat/background_placement'), chosen.as_dict())
+                self.assertEqual(settings.value('chat/background_placements'), {'work': chosen.as_dict()})
                 source = root / 'replacement.png';self.make_image(source)
-                with patch('deskpet.chat.window.QFileDialog.getOpenFileName', return_value=(str(source), '')):
+                with patch('deskpet.ui.background_controls.QFileDialog.getOpenFileName', return_value=(str(source), '')):
                     window.choose_background()
                 self.assertEqual(window.surface_placement, BackgroundPlacement())
                 self.assertTrue(window.background_position_button.isEnabled())
                 window.clear_background()
                 self.assertFalse(window.background_position_button.isEnabled())
                 self.assertFalse(settings.contains('chat/background_placement'))
+                self.assertFalse(settings.contains('chat/background_placements'))
                 self.assertTrue(window.surface_image.isNull())
             finally:
                 window.shutdown();window.close()
+
+    def test_page_crops_are_independent_preserve_legacy_and_survive_restart(self):
+        from PySide6.QtWidgets import QPushButton
+        from deskpet.ui.background_controls import PageBackgrounds
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory);image = root / 'background.png';self.make_image(image)
+            settings = QSettings(str(root / 'settings.ini'), QSettings.IniFormat)
+            legacy = BackgroundPlacement(30, 65, 140)
+            settings.setValue('chat/background_placement', legacy.as_dict())
+            surface = BackgroundSurface()
+            manager = PageBackgrounds(surface, settings, image, 'chat/background', QPushButton(surface))
+            manager.activate('work', '工作')
+            self.assertEqual(surface.surface_placement, legacy)
+            manager.save_position('work', BackgroundPlacement(80, 10, 200))
+            manager.activate('companion', '陪伴')
+            self.assertEqual(surface.surface_placement, legacy)
+            manager.save_position('companion', BackgroundPlacement(10, 90, 110))
+            manager.activate('work', '工作')
+            self.assertEqual(surface.surface_placement, BackgroundPlacement(80, 10, 200))
+            surface.close()
+            settings = QSettings(str(root / 'settings.ini'), QSettings.IniFormat)
+            restored = BackgroundSurface()
+            manager = PageBackgrounds(restored, settings, image, 'chat/background', QPushButton(restored))
+            manager.activate('companion', '陪伴')
+            self.assertEqual(restored.surface_placement, BackgroundPlacement(10, 90, 110))
+            manager.activate('work', '工作')
+            self.assertEqual(restored.surface_placement, BackgroundPlacement(80, 10, 200))
+            restored.close()
+
+    def test_programmatic_page_change_during_preview_saves_only_original_page(self):
+        from PySide6.QtWidgets import QPushButton
+        from deskpet.ui.background_controls import PageBackgrounds
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory);image = root / 'background.png';self.make_image(image)
+            settings = QSettings(str(root / 'settings.ini'), QSettings.IniFormat)
+            surface = BackgroundSurface()
+            manager = PageBackgrounds(surface, settings, image, 'music/background', QPushButton(surface))
+            manager.activate('tools.netease.account', '我的歌单')
+            selected = BackgroundPlacement(10, 30, 190)
+            def finish():
+                dialog = next(c for c in surface.children() if isinstance(c, BackgroundPositionDialog))
+                dialog.set_controls(selected)
+                manager.activate('tools.netease.songs', '歌曲与歌单')
+                dialog.accept()
+            QTimer.singleShot(0, finish)
+            manager.adjust()
+            self.assertEqual(manager.position('tools.netease.account'), selected)
+            self.assertEqual(surface.surface_placement, BackgroundPlacement())
+            self.assertEqual(manager.records(), {'tools.netease.account': selected.as_dict()})
+            surface.close()

@@ -9,8 +9,8 @@ from unittest.mock import patch
 
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from PySide6.QtCore import QObject, QSettings, QUrl
-from PySide6.QtGui import QFont, QFontDatabase
+from PySide6.QtCore import QObject, QSettings, QUrl, QPoint
+from PySide6.QtGui import QFont, QFontDatabase, QImage, QColor
 from PySide6.QtWidgets import QApplication, QMessageBox
 from deskpet.app import Pet
 from deskpet.music.audio.remote import RemotePlayer
@@ -91,6 +91,51 @@ with tempfile.TemporaryDirectory(prefix='music-companion-') as temporary:
         companion.open(0)
         assert companion.window.isVisible() and companion.cloud is not None
         assert companion.cloud.client.reply is None  # Opening a page never makes a network request.
+        from deskpet.ui.background import BackgroundPlacement
+        background = root / 'synthetic-background.png'
+        image = QImage(320, 240, QImage.Format_RGB32)
+        image.fill(QColor('#245599'));image.save(str(background))
+        with patch('deskpet.ui.background_controls.QFileDialog.getOpenFileName', return_value=(str(background), '')):
+            pet.panel.choose_background()
+        assert not companion.window.surface_image.isNull()
+        assert companion.background_position_button.isEnabled()
+        playlist_crop = BackgroundPlacement(20, 70, 130)
+        account_crop = BackgroundPlacement(10, 20, 160)
+        lyric_crop = BackgroundPlacement(30, 40, 200)
+        pet.panel.backgrounds.save_position('playlist.local', playlist_crop)
+        pet.panel.change_background_page(0)
+        companion.backgrounds.save_position('tools.netease.account', account_crop)
+        companion.update_background_page();app.processEvents()
+        assert companion.window.surface_placement == account_crop
+        viewport = companion.cloud.collections.viewport()
+        preview = Path(__file__).resolve().parents[1] / 'preview/music-companion'
+        preview.mkdir(parents=True, exist_ok=True)
+        companion.window.grab().save(str(preview / 'netease-background.png'))
+        point = viewport.mapTo(companion.window, QPoint(viewport.width() // 2, viewport.height() // 2))
+        color = companion.window.grab().toImage().pixelColor(point)
+        assert color.saturation() > 20, 'opaque NetEase list still hides the background: ' + color.name()
+        companion.tabs.setCurrentIndex(1)
+        companion.backgrounds.save_position('tools.lyrics', lyric_crop)
+        companion.update_background_page()
+        assert companion.window.surface_placement == lyric_crop
+        assert pet.panel.surface_placement == playlist_crop
+        companion.window.grab().save(str(preview / 'lyrics-background.png'))
+        companion.tabs.setCurrentIndex(2)
+        assert companion.window.surface_placement == BackgroundPlacement()
+        companion.window.grab().save(str(preview / 'beats-background.png'))
+        companion.tabs.setCurrentIndex(0)
+        assert companion.window.surface_placement == account_crop
+        companion.cloud.tabs.setCurrentIndex(0)
+        assert companion.window.surface_placement == BackgroundPlacement()
+        companion.cloud.tabs.setCurrentIndex(2)
+        assert companion.window.surface_placement == account_crop
+        companion.backgrounds.clear();app.processEvents()
+        assert companion.window.surface_image.isNull() and pet.panel.surface_image.isNull()
+        assert not companion.background_position_button.isEnabled()
+        assert not pet.panel.background_position_button.isEnabled()
+        point = viewport.mapTo(companion.window, QPoint(viewport.width() // 2, viewport.height() // 2))
+        color = companion.window.grab().toImage().pixelColor(point)
+        assert color == QColor('white'), 'default background did not restore the original page style'
         with patch('deskpet.music.tools.companion.QMessageBox.question', return_value=QMessageBox.StandardButton.Yes):
             companion.online_lyrics('123', '人工云歌曲', '[00:00.00]云歌词测试\n[00:01.00]云歌词测试二')
         assert companion.bindings['123'] == 'local:' + str(song)
@@ -129,7 +174,7 @@ with tempfile.TemporaryDirectory(prefix='music-companion-') as temporary:
             count = sum(command['cmd'] == 'play' for command in engine.commands)
             companion.beats.analysisFinished.emit(True)
             assert count == sum(command['cmd'] == 'play' for command in engine.commands)
-        print('PASS: lazy tools; real clock/lyrics; beat state priority; cloud binding; pre-play pause and source-switch guard; no rewards/network')
+        print('PASS: lazy tools; NetEase background; independent page crops; default style restore; real clock/lyrics; beat state priority; cloud binding; pre-play pause and source-switch guard; no rewards/network')
     finally:
         if companion: companion.shutdown()
         if pet.mod_host: pet.mod_host.shutdown()

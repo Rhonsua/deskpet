@@ -31,12 +31,13 @@ from deskpet.music.audio.remote import AudioEngine
 from deskpet.pet.characters import character_directory
 from deskpet.ui.icon import application_icon
 from deskpet.version import VERSION
-from deskpet.ui.background import BackgroundSurface, save_background
+from deskpet.ui.background import BackgroundSurface
 
 
 class MusicPanel(BackgroundSurface):
     surface_color = '#FFFFFF'
     songChanged = Signal(str)
+    backgroundChanged = Signal()
 
     def set_song_title(self, title):
         self.song_title.setText(title)
@@ -73,7 +74,14 @@ class MusicPanel(BackgroundSurface):
         self._audio = self._player = self._audio_router = None
         self._restore_request = None
         build(self)
-        self.load_background()
+        from deskpet.ui.background_controls import PageBackgrounds
+        self.backgrounds = PageBackgrounds(self, self.settings, self.background_path,
+            'music/background', self.background_position_button,
+            style=lambda enabled: self.setStyleSheet(COMPACT_GLASS_STYLE if enabled else COMPACT_STYLE),
+            notify=self.status.setText)
+        self.backgrounds.image_changed.connect(self.backgroundChanged.emit)
+        self.tabs.currentChanged.connect(self.change_background_page)
+        self.change_background_page(self.tabs.currentIndex())
         if self.library_storage.notice:
             self.status.setText(self.library_storage.notice)
         self.bilibili.starting.connect(self.activate_web)
@@ -93,28 +101,21 @@ class MusicPanel(BackgroundSurface):
                                         and hasattr(self.pet, 'refresh_characters') else None)
 
     def load_background(self):
-        self.set_surface(self.background_path)
-        self.setStyleSheet(COMPACT_STYLE if self.surface_image.isNull() else COMPACT_GLASS_STYLE)
+        self.backgrounds.reload()
+
+    def change_background_page(self, index):
+        pages = ('local', 'growth', 'settings', 'bilibili')
+        if 0 <= index < len(pages):
+            self.backgrounds.activate('playlist.' + pages[index], '歌单 · ' + self.tabs.tabText(index))
+
+    def adjust_background_position(self):
+        self.backgrounds.adjust()
 
     def choose_background(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, '选择歌单背景', '', '图片 (*.png *.jpg *.jpeg *.webp *.bmp)')
-        if not path:
-            return
-        try:
-            save_background(path, self.background_path)
-            self.load_background()
-            self.status.setText('歌单背景已保存，会随窗口大小自动居中裁剪。')
-        except (ValueError, OSError) as error:
-            self.status.setText(str(error))
+        self.backgrounds.choose()
 
     def clear_background(self):
-        try:
-            self.background_path.unlink(missing_ok=True)
-            self.load_background()
-            self.status.setText('已恢复默认歌单背景。')
-        except OSError:
-            self.status.setText('背景无法重置，请检查文件权限。')
+        self.backgrounds.clear()
 
     def ensure_audio(self):
         """Windows endpoint discovery can be slow; perform it on first use."""

@@ -4,8 +4,8 @@ import sqlite3
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Qt
-from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QTabWidget, QLabel,
-                               QMessageBox)
+from PySide6.QtWidgets import (QApplication, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel,
+                               QMessageBox, QPushButton)
 from deskpet.music.tools.clock import playback_snapshot
 from deskpet.ui.theme import apply_light_palette
 
@@ -60,14 +60,25 @@ class MusicCompanion(QObject):
     def open(self, page=0):
         if self.window is None:
             from deskpet.music.netease import NeteaseWidget
-            from deskpet.ui.compact import COMPACT_STYLE
+            from deskpet.ui.background import BackgroundSurface
             # The topmost pet must not become this window's native owner.
-            self.window = QWidget(None, Qt.WindowType.Window)
+            self.window = BackgroundSurface(None, Qt.WindowType.Window)
             self.window.setWindowTitle('天依 · 网易云、歌词与节拍')
             self.window.resize(760, 740)
             apply_light_palette(self.window)
-            self.window.setStyleSheet(COMPACT_STYLE)
             layout = QVBoxLayout(self.window)
+            background_tools = QHBoxLayout()
+            background_button = QPushButton('更换背景')
+            background_button.setToolTip('与歌单共用音乐背景图片；各页裁剪位置独立保存。')
+            background_button.clicked.connect(lambda: self.backgrounds.choose())
+            self.background_position_button = QPushButton('调整位置')
+            self.background_position_button.clicked.connect(lambda: self.backgrounds.adjust())
+            reset_background = QPushButton('默认背景')
+            reset_background.clicked.connect(lambda: self.backgrounds.clear())
+            for button in (background_button, self.background_position_button, reset_background):
+                background_tools.addWidget(button)
+            background_tools.addStretch()
+            layout.addLayout(background_tools)
             self.current_label = QLabel()
             self.current_label.setTextFormat(Qt.TextFormat.PlainText)
             self.current_label.setWordWrap(True)
@@ -93,6 +104,19 @@ class MusicCompanion(QObject):
             self.tabs.addTab(self.cloud, '网易云')
             self.tabs.addTab(self.lyrics.create_widget(self.window), '歌词字幕')
             self.tabs.addTab(self.beats.create_widget(self.window), '节拍跟随')
+            # Nested widgets own opaque styles for standalone use; replace
+            # those too, otherwise they hide the window's background image.
+            self.default_page_styles = [(self.tabs.widget(i), self.tabs.widget(i).styleSheet())
+                                        for i in range(self.tabs.count())]
+            from deskpet.ui.background_controls import PageBackgrounds
+            self.backgrounds = PageBackgrounds(self.window, self.pet.panel.settings,
+                self.pet.panel.background_path, 'music/background', self.background_position_button,
+                style=self.apply_background_style)
+            self.backgrounds.image_changed.connect(self.pet.panel.load_background)
+            self.pet.panel.backgroundChanged.connect(self.backgrounds.reload)
+            self.tabs.currentChanged.connect(self.update_background_page)
+            self.cloud.tabs.currentChanged.connect(self.update_background_page)
+            self.update_background_page()
         self.tick()
         self.tabs.setCurrentIndex(max(0, min(2, page)))
         self.pet.toolbar.hide()
@@ -102,6 +126,24 @@ class MusicCompanion(QObject):
         self.window.show()
         self.window.raise_()
         self.window.activateWindow()
+
+    def apply_background_style(self, enabled):
+        from deskpet.ui.compact import COMPACT_STYLE, MUSIC_TOOL_GLASS_STYLE
+        self.window.setStyleSheet(MUSIC_TOOL_GLASS_STYLE if enabled else COMPACT_STYLE)
+        for page, original in self.default_page_styles:
+            page.setStyleSheet(MUSIC_TOOL_GLASS_STYLE if enabled else original)
+
+    def update_background_page(self, *unused):
+        index = self.tabs.currentIndex()
+        if index == 0:
+            child = self.cloud.tabs.currentIndex()
+            keys = ('songs', 'snapshots', 'account', 'connection')
+            page = 'tools.netease.' + keys[max(0, min(3, child))]
+            label = '网易云 · ' + self.cloud.tabs.tabText(child)
+        else:
+            page = 'tools.lyrics' if index == 1 else 'tools.beats'
+            label = self.tabs.tabText(index)
+        self.backgrounds.activate(page, label)
 
     def control_transport(self, action):
         if action == 'toggle':
