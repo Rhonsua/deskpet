@@ -99,6 +99,8 @@ class MusicPanel(BackgroundSurface):
         self.tabs.currentChanged.connect(lambda index: self.ensure_audio() if index == 2 else None)
         self.tabs.currentChanged.connect(lambda index: self.pet.refresh_characters() if index == 2
                                         and hasattr(self.pet, 'refresh_characters') else None)
+        from deskpet.ui.updates import UpdateController
+        self.updater = UpdateController(self)
 
     def load_background(self):
         self.backgrounds.reload()
@@ -704,6 +706,7 @@ def main():
         return 0
     app.setQuitOnLastWindowClosed(False)
     pet = Pet()
+    pet.panel.updater.start()
     if '--preview-crawl' in sys.argv:
         QTimer.singleShot(1500, pet.preview_crawl_animation)
     if '--preview-work' in sys.argv or '--work' in sys.argv or '--chat' in sys.argv:

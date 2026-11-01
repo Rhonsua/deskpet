@@ -20,6 +20,17 @@ class Setup {
         return index >= 0 && index + 1 < Args.Length ? Args[index + 1] : fallback;
     }
     static string Root(string value) { return Path.GetFullPath(value).TrimEnd(Path.DirectorySeparatorChar); }
+    static string PreviousInstallDirectory() {
+        try {
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(Key)) {
+                string path = key == null ? null : key.GetValue("InstallLocation") as string;
+                if (!String.IsNullOrWhiteSpace(path) && Path.IsPathRooted(path) &&
+                    File.Exists(Path.Combine(path, "installed-files.txt")) &&
+                    File.Exists(Path.Combine(path, "TianyiPet.exe"))) return Root(path);
+            }
+        } catch (Exception) { /* A missing or inaccessible old installation uses the default. */ }
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "TianyiPet");
+    }
     static string Child(string root, string relative) {
         string path = Path.GetFullPath(Path.Combine(root, relative));
         if (!path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
@@ -133,7 +144,7 @@ class Setup {
         AppContext.SetSwitch("Switch.System.IO.BlockLongPaths", false);
         Args = args;
         Application.EnableVisualStyles();
-        string destination = Option("--dir", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "TianyiPet"));
+        string destination = Option("--dir", PreviousInstallDirectory());
         bool quiet = Has("--quiet"), test = Has("--test");
         try {
             if (Has("--uninstall")) {
