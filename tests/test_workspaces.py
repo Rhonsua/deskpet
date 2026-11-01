@@ -150,3 +150,48 @@ class WorkspaceTests(unittest.TestCase):
             restored.resize(960,700);restored.show();self.app.processEvents()
             self.assertFalse(restored.sidebar.isVisible())
             restored.shutdown();restored.close()
+
+    def test_open_switch_and_restore_conversations_show_latest_message(self):
+        from PySide6.QtWidgets import QTabWidget, QWidget
+        from PySide6.QtTest import QTest
+        with tempfile.TemporaryDirectory() as folder,patch('deskpet.chat.work_client.WorkClient',FakeClient):
+            w=Workspaces(lambda:'config',folder)
+            first=w.add_project(folder)
+            first.log.set_messages([{'role':'assistant','content':f'工作结果 {i}\n' + '详细说明 ' * 30}
+                                    for i in range(35)])
+            second=w.new_conversation()
+            # Older records may contain only a plain-text transcript.
+            second.log.setPlainText('\n'.join(f'旧版记录 {i}' for i in range(100)))
+            w.select_conversation(first.conversation_id)
+            w.shutdown()
+
+            tabs=QTabWidget();tabs.resize(960,700)
+            tabs.addTab(QWidget(),'陪伴')
+            restored=Workspaces(lambda:'config',folder)
+            tabs.addTab(restored,'工作');tabs.show()
+            self.addCleanup(tabs.close)
+            self.addCleanup(restored.shutdown)
+            QTest.qWait(30)
+            tabs.setCurrentIndex(1);QTest.qWait(30)
+
+            def assert_latest(page):
+                bar=page.log.verticalScrollBar()
+                self.assertGreater(bar.maximum(),0)
+                self.assertEqual(bar.value(),bar.maximum())
+
+            current=restored.stack.currentWidget()
+            assert_latest(current)
+            # Showing once must not keep pulling the reader back down.
+            current.log.verticalScrollBar().setValue(0)
+            restored.refresh_status();QTest.qWait(30)
+            self.assertEqual(current.log.verticalScrollBar().value(),0)
+            tabs.setCurrentIndex(0);tabs.setCurrentIndex(1);QTest.qWait(30)
+            assert_latest(current)
+            other=list(restored.pages.values())[1]
+            restored.select_conversation(other.conversation_id);QTest.qWait(30)
+            assert_latest(other)
+            restored.select_conversation(current.conversation_id);QTest.qWait(30)
+            assert_latest(current)
+            tabs.hide();tabs.show();QTest.qWait(30)
+            assert_latest(current)
+            restored.shutdown();tabs.close()

@@ -1,6 +1,7 @@
 """Native task view for the official Harness backend; no browser required."""
 import json
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPlainTextEdit, QPushButton, QFileDialog, QCheckBox, QMessageBox,
                                QToolButton, QFrame, QSizePolicy)
@@ -90,6 +91,9 @@ class WorkPanel(QWidget):
         self.log.setStyleSheet('QTextBrowser { background: transparent; border: none; padding: 4px; color: #243541; font-size: 13px; }')
         self.log.setMinimumSize(0, 100)
         self.log.setPlaceholderText('在下面输入任务，和天依一起完成工作。')
+        self.latest_scroll = QTimer(self)
+        self.latest_scroll.setSingleShot(True)
+        self.latest_scroll.timeout.connect(self.show_latest_message)
         layout.addWidget(self.log, 1)
 
         row = QHBoxLayout()
@@ -192,6 +196,18 @@ class WorkPanel(QWidget):
         self.client.busy_changed.connect(self.set_busy)
         self.client.completed.connect(lambda text: self.finish('工作完成', text))
         self.client.failed.connect(lambda text: self.finish('工作已结束，可修改输入后重试', text))
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Hidden tabs have not settled their transcript geometry yet. Scroll
+        # once after layout, not on a repeating timer that interrupts reading.
+        self.latest_scroll.start(0)
+
+    def show_latest_message(self):
+        if self.isVisible():
+            self.log.moveCursor(QTextCursor.End)
+            bar = self.log.verticalScrollBar()
+            bar.setValue(bar.maximum())
 
     def toggle_details(self, expanded):
         self.details_box.setVisible(expanded)
