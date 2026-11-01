@@ -1,6 +1,8 @@
 """Continuous window background and translucent controls."""
 from pathlib import Path
-from PySide6.QtCore import Qt, QSaveFile, QIODevice, QSize
+from dataclasses import dataclass, asdict
+import math
+from PySide6.QtCore import Qt, QSaveFile, QIODevice, QSize, QRectF
 from PySide6.QtGui import QPixmap,QPainter,QColor,QImageReader
 from PySide6.QtWidgets import QWidget
 
@@ -47,13 +49,27 @@ class BackgroundSurface(QWidget):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
         self.surface_image=QPixmap();self.surface_cover=QPixmap()
+        self.surface_placement = BackgroundPlacement()
+
+    def set_placement(self, value):
+        self.surface_placement = BackgroundPlacement.read(value)
+        self.scale_surface()
 
     def set_surface(self,path):
         self.surface_image=QPixmap(str(path)) if path and Path(path).is_file() else QPixmap()
         self.scale_surface()
 
     def scale_surface(self):
-        self.surface_cover=self.surface_image.scaled(self.size(),Qt.KeepAspectRatioByExpanding,Qt.SmoothTransformation) if not self.surface_image.isNull() else QPixmap()
+        self.surface_cover = QPixmap()
+        if not self.surface_image.isNull() and not self.size().isEmpty():
+            # Cache only the visible viewport, even when heavily zoomed in.
+            self.surface_cover = QPixmap(self.size())
+            self.surface_cover.fill(Qt.transparent)
+            painter = QPainter(self.surface_cover)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            painter.drawPixmap(QRectF(self.rect()), self.surface_image,
+                               background_crop(self.surface_image.size(), self.size(), self.surface_placement))
+            painter.end()
         self.update()
 
     def resizeEvent(self,event):
@@ -62,5 +78,43 @@ class BackgroundSurface(QWidget):
     def paintEvent(self,event):
         painter=QPainter(self);painter.fillRect(self.rect(),QColor(self.surface_color))
         if not self.surface_cover.isNull():
-            painter.drawPixmap((self.width()-self.surface_cover.width())//2,(self.height()-self.surface_cover.height())//2,self.surface_cover)
+            painter.drawPixmap(0, 0, self.surface_cover)
         painter.end()
+
+
+@dataclass(frozen=True)
+class BackgroundPlacement:
+    x: int = 50
+    y: int = 50
+    zoom: int = 100
+
+    @classmethod
+    def read(cls, value=None):
+        if isinstance(value, cls):
+            value = asdict(value)
+        if not isinstance(value, dict):
+            value = {}
+        def bounded(name, default, low, high):
+            try:
+                number = float(value.get(name, default))
+                return max(low, min(high, round(number))) if math.isfinite(number) else default
+            except (ValueError, TypeError, OverflowError):
+                return default
+        return cls(bounded('x', 50, 0, 100), bounded('y', 50, 0, 100),
+                   bounded('zoom', 100, 100, 300))
+
+    def as_dict(self):
+        return asdict(self)
+
+
+def background_crop(image_size, viewport_size, placement=None):
+    """Source-image rectangle, always filling the viewport without blank edges."""
+    if image_size.isEmpty() or viewport_size.isEmpty():
+        return QRectF()
+    position = BackgroundPlacement.read(placement)
+    scale = max(viewport_size.width() / image_size.width(),
+                viewport_size.height() / image_size.height()) * position.zoom / 100
+    width = min(image_size.width(), viewport_size.width() / scale)
+    height = min(image_size.height(), viewport_size.height() / scale)
+    return QRectF((image_size.width() - width) * position.x / 100,
+                  (image_size.height() - height) * position.y / 100, width, height)

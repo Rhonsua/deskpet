@@ -99,9 +99,13 @@ class ChatWindow(ChatSurface):
         balance_row = QHBoxLayout()
         background_button = QPushButton('更换背景')
         background_button.clicked.connect(self.choose_background)
+        self.background_position_button = QPushButton('调整位置')
+        self.background_position_button.setToolTip('拖动预览或使用滑块，调整整窗背景的位置和缩放')
+        self.background_position_button.clicked.connect(self.adjust_background_position)
         reset_background = QPushButton('默认背景')
         reset_background.clicked.connect(self.clear_background)
         balance_row.addWidget(background_button)
+        balance_row.addWidget(self.background_position_button)
         balance_row.addWidget(reset_background)
         balance_row.addStretch()
         balance_row.addWidget(self.balance_badge)
@@ -129,7 +133,9 @@ class ChatWindow(ChatSurface):
         from .conversation_view import ConversationView
         self.history_view = ConversationView()
         self.background_path = root / 'background.png'
+        self.set_placement(self.pet.panel.settings.value('chat/background_placement'))
         self.set_surface(self.background_path)
+        self.background_position_button.setEnabled(not self.surface_image.isNull())
         self.history_view.setOpenLinks(False)
         self.history_view.setOpenExternalLinks(False)
         layout.addWidget(self.history_view, 1)
@@ -343,14 +349,33 @@ class ChatWindow(ChatSurface):
         try:
             from .conversation_view import save_background
             save_background(path,self.background_path)
+            self.set_placement(None)
             self.set_surface(self.background_path)
-            self.status.setText('整窗背景已更换，会随窗口大小自动居中裁剪。')
+            self.pet.panel.settings.remove('chat/background_placement')
+            self.background_position_button.setEnabled(True)
+            self.status.setText('整窗背景已更换，点击“调整位置”可以选择显示区域。')
         except (ValueError,OSError) as error:self.status.setText(str(error))
+
+    def adjust_background_position(self):
+        if self.surface_image.isNull():
+            return
+        from deskpet.ui.background_position import BackgroundPositionDialog
+        dialog = BackgroundPositionDialog(self)
+        try:
+            if dialog.exec() == BackgroundPositionDialog.DialogCode.Accepted:
+                self.pet.panel.settings.setValue('chat/background_placement', self.surface_placement.as_dict())
+                self.pet.panel.settings.sync()
+                self.status.setText('背景显示位置已保存。')
+        finally:
+            dialog.deleteLater()
 
     def clear_background(self):
         try:
             self.background_path.unlink(missing_ok=True)
             self.set_surface(None)
+            self.set_placement(None)
+            self.pet.panel.settings.remove('chat/background_placement')
+            self.background_position_button.setEnabled(False)
         except OSError:self.status.setText('背景无法重置，请检查文件权限。')
 
     def restore_persona(self):
