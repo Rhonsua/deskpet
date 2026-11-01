@@ -44,6 +44,7 @@ with tempfile.TemporaryDirectory(prefix='installer-check-', dir=preview, ignore_
         assert not any('/harness-runtime/' in name for name in names)
         assert not any(name.endswith('/node.exe') for name in names)
         assert '_internal/deskpet/chat/runtime_package_lock.json' in names
+        assert '_internal/deskpet/music/kugou/LICENSE' in names
         assert not any('/work-sessions/' in name or '/local-work/harness/' in name for name in names)
         assert not any('previous-action-map' in name for name in names)
         assert not any('miku' in name.lower() for name in names)
@@ -62,6 +63,9 @@ with tempfile.TemporaryDirectory(prefix='installer-check-', dir=preview, ignore_
             pure = bundle.open_embedded_archive(name)
             assert 'deskpet.music.audio.output_switch' in pure.toc, 'installer is missing the audio route fix'
             assert 'deepseek_harness' in pure.toc and 'deskpet.chat.harness_bootstrap' in pure.toc
+            assert all(module in pure.toc for module in (
+                'deskpet.music.kugou.service', 'deskpet.music.kugou.client',
+                'deskpet.music.kugou.widget', 'deskpet.music.tools.platform_widget'))
             assert not any(module == 'deskpet.mods.goals' or module.startswith('deskpet.mods.goals.')
                            for module in pure.toc), 'goal code must not ship in the main application'
     report = folder / 'self-check.json'

@@ -119,6 +119,9 @@ class LyricsWidget(QWidget):
         elif source.startswith('bilibili:'):
             parts = source.split(':')
             description = 'B站：' + parts[1] + ' 第 ' + parts[2] + ' P' if len(parts) == 3 else 'B站音源'
+        elif source.startswith(('netease:', 'kugou:')):
+            provider, song_id = source.split(':', 1)
+            description = ('网易云：' if provider == 'netease' else '酷狗：') + song_id
         else:
             description = '未播放'
         self.source_label.setText('当前音源 · ' + description[:110] + ('…' if len(description) > 110 else ''))
@@ -130,7 +133,8 @@ class LyricsWidget(QWidget):
                 selected = controller.binding['id']
             self.cache_combo.clear()
             for item in controller.get_cached():
-                origin = '网易云 ' + item['song_id'] if item['source'] == 'netease' else '文件'
+                origin = ({'netease': '网易云 ', 'kugou': '酷狗 '}[item['source']] + item['song_id']
+                          if item['source'] in ('netease', 'kugou') else '文件')
                 self.cache_combo.addItem(item['title'][:70] + ' · ' + origin, item['id'])
                 self.cache_combo.setItemData(self.cache_combo.count() - 1,
                                             item['title'] + '\n来源：' + origin + '\n缓存时间：' + item['fetched_at'],

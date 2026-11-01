@@ -12,6 +12,7 @@ from .store import LyricsStore, read_lyric_file, validate_source
 class LyricsController(QObject):
     changed = Signal()
     bound = Signal(str, str)
+    onlineBound = Signal(str, str, str)
 
     def __init__(self, pet, data_dir, parent=None):
         super().__init__(parent)
@@ -60,19 +61,19 @@ class LyricsController(QObject):
             raise ValueError('歌词存储不可用，请重启桌宠后重试。')
         return self.store
 
-    def cache_online(self, song_id, title, lrc):
-        lyric_id = self._store().cache('netease', str(song_id), title, lrc)
+    def cache_online(self, song_id, title, lrc, provider='netease'):
+        lyric_id = self._store().cache(provider, str(song_id), title, lrc)
         self.status = '已缓存歌词；请确认当前音源与歌曲版本后再绑定。'
         self.changed.emit()
         return lyric_id
 
-    def get_cached(self, song_id=None):
+    def get_cached(self, song_id=None, provider='netease'):
         """No argument: metadata list. Song ID: full cached record including body, or None."""
-        return self._store().cached() if song_id is None else self._store().cached_online(song_id)
+        return self._store().cached() if song_id is None else self._store().cached_online(song_id, provider)
 
-    def import_online(self, song_id, title, lrc, source_key):
+    def import_online(self, song_id, title, lrc, source_key, provider='netease'):
         validate_source(source_key)
-        lyric_id = self.cache_online(song_id, title, lrc)
+        lyric_id = self.cache_online(song_id, title, lrc, provider)
         self.bind_cached(lyric_id, source_key)
         return lyric_id
 
@@ -89,6 +90,8 @@ class LyricsController(QObject):
         self.changed.emit()
         if cached['source'] == 'netease':
             self.bound.emit(cached['song_id'], source_key)
+        if cached['source'] in ('netease', 'kugou'):
+            self.onlineBound.emit(cached['source'], cached['song_id'], source_key)
 
     def import_file(self, path, source_key=None):
         source_key = self.source_key if source_key is None else source_key

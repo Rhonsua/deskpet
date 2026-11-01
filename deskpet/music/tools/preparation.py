@@ -42,12 +42,14 @@ class MusicPreparation(QObject):
         self.analyzing = True
         self.beats.analyze()
 
-    def online(self, item, media, callback):
+    def online(self, item, media, callback, provider='netease'):
+        from deskpet.music.tools.cloud_providers import media_validator
+        validator = media_validator(provider)
         self.cancel()
         if not self.beats.enabled or media.get('trial'):
             callback()
             return
-        source = 'netease:' + item['id']
+        source = provider + ':' + item['id']
         identity = json.dumps([item['id'], media.get('size', 0), media.get('duration_ms', 0),
                                media.get('extension', '')], separators=(',', ':'))
         self.beats.restore_online(source, identity)
@@ -57,6 +59,9 @@ class MusicPreparation(QObject):
         self.identity = identity
         self._begin(callback, '首次准备这首歌的节拍，完成后自动播放…\n以后会复用解析结果。')
         try:
+            # Validate each platform's stream against its own CDN policy.
+            # Keep the NetEase default patchable for the existing local fixtures.
+            self.transfer.validator = validator if provider != 'netease' else None
             root = (self.companion.root / 'beat-work').resolve()
             root.mkdir(parents=True, exist_ok=True)
             self.temp = tempfile.TemporaryDirectory(prefix='analysis-', dir=root)

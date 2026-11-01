@@ -8,6 +8,12 @@ def netease_source_id(source_key):
     match = re.fullmatch(r'netease:([1-9][0-9]{0,18})', source_key) if isinstance(source_key, str) else None
     return match[1] if match else None
 
+def online_source_id(source_key):
+    if netease_source_id(source_key):
+        return netease_source_id(source_key)
+    match = re.fullmatch(r'kugou:([0-9A-F]{32})', source_key) if isinstance(source_key, str) else None
+    return match[1] if match else None
+
 def estimate(energy, hop_ms=10):
     import numpy as np
     values=np.asarray(energy,dtype=float)

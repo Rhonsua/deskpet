@@ -33,11 +33,11 @@ def bilibili_key(url):
 
 def playback_snapshot(panel, now=None):
     now = time.monotonic() if now is None else now
-    if panel.playback_source == 'netease':
+    if panel.playback_source in ('netease', 'kugou'):
         cloud = panel.cloud_player
         if cloud is None or not cloud.current:
             return PlaybackSnapshot()
-        key, title = 'netease:' + cloud.current['id'], cloud.current['title']
+        key, title = panel.playback_source + ':' + cloud.current['id'], cloud.current['title']
         player, engine = panel._player, panel.engine
         if player is None:
             return PlaybackSnapshot(key, title)

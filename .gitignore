@@ -19,6 +19,8 @@ assets/references/
 **/chat/config-*.tmp
 **/netease/session.json
 **/netease/private/
+**/kugou/session.json
+**/kugou/private/
 *.db-wal
 *.db-shm
 

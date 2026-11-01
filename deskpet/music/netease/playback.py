@@ -5,6 +5,8 @@ from PySide6.QtMultimedia import QMediaPlayer
 from deskpet.music.tools.library import PlaybackQueue, MODES
 from deskpet.music.netease.client import Client
 from deskpet.music.netease.links import music_id
+from deskpet.music.tools.cloud_providers import (provider_name, client_class, media_validator,
+                                                clean_tracks as provider_tracks, track_argument)
 
 
 def clean_tracks(tracks):
@@ -20,9 +22,10 @@ def clean_tracks(tracks):
 
 
 class NeteasePlayback(QObject):
-    def __init__(self, companion, cloud):
+    def __init__(self, companion, cloud, provider='netease'):
         super().__init__(companion)
         self.companion, self.cloud = companion, cloud
+        self.provider, self.provider_name = provider, provider_name(provider)
         self.panel = companion.pet.panel
         self.queue = PlaybackQueue(self.panel.queue.mode)
         self.tracks = []
@@ -32,8 +35,9 @@ class NeteasePlayback(QObject):
         self.trial_offset = 0
         self.failures = set()
         self.generation = 0
-        self.client = Client(self)
-        self.lyric_client = Client(self)
+        client = Client if provider == 'netease' else client_class(provider)
+        self.client = client(self)
+        self.lyric_client = client(self)
         self.client.completed.connect(self._resolved)
         self.client.failed.connect(self._failed)
         self.lyric_client.completed.connect(self._lyrics)
@@ -45,7 +49,13 @@ class NeteasePlayback(QObject):
 
     @property
     def active(self):
-        return self.panel.playback_source == 'netease'
+        return self.panel.playback_source == self.provider
+
+    def _request_kind(self, kind):
+        # Preserve the established Netease transport API. Kugou requests also
+        # carry the load generation, so replaying the same hash cannot accept
+        # a previous account/session's delayed completion.
+        return kind if self.provider == 'netease' else f'{kind}:{self.generation}'
 
     def status(self, message):
         self.cloud.set_playback_status(message)
@@ -54,7 +64,7 @@ class NeteasePlayback(QObject):
 
     def play(self, tracks, index=0):
         try:
-            prepared = clean_tracks(tracks)
+            prepared = provider_tracks(tracks, self.provider)
         except (ValueError, AttributeError, TypeError):
             self.status('歌曲列表无效，请重新读取歌单。')
             return
@@ -62,10 +72,13 @@ class NeteasePlayback(QObject):
             self.status('请先选择歌曲或打开歌单。')
             return
         self.deactivate()
+        stop_other = getattr(self.companion, 'stop_other_cloud', None)
+        if stop_other:
+            stop_other(self.provider)
         if self.panel.bilibili.active:
             self.panel.bilibili.stop()
         self.panel._restore_request = None
-        self.panel.playback_source = 'netease'
+        self.panel.playback_source = self.provider
         self.panel.last_position = self.panel.last_source = None
         self.tracks = prepared
         self.queue.mode = self.panel.queue.mode
@@ -93,26 +106,27 @@ class NeteasePlayback(QObject):
         self.panel.player.setSource(QUrl())
         self.panel.pet.playing = False
         self.panel.set_song_title(self.current['title'])
-        self.panel.song_meta.setText('网易云 · ' + MODES[self.queue.mode])
+        self.panel.song_meta.setText(self.provider_name + ' · ' + MODES[self.queue.mode])
         self.status('正在获取音源：' + self.current['title'])
-        self.client.run('media', self.cloud._service().media(self.current['id']))
+        self.client.run(self._request_kind('media'), self.cloud._service().media(track_argument(self.current, self.provider)))
 
     def _resolved(self, kind, result):
+        if kind != self._request_kind('media'):
+            return
         if not self.active or not self.current or result.get('id') != self.current['id']:
             return
         if result.get('unavailable') or not result.get('url'):
             self._failed(kind, result.get('reason') or '当前账号无法播放这首歌曲。', False)
             return
-        from deskpet.music.netease.media import validate_media_url
         try:
-            url = validate_media_url(result['url'])
+            url = media_validator(self.provider)(result['url'])
         except ValueError:
             self._failed(kind, '音源地址不兼容，已跳过。', False)
             return
         self.trial = bool(result.get('trial'))
         self.trial_offset = max(0, int(result.get('trial_start_ms', 0))) if self.trial else 0
-        self.panel.song_meta.setText('网易云 · ' + ('试听片段 · ' if self.trial else '') + MODES[self.queue.mode])
-        self.lyric_client.run('lyrics', self.cloud._service().song(self.current['id']))
+        self.panel.song_meta.setText(self.provider_name + ' · ' + ('试听片段 · ' if self.trial else '') + MODES[self.queue.mode])
+        self.lyric_client.run(self._request_kind('lyrics'), self.cloud._service().song(track_argument(self.current, self.provider)))
         generation = self.generation
         def ready():
             if not self.active or generation != self.generation:
@@ -122,15 +136,21 @@ class NeteasePlayback(QObject):
             if self.want_play:
                 self.panel.player.play()
             self.status(('仅提供试听：' if self.trial else '音源已就绪：') + self.current['title'])
-        self.companion.preparation.online(self.current, result, ready)
+        if self.provider == 'netease':
+            self.companion.preparation.online(self.current, result, ready)
+        else:
+            self.companion.preparation.online(self.current, result, ready, provider=self.provider)
 
     def _lyrics(self, kind, result):
+        if kind != self._request_kind('lyrics'):
+            return
         if not self.active or not self.current or result.get('id') != self.current['id']:
             return
         if result.get('lrc'):
             try:
+                kwargs = {} if self.provider == 'netease' else {'provider': self.provider}
                 self.companion.lyrics.import_online(result['id'], result['title'], result['lrc'],
-                                                     'netease:' + result['id'])
+                                                     self.provider + ':' + result['id'], **kwargs)
                 self.companion.tick()
             except Exception:
                 self.status('歌曲可继续播放，但歌词暂时无法保存。')
@@ -138,12 +158,18 @@ class NeteasePlayback(QObject):
             self.status(('试听中；' if self.trial else '') + result.get('lrc_status', '此曲暂无逐句歌词。'))
 
     def _lyric_failed(self, kind, message, expired):
+        if kind != self._request_kind('lyrics'):
+            return
+        if not self.active:
+            return
         if expired:
             self.cloud._failed(kind, message, True)
         elif self.active:
             self.status('音乐继续播放；歌词获取失败，可稍后重试。')
 
     def _failed(self, kind, message, expired):
+        if kind not in (self._request_kind('media'), 'audio'):
+            return
         if not self.active:
             return
         if expired:
@@ -174,7 +200,7 @@ class NeteasePlayback(QObject):
             index = self.queue.advance(direction, ended=automatic and not failed)
             if index is None:
                 self.want_play = False
-                self.status('这个网易云歌单听完啦。')
+                self.status('这个' + self.provider_name + '歌单听完啦。')
                 return
             if self.tracks[index]['id'] not in self.failures:
                 self.want_play = True
@@ -207,12 +233,12 @@ class NeteasePlayback(QObject):
 
     def audio_error(self):
         if self.active and self.media_ready:
-            self._failed('audio', '网易云音频加载失败或链接已过期，正在尝试下一首。', False)
+            self._failed('audio', self.provider_name + '音频加载失败或链接已过期，正在尝试下一首。', False)
 
     def set_mode(self, mode):
         self.queue.mode, self.queue.bag = mode, []
         if self.active:
-            self.panel.song_meta.setText('网易云 · ' + ('试听片段 · ' if self.trial else '') + MODES[mode])
+            self.panel.song_meta.setText(self.provider_name + ' · ' + ('试听片段 · ' if self.trial else '') + MODES[mode])
 
     def deactivate(self):
         self.generation += 1
@@ -230,4 +256,4 @@ class NeteasePlayback(QObject):
                 self.panel.player.setSource(QUrl())
             self.panel.pet.playing = False
             self.panel.last_position = self.panel.last_source = None
-            self.panel.set_song_title('网易云播放已停止')
+            self.panel.set_song_title(self.provider_name + '播放已停止')

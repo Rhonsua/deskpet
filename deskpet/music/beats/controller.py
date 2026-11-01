@@ -7,7 +7,7 @@ from pathlib import Path
 from deskpet.paths import PROJECT_ROOT
 import sys
 from PySide6.QtCore import QObject,Signal,QProcess
-from .core import clock, netease_source_id
+from .core import clock, online_source_id
 
 @dataclass(frozen=True)
 class BeatSample:
@@ -53,7 +53,7 @@ class BeatController(QObject):
             self._pending=False
             self.analysisFinished.emit(bool(success))
     def restore_online(self,source_key,identity):
-        if netease_source_id(source_key) is None:raise ValueError('在线节拍需要有效网易云音源')
+        if online_source_id(source_key) is None:raise ValueError('在线节拍需要有效在线音乐音源')
         if not isinstance(identity,str) or not identity or len(identity)>4096:raise ValueError('在线音频版本标识无效')
         self.set_source(source_key)
         if self._online_identity!=identity:
@@ -65,13 +65,13 @@ class BeatController(QObject):
             self.analysis=candidate;self.status='已有歌曲节拍缓存，下次播放直接复用';self.changed.emit();return True
         self.changed.emit();return False
     def analyze_online(self,path,identity):
-        if netease_source_id(self.source) is None:raise ValueError('请先选择网易云歌曲')
+        if online_source_id(self.source) is None:raise ValueError('请先选择在线歌曲')
         self.restore_online(self.source,identity)
         self._start_analysis(Path(path))
     def _manual_path(self):return self.directory/('manual-'+hashlib.sha256(self.source.encode()).hexdigest()+'.json')
     def set_source(self,source_key):
-        if source_key.startswith('netease:') and netease_source_id(source_key) is None:
-            raise ValueError('网易云音源需要有效歌曲ID')
+        if source_key.startswith(('netease:', 'kugou:')) and online_source_id(source_key) is None:
+            raise ValueError('在线音源需要有效歌曲编号')
         if source_key==self.source:return
         self.cancel();self.source=source_key;self.path=None;self.analysis={};self.tag_bpm=0;self.fingerprint='';self.progress=0
         self._cache_path=None;self._online_identity=''
@@ -81,7 +81,7 @@ class BeatController(QObject):
             if not math.isfinite(b) or (b!=0 and not 20<=b<=400) or not math.isfinite(o) or abs(o)>3600000 or v not in (.5,1,2):self.manual={}
         except (TypeError,ValueError):self.manual={}
         self.status='仅支持手动BPM'
-        if netease_source_id(source_key):
+        if online_source_id(source_key):
             self.status='开启后首次播放自动分析，之后复用歌曲节拍缓存'
         if source_key.startswith('local:'):
             self.path=Path(source_key[6:])

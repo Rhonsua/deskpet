@@ -192,7 +192,10 @@ class MusicPanel(BackgroundSurface):
 
     @property
     def cloud_player(self):
-        return getattr(getattr(self.pet, 'music_companion', None), 'playback', None)
+        companion = getattr(self.pet, 'music_companion', None)
+        if companion is not None and hasattr(companion, 'player_for'):
+            return companion.player_for(self.playback_source)
+        return getattr(companion, 'playback', None)
 
     def activate_web(self):
         companion = getattr(self.pet, 'music_companion', None)
@@ -451,7 +454,7 @@ class MusicPanel(BackgroundSurface):
         source = self.current_path()
         playing = self._player is not None and self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
         audible = self._audio is not None and self._audio.volume() > 0 and not self._audio.isMuted()
-        if self.playback_source == 'netease':
+        if self.playback_source in ('netease', 'kugou'):
             from deskpet.music.tools.clock import playback_snapshot
             snapshot = playback_snapshot(self, now)
             source, position, playing = snapshot.source_key, snapshot.position_ms, snapshot.playing
@@ -564,7 +567,7 @@ class MusicPanel(BackgroundSurface):
         return True
 
     def toggle(self):
-        if self.playback_source == 'netease' and self.cloud_player is not None:
+        if self.playback_source in ('netease', 'kugou') and self.cloud_player is not None:
             self.cloud_player.toggle()
             return
         if self.playback_source == 'web':
@@ -593,7 +596,7 @@ class MusicPanel(BackgroundSurface):
                 self.player.play()
 
     def step(self, direction):
-        if self.playback_source == 'netease' and self.cloud_player is not None:
+        if self.playback_source in ('netease', 'kugou') and self.cloud_player is not None:
             self.cloud_player.step(direction)
             return
         if self.playback_source == 'web':
@@ -611,7 +614,7 @@ class MusicPanel(BackgroundSurface):
         self.status.setText('歌单中没有可播放的文件，请检查歌曲位置或格式')
 
     def audio_error(self, *_):
-        if self.playback_source == 'netease' and self.cloud_player is not None:
+        if self.playback_source in ('netease', 'kugou') and self.cloud_player is not None:
             self.cloud_player.audio_error()
             return
         if self.playback_source == 'web':
@@ -643,7 +646,7 @@ class MusicPanel(BackgroundSurface):
             return
         if status in (QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia):
             self.duration_changed(self.player.duration())
-        if self.playback_source == 'netease' and self.cloud_player is not None:
+        if self.playback_source in ('netease', 'kugou') and self.cloud_player is not None:
             self.cloud_player.media_changed(status)
             return
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
@@ -657,7 +660,7 @@ class MusicPanel(BackgroundSurface):
         if not self.persist_library():
             return
         self.settings.setValue('play_mode', self.queue.mode)
-        if self.playback_source != 'netease':
+        if self.playback_source not in ('netease', 'kugou'):
             self.settings.setValue('current_path', self.current_path())
             self.settings.setValue('current_position', self.pending_seek if self.pending_seek is not None
                                    else self._player.position() if self._player is not None else 0)

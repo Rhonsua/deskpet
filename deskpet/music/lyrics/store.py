@@ -9,15 +9,17 @@ from .parser import parse, MAX_TEXT
 
 def validate_source(key):
     if not isinstance(key, str) or len(key) > 4096:
-        raise ValueError('请选择正在播放的本地、B站或网易云音源。')
+        raise ValueError('请选择正在播放的本地、B站或在线音乐音源。')
     if key.startswith('local:') and Path(key[6:]).is_absolute():
         return key
     if re.fullmatch(r'netease:[1-9][0-9]{0,18}', key):
         return key
+    if re.fullmatch(r'kugou:[0-9A-F]{32}', key):
+        return key
     match = re.fullmatch(r'bilibili:(?:BV[0-9A-Za-z]{10}|av[1-9][0-9]*):([1-9][0-9]*)', key)
     if match and int(match[1]) <= 10000:
         return key
-    raise ValueError('请选择准确本地路径、B站视频分P（1～10000）或网易云正整数歌曲ID。')
+    raise ValueError('请选择准确本地路径、B站视频分P（1～10000）或有效在线歌曲编号。')
 
 
 class LyricsStore:
@@ -46,11 +48,13 @@ class LyricsStore:
         self.db.close()
 
     def cache(self, source, song_id, title, body, format='lrc', now=None):
-        if (source not in ('netease', 'file') or not isinstance(title, str) or len(title) > 500
+        if (source not in ('netease', 'kugou', 'file') or not isinstance(title, str) or len(title) > 500
                 or not isinstance(song_id, str) or not song_id or len(song_id) > 4096):
             raise ValueError('歌词来源信息无效。')
         if source == 'netease' and not re.fullmatch(r'[0-9]{1,30}', song_id):
             raise ValueError('网易云歌曲 ID 无效。')
+        if source == 'kugou' and not re.fullmatch(r'[0-9A-F]{32}', song_id):
+            raise ValueError('酷狗歌曲编号无效。')
         if format not in ('lrc', 'srt'):
             raise ValueError('只支持 LRC 或 SRT。')
         parse(body, format)
@@ -65,9 +69,11 @@ class LyricsStore:
         return [dict(row) for row in self.db.execute(
             'SELECT id,source,song_id,title,fetched_at,format FROM lyrics ORDER BY fetched_at DESC,id DESC')]
 
-    def cached_online(self, song_id):
+    def cached_online(self, song_id, provider='netease'):
+        if provider not in ('netease', 'kugou'):
+            raise ValueError('未知歌词平台。')
         row = self.db.execute('SELECT * FROM lyrics WHERE source=? AND song_id=?',
-                              ('netease', str(song_id))).fetchone()
+                              (provider, str(song_id))).fetchone()
         return dict(row) if row else None
 
     def get(self, lyric_id):

@@ -1,19 +1,19 @@
 # Windows 试用安装包
 
-## 0.6.2 发行包
+## 0.6.3 发行包
 
-运行 `TianyiPet-0.6.2-Setup.exe`。安装包只带 Python SDK 和自动安装脚本；首次开始工作时先从 Node.js 官网下载 `24.20.0` Windows x64 免安装版并核验 SHA-256，再通过它自带的 npm 从官方 registry 安装锁定的 `@deepseek-ai/dsh 0.2.2-alpha.2`。工作模式通过 `TianyiWorker.exe --harness-worker` 启动，无需手动安装 Python、Node.js 或 Harness。首次需要联网，显示进度、支持取消，成功后继续原任务；下载失败可直接重试。
+运行 `TianyiPet-0.6.3-Setup.exe`。安装包只带 Python SDK 和自动安装脚本；首次开始工作时先从 Node.js 官网下载 `24.20.0` Windows x64 免安装版并核验 SHA-256，再通过它自带的 npm 从官方 registry 安装锁定的 `@deepseek-ai/dsh 0.2.2-alpha.2`。工作模式通过 `TianyiWorker.exe --harness-worker` 启动，无需手动安装 Python、Node.js 或 Harness。首次需要联网，显示进度、支持取消，成功后继续原任务；下载失败可直接重试。
 
 工作会话放在应用用户数据目录的 `work-sessions` 中，运行文件在同级 `work-runtime/dsh-0.2.2-alpha.2-node-24.20.0-x64` 中。程序更新和官方 DSH 重装根目录都不会覆盖它们；不修改系统 PATH。完整安装后写就绪标记，已安装时直接复用；中断不会留下假成功标记。源码开发环境仍使用项目内的隔离后端。安装日志位于 `work-runtime/setup.log`，不传入用户 API Key。
 
-本版增加 GitHub 发行版更新检测，并包含工位项目与对话侧栏、空对话复用和清理、进入对话定位最新消息，以及各页独立背景位置调整、网易云工具背景。保留原有半透明外观，不包含仅供比较的黑底和气泡预览。延续工作姿势和概率触发的蛄蛹动作。只包含当前天依模型，排除 Miku、Mod 本体、用户配置、音乐和聊天记录。安装包不包含完整 Node/npm 后端目录，保持较小体积。下载依赖时保留其官方许可证。
+本版增加普通酷狗与网易云共用音乐页，修复真实账号歌单读取，并保留 GitHub 发行版更新检测，并包含工位项目与对话侧栏、空对话复用和清理、进入对话定位最新消息，以及各页独立背景位置调整、网易云工具背景。保留原有半透明外观，不包含仅供比较的黑底和气泡预览。延续工作姿势和概率触发的蛄蛹动作。只包含当前天依模型，排除 Miku、Mod 本体、用户配置、音乐和聊天记录。安装包不包含完整 Node/npm 后端目录，保持较小体积。下载依赖时保留其官方许可证。
 
 构建：
 
 ```powershell
 .\.venv\Scripts\python.exe -m PyInstaller --noconfirm packaging/deskpet.spec
-.\.venv\Scripts\python.exe packaging/build_installer.py --version 0.6.2
-.\.venv\Scripts\python.exe tests/harness_smoke.py --worker dist/TianyiPet/TianyiWorker.exe --runtime local-work/bootstrap-release-check/runtime --strict-path --report dist/TEST-REPORT-0.6.2-harness.json
+.\.venv\Scripts\python.exe packaging/build_installer.py --version 0.6.3
+.\.venv\Scripts\python.exe tests/harness_smoke.py --worker dist/TianyiPet/TianyiWorker.exe --runtime local-work/bootstrap-release-check/runtime --strict-path --report dist/TEST-REPORT-0.6.3-harness.json
 .\.venv\Scripts\python.exe tests/smoke_installer.py
 ```
 
@@ -53,18 +53,18 @@
 
 输出文件：
 
-- `dist/TianyiPet-0.6.2-Setup.exe`：新版，有安装进度、位置选择、快捷方式和卸载入口。
-- `dist/TianyiPet-0.6.2-portable.zip`：仅加 `--portable` 时另行生成，解压后运行 `TianyiPet.exe`。
+- `dist/TianyiPet-0.6.3-Setup.exe`：新版，有安装进度、位置选择、快捷方式和卸载入口。
+- `dist/TianyiPet-0.6.3-portable.zip`：仅加 `--portable` 时另行生成，解压后运行 `TianyiPet.exe`。
 - `dist/TianyiPet-GoalCompanion-0.1.0.zip`：单独的目标陪伴 Mod，含源码、固定入口、元数据、说明和 MIT LICENSE；不包含用户数据库。
 - 本次新版通过验证后，清理版本低于 0.5.0 的旧安装包，保留 0.5.0 及之后的版本。
 - `dist/SHA256SUMS.txt`：本次生成安装包、免安装包及已存在的目标 Mod ZIP 的 SHA-256。
-- `dist/TEST-REPORT-0.6.2-installer.json`：本机安装、启动和卸载检查结果。
+- `dist/TEST-REPORT-0.6.3-installer.json`：本机安装、启动和卸载检查结果。
 
 `build/` 和 `dist/` 不提交到 Git。安装包通过 GitHub Releases 附件提供，不提交到代码历史。安装包仅包含洛天依，明确排除 Miku 素材、Miku 专用人格、自定义角色包和历史模型工程；保留通用角色及人格模板。用户本地已有的 Miku 目录不会因构建而删除。
 
 ## GitHub 发行版更新
 
-0.6.2 支持后台检查 GitHub 正式发行版并由用户选择是否更新；0.6.1 及更早版本需先手动安装本版。安装器优先读取已有安装的位置作为默认目录。客户端在用户同意后下载安装包，校验通过后再次确认退出，再打开正常安装界面，不静默覆盖运行中的程序。
+0.6.2 起支持后台检查 GitHub 正式发行版并由用户选择是否更新；0.6.1 及更早版本需先手动安装本版。安装器优先读取已有安装的位置作为默认目录。客户端在用户同意后下载安装包，校验通过后再次确认退出，再打开正常安装界面，不静默覆盖运行中的程序。
 
 维护者需将对应版本的 `TianyiPet-<版本>-Setup.exe` 与 `SHA256SUMS.txt` 上传到 `Rhonsua/deskpet` 的 GitHub Release，标签使用 `v<版本>` 并标记为 Latest；文件仍不加入 Git 提交。详见 [GitHub 发行与更新](../docs/guides/GitHub发行与更新.md)。
 

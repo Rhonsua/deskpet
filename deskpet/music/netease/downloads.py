@@ -68,8 +68,9 @@ class Downloader(QObject):
     failed=Signal(str)
     warning=Signal(str)
     progress=Signal(int,int)
-    def __init__(self,parent=None):
+    def __init__(self,parent=None,validator=None):
         super().__init__(parent)
+        self.validator=validator
         self.manager=QNetworkAccessManager(self);self.reply=None;self.part=None;self.file=None
         self.resolve_conflict=None
         self.timer=QTimer(self);self.timer.setSingleShot(True);self.timer.timeout.connect(lambda:self._fail('下载超过30秒无响应，已停止'))
@@ -77,7 +78,7 @@ class Downloader(QObject):
     def start(self,url,directory,stem,extension,lrc='',expected_size=0):
         self.cancel()
         try:
-            url=validate_media_url(url)
+            url=(self.validator or validate_media_url)(url)
             extension=str(extension).lower().lstrip('.')
             if extension not in ALLOWED_EXTENSIONS:raise ValueError('下载接口未提供支持的音频格式')
             if type(expected_size) is not int or expected_size<0 or expected_size>MAX_BYTES:raise ValueError('音频大小无效或超过200MiB')
@@ -102,6 +103,9 @@ class Downloader(QObject):
         except (OSError,ValueError,TypeError):self._fail('无法开始下载：请检查可信音频地址、格式、大小和保存目录')
     def _headers(self,reply):
         if reply is not self.reply:return False
+        try:(self.validator or validate_media_url)(reply.url().toString())
+        except ValueError:
+            self._fail('音频响应地址不属于当前平台可信服务器');return False
         status=reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute) or 0
         if status and status!=200:
             self._fail('音频服务器返回HTTP错误或重定向；未转发凭据或保存响应');return False

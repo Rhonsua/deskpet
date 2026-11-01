@@ -10,13 +10,18 @@ from deskpet.music.netease.downloads import Downloader, export_lrc, safe_stem
 from deskpet.music.netease.service import ApiError, SessionExpired
 from deskpet.music.netease.playback import clean_tracks
 from deskpet.music.netease.links import music_id
+from deskpet.music.tools.cloud_providers import (provider_name, client_class, media_validator,
+                                                clean_tracks as provider_tracks, track_argument, service_errors)
 
 
 class NeteaseDownloads(QObject):
-    def __init__(self, companion, cloud):
+    def __init__(self, companion, cloud, provider='netease'):
         super().__init__(companion)
         self.companion, self.cloud = companion, cloud
-        self.client, self.transfer = Client(self), Downloader(self)
+        self.provider, self.provider_name = provider, provider_name(provider)
+        client = Client if provider == 'netease' else client_class(provider)
+        self.client = client(self)
+        self.transfer = Downloader(self) if provider == 'netease' else Downloader(self, validator=media_validator(provider))
         self.client.completed.connect(self._prepared)
         self.client.failed.connect(self._failed)
         self.transfer.completed.connect(self._saved)
@@ -46,7 +51,11 @@ class NeteaseDownloads(QObject):
 
     def start_playlist(self, playlist_id, directory=None):
         try:
-            playlist_id = 'likes' if playlist_id == 'likes' else music_id(playlist_id)
+            if self.provider == 'kugou':
+                from deskpet.music.kugou.links import playlist_id as clean_playlist
+                playlist_id = clean_playlist(playlist_id)
+            else:
+                playlist_id = 'likes' if playlist_id == 'likes' else music_id(playlist_id)
         except ValueError:
             self.cloud.set_playback_status('歌单编号无效，请重新打开歌单。')
             return
@@ -55,7 +64,7 @@ class NeteaseDownloads(QObject):
     def start(self, tracks, lyrics_only=False, directory=None, *, playlist_id=None):
         epoch = self.epoch
         try:
-            items = clean_tracks(tracks)
+            items = provider_tracks(tracks, self.provider)
         except (TypeError, ValueError, AttributeError):
             self.cloud.set_playback_status('下载列表无效，请重新选择歌曲。')
             return
@@ -63,7 +72,7 @@ class NeteaseDownloads(QObject):
             self.cloud.set_playback_status('每次请选择 1～100 首歌曲下载。')
             return
         if directory is None:
-            default = self.companion.pet.panel.settings.value('netease_download_directory', '')
+            default = self.companion.pet.panel.settings.value(self.provider + '_download_directory', '')
             default = default or QStandardPaths.writableLocation(QStandardPaths.StandardLocation.MusicLocation)
             directory = QFileDialog.getExistingDirectory(self.cloud, '选择歌曲和 LRC 保存文件夹', str(default))
         if not directory:
@@ -82,7 +91,7 @@ class NeteaseDownloads(QObject):
         self.saved_count = self.bound_count = self.failed_count = 0
         self.skipped_count = 0
         self.conflict_choice = None
-        self.companion.pet.panel.settings.setValue('netease_download_directory', str(destination))
+        self.companion.pet.panel.settings.setValue(self.provider + '_download_directory', str(destination))
         self.dialog = QProgressDialog('', '取消下载', 0, len(items), self.cloud.window())
         label = QLabel()
         label.setTextFormat(Qt.TextFormat.PlainText)
@@ -99,7 +108,7 @@ class NeteaseDownloads(QObject):
             self.dialog.setWindowTitle('下载整个歌单＋LRC')
             self.dialog.setLabelText('正在读取完整歌单，包含尚未显示的曲目…')
             service = self.cloud._service()
-            self.client.run('playlist_download', service.likes() if playlist_id == 'likes' else service.playlist(playlist_id))
+            self.client.run('playlist_download', service.likes() if self.provider == 'netease' and playlist_id == 'likes' else service.playlist(playlist_id))
         else:
             self._next()
 
@@ -112,22 +121,28 @@ class NeteaseDownloads(QObject):
             return
         self.note = ''
         self.dialog.setLabelText(f'{self.index + 1}/{len(self.items)} · {self.items[self.index]["title"]}\n正在读取下载权限与歌词…')
-        self.client.run('prepare', self._prepare(self.cloud._service(), self.items[self.index], self.lyrics_only))
+        self.client.run('prepare', self._prepare(self.cloud._service(), self.items[self.index], self.lyrics_only, self.provider))
 
     @staticmethod
-    def _prepare(service, item, lyrics_only):
+    def _prepare(service, item, lyrics_only, provider='netease'):
+        api_error, session_expired = service_errors(provider)
+        argument = track_argument(item, provider)
         media = None
         if not lyrics_only:
-            media = yield from service.media(item['id'], download=True)
+            media = yield from service.media(argument, download=True)
+            if media.get('id', item['id']) != item['id']:
+                raise api_error('下载音源与所选歌曲不一致，请重新获取')
             if media.get('unavailable') or media.get('trial') or not media.get('url'):
                 return dict(media=media, lrc='', item=item, lyric_status='')
         try:
-            song = yield from service.song(item['id'])
+            song = yield from service.song(argument)
+            if song.get('id', item['id']) != item['id']:
+                raise api_error('歌词与所选歌曲不一致')
             return dict(media=media, lrc=song.get('lrc', ''), item=item,
                         lyric_status=song.get('lrc_status', '未返回逐句歌词'))
-        except SessionExpired:
+        except session_expired:
             raise
-        except ApiError:
+        except api_error:
             return dict(media=media, lrc='', item=item, lyric_status='歌词获取失败，可稍后单独保存LRC')
 
     def _prepared(self, kind, result):
@@ -137,14 +152,14 @@ class NeteaseDownloads(QObject):
             if not self.fetching_playlist:
                 return
             try:
-                self.items = clean_tracks(result['tracks'])
+                self.items = provider_tracks(result['tracks'], self.provider)
                 if not self.items or len(result['tracks']) > 20000:
                     raise ValueError('歌单没有可读取的歌曲，或超过 20000 首。')
             except (ValueError, TypeError, KeyError, AttributeError) as error:
                 self._failed(kind, str(error), False)
                 return
             self.fetching_playlist = False
-            self.playlist_title = str(result.get('title') or '网易云歌单')[:1000]
+            self.playlist_title = str(result.get('title') or self.provider_name + '歌单')[:1000]
             if not result.get('complete'):
                 self.playlist_note = f'歌单读取不完整：本次只能处理已取得的 {len(self.items)}/{result.get("total", "未知")} 首。'
             self.dialog.setRange(0, len(self.items))
@@ -156,6 +171,8 @@ class NeteaseDownloads(QObject):
         if result['item']['id'] != item['id']:
             return
         stem = item['title'] + (' - ' + item['artists'] if item['artists'] else '') + ' [' + item['id'] + ']'
+        if self.provider != 'netease':
+            stem = '[' + self.provider + '-' + item['id'] + '] ' + stem
         lyric = result.get('lrc', '')
         self.note = '' if lyric else result.get('lyric_status', '无逐句歌词')
         try:

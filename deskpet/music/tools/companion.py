@@ -1,5 +1,6 @@
 """Lazy music tools with one source clock for lyrics and beat-driven motion."""
 import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -22,8 +23,10 @@ class MusicCompanion(QObject):
         self.beats = BeatController(self.root, self)
         from deskpet.music.tools.preparation import MusicPreparation
         self.preparation = MusicPreparation(self)
-        self.window = self.cloud = None
+        self.window = self.cloud = self.platforms = None
         self.playback = self.downloads = None
+        self.players, self.download_jobs = {}, {}
+        self.background_enabled = False
         self.beat = None
         self._source = ''
         self._closed = False
@@ -32,11 +35,11 @@ class MusicCompanion(QObject):
         try:
             raw = json.loads(self.bindings_path.read_text(encoding='utf-8'))
             self.bindings = {key: value for key, value in raw.items()
-                             if isinstance(key, str) and key.isdigit() and isinstance(value, str)
+                             if isinstance(key, str) and (key.isdigit() or re.fullmatch(r'kugou:[0-9A-F]{32}', key)) and isinstance(value, str)
                              and value.startswith(('local:', 'bilibili:'))} if isinstance(raw, dict) else {}
         except (OSError, ValueError):
             self.bindings = {}
-        self.lyrics.bound.connect(self.remember_binding)
+        self.lyrics.onlineBound.connect(lambda provider, song, source: self.remember_binding(song, source, provider))
         self.timer = QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self.tick)
@@ -59,11 +62,11 @@ class MusicCompanion(QObject):
 
     def open(self, page=0):
         if self.window is None:
-            from deskpet.music.netease import NeteaseWidget
+            from deskpet.music.tools.platform_widget import MusicPlatformWidget
             from deskpet.ui.background import BackgroundSurface
             # The topmost pet must not become this window's native owner.
             self.window = BackgroundSurface(None, Qt.WindowType.Window)
-            self.window.setWindowTitle('天依 · 网易云、歌词与节拍')
+            self.window.setWindowTitle('天依 · 在线音乐、歌词与节拍')
             self.window.resize(760, 740)
             apply_light_palette(self.window)
             layout = QVBoxLayout(self.window)
@@ -85,29 +88,20 @@ class MusicCompanion(QObject):
             layout.addWidget(self.current_label)
             self.tabs = QTabWidget()
             layout.addWidget(self.tabs)
-            self.cloud = NeteaseWidget(self.root / 'netease', self.window)
-            self.cloud.lyricsReady.connect(self.online_lyrics)
-            self.cloud.bindRequested.connect(self.bind_cached)
-            self.cloud.playBoundRequested.connect(self.play_bound)
-            from deskpet.music.netease.playback import NeteasePlayback
-            from deskpet.music.netease.download_queue import NeteaseDownloads
-            self.playback = NeteasePlayback(self, self.cloud)
-            self.downloads = NeteaseDownloads(self, self.cloud)
-            self.cloud.playRequested.connect(self.playback.play)
-            self.cloud.downloadRequested.connect(self.downloads.start)
-            self.cloud.playlistDownloadRequested.connect(self.downloads.start_playlist)
-            self.cloud.transportRequested.connect(self.control_transport)
-            self.cloud.modeRequested.connect(lambda mode: self.pet.panel.mode_choice.setCurrentIndex(
-                self.pet.panel.mode_choice.findData(mode)))
+            self.platforms = MusicPlatformWidget(self.root / 'netease', self.window)
+            self.platforms.widgetCreated.connect(self.connect_provider)
+            for provider, widget in self.platforms.widgets.items():
+                self.connect_provider(provider, widget)
             self.pet.panel.mode_choice.currentIndexChanged.connect(self.sync_cloud_mode)
             self.sync_cloud_mode()
-            self.tabs.addTab(self.cloud, '网易云')
+            self.tabs.addTab(self.platforms, '在线音乐')
             self.tabs.addTab(self.lyrics.create_widget(self.window), '歌词字幕')
             self.tabs.addTab(self.beats.create_widget(self.window), '节拍跟随')
             # Nested widgets own opaque styles for standalone use; replace
             # those too, otherwise they hide the window's background image.
             self.default_page_styles = [(self.tabs.widget(i), self.tabs.widget(i).styleSheet())
                                         for i in range(self.tabs.count())]
+            self.default_page_styles.extend((widget, widget.styleSheet()) for widget in self.platforms.widgets.values())
             from deskpet.ui.background_controls import PageBackgrounds
             self.backgrounds = PageBackgrounds(self.window, self.pet.panel.settings,
                 self.pet.panel.background_path, 'music/background', self.background_position_button,
@@ -115,7 +109,9 @@ class MusicCompanion(QObject):
             self.backgrounds.image_changed.connect(self.pet.panel.load_background)
             self.pet.panel.backgroundChanged.connect(self.backgrounds.reload)
             self.tabs.currentChanged.connect(self.update_background_page)
-            self.cloud.tabs.currentChanged.connect(self.update_background_page)
+            self.platforms.providerChanged.connect(self.provider_changed)
+            selected = self.pet.panel.settings.value('music/provider', 'netease')
+            self.platforms.set_provider(selected if selected in ('netease', 'kugou') else 'netease')
             self.update_background_page()
         self.tick()
         self.tabs.setCurrentIndex(max(0, min(2, page)))
@@ -129,6 +125,7 @@ class MusicCompanion(QObject):
 
     def apply_background_style(self, enabled):
         from deskpet.ui.compact import COMPACT_STYLE, MUSIC_TOOL_GLASS_STYLE
+        self.background_enabled = enabled
         self.window.setStyleSheet(MUSIC_TOOL_GLASS_STYLE if enabled else COMPACT_STYLE)
         for page, original in self.default_page_styles:
             page.setStyleSheet(MUSIC_TOOL_GLASS_STYLE if enabled else original)
@@ -136,14 +133,56 @@ class MusicCompanion(QObject):
     def update_background_page(self, *unused):
         index = self.tabs.currentIndex()
         if index == 0:
-            child = self.cloud.tabs.currentIndex()
+            provider = self.platforms.current_provider
+            widget = self.platforms.current_widget
+            child = widget.tabs.currentIndex()
             keys = ('songs', 'snapshots', 'account', 'connection')
-            page = 'tools.netease.' + keys[max(0, min(3, child))]
-            label = '网易云 · ' + self.cloud.tabs.tabText(child)
+            page = 'tools.' + provider + '.' + keys[max(0, min(3, child))]
+            label = ('网易云' if provider == 'netease' else '酷狗') + ' · ' + widget.tabs.tabText(child)
         else:
             page = 'tools.lyrics' if index == 1 else 'tools.beats'
             label = self.tabs.tabText(index)
         self.backgrounds.activate(page, label)
+
+    def connect_provider(self, provider, widget):
+        from deskpet.music.netease.playback import NeteasePlayback
+        from deskpet.music.netease.download_queue import NeteaseDownloads
+        if provider in self.players:
+            return
+        player = self.players[provider] = NeteasePlayback(self, widget, provider=provider)
+        downloads = self.download_jobs[provider] = NeteaseDownloads(self, widget, provider=provider)
+        if provider == 'netease':
+            # Keep the existing public aliases for integrations and old saved settings.
+            self.cloud, self.playback, self.downloads = widget, player, downloads
+        widget.lyricsReady.connect(lambda song, title, lrc: self.online_lyrics(song, title, lrc, provider))
+        widget.bindRequested.connect(lambda song, title: self.bind_cached(song, title, provider))
+        widget.playBoundRequested.connect(lambda song: self.play_bound(song, provider))
+        widget.playRequested.connect(player.play)
+        widget.downloadRequested.connect(downloads.start)
+        widget.playlistDownloadRequested.connect(downloads.start_playlist)
+        widget.transportRequested.connect(self.control_transport)
+        widget.modeRequested.connect(lambda mode: self.pet.panel.mode_choice.setCurrentIndex(
+            self.pet.panel.mode_choice.findData(mode)))
+        widget.tabs.currentChanged.connect(lambda *_: self.update_background_page() if hasattr(self, 'backgrounds') else None)
+        self.sync_cloud_mode()
+        if hasattr(self, 'default_page_styles'):
+            self.default_page_styles.append((widget, widget.styleSheet()))
+            self.apply_background_style(self.background_enabled)
+
+    def provider_changed(self, provider):
+        self.pet.panel.settings.setValue('music/provider', provider)
+        self.update_background_page()
+
+    def player_for(self, provider):
+        return self.players.get(provider)
+
+    def downloads_for(self, provider):
+        return self.download_jobs.get(provider)
+
+    def stop_other_cloud(self, provider):
+        for name, player in self.players.items():
+            if name != provider:
+                player.deactivate()
 
     def control_transport(self, action):
         if action == 'toggle':
@@ -152,8 +191,9 @@ class MusicCompanion(QObject):
             self.pet.panel.step(-1 if action == 'previous' else 1)
 
     def sync_cloud_mode(self, *_):
-        if self.cloud is not None:
-            choice = self.cloud.play_mode
+        for provider, player in self.players.items():
+            player.set_mode(self.pet.panel.queue.mode)
+            choice = player.cloud.play_mode
             choice.blockSignals(True)
             choice.setCurrentIndex(choice.findData(self.pet.panel.queue.mode))
             choice.blockSignals(False)
@@ -161,24 +201,24 @@ class MusicCompanion(QObject):
     def notify(self, text):
         self.pet.bubble.say(text, 8000)
 
-    def online_lyrics(self, song_id, title, lrc):
+    def online_lyrics(self, song_id, title, lrc, provider='netease'):
         try:
-            self.lyrics.cache_online(song_id, title, lrc)
-            self.bind_lyrics(song_id, title, lrc)
+            self.lyrics.cache_online(song_id, title, lrc, provider)
+            self.bind_lyrics(song_id, title, lrc, provider)
         except (OSError, ValueError, sqlite3.Error) as error:
             self.notify('歌词未绑定：' + str(error))
 
-    def bind_cached(self, song_id, title):
+    def bind_cached(self, song_id, title, provider='netease'):
         try:
-            cached = self.lyrics.get_cached(song_id)
+            cached = self.lyrics.get_cached(song_id, provider)
             if cached:
-                self.bind_lyrics(song_id, cached['title'], cached['body'])
+                self.bind_lyrics(song_id, cached['title'], cached['body'], provider)
             else:
-                self.notify('尚未缓存这首歌的歌词，请先在网易云页获取。')
+                self.notify('尚未缓存这首歌的歌词，请先在对应音乐平台获取。')
         except (OSError, ValueError, sqlite3.Error) as error:
             self.notify('歌词未绑定：' + str(error))
 
-    def bind_lyrics(self, song_id, title, lrc):
+    def bind_lyrics(self, song_id, title, lrc, provider='netease'):
         current = playback_snapshot(self.pet.panel)
         if not current.source_key:
             self.notify('歌词已缓存。先选择本地歌曲或 B站视频，再在歌词字幕页绑定。')
@@ -188,14 +228,15 @@ class MusicCompanion(QObject):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             return
-        self.lyrics.import_online(song_id, title, lrc, current.source_key)
+        self.lyrics.import_online(song_id, title, lrc, current.source_key, provider)
         self.tick()
         self.notify('已绑定歌词，可在“歌词字幕”页调整时间偏移。')
 
-    def remember_binding(self, song_id, source_key):
+    def remember_binding(self, song_id, source_key, provider='netease'):
         if not source_key.startswith(('local:', 'bilibili:')):
             return
-        self.bindings[str(song_id)] = source_key
+        identity = str(song_id) if provider == 'netease' else provider + ':' + str(song_id)
+        self.bindings[identity] = source_key
         try:
             temporary = self.bindings_path.with_suffix('.tmp')
             temporary.write_text(json.dumps(self.bindings, ensure_ascii=False), encoding='utf-8')
@@ -203,8 +244,9 @@ class MusicCompanion(QObject):
         except OSError:
             self.notify('歌词已绑定，但播放音源映射未能保存；请检查数据目录权限。')
 
-    def play_bound(self, song_id):
-        key = self.bindings.get(str(song_id), '')
+    def play_bound(self, song_id, provider='netease'):
+        identity = str(song_id) if provider == 'netease' else provider + ':' + str(song_id)
+        key = self.bindings.get(identity, '')
         panel = self.pet.panel
         if key.startswith('local:'):
             path = key[6:]
@@ -235,12 +277,12 @@ class MusicCompanion(QObject):
         self._closed = True
         self.timer.stop()
         self.preparation.cancel()
-        if self.playback is not None:
-            self.playback.deactivate()
-        if self.downloads is not None:
-            self.downloads.cancel()
-        if self.cloud is not None:
-            self.cloud.shutdown()
+        for player in self.players.values():
+            player.deactivate()
+        for downloads in self.download_jobs.values():
+            downloads.cancel()
+        if self.platforms is not None:
+            self.platforms.shutdown()
         self.beats.shutdown()
         self.lyrics.shutdown()
         if self.window is not None:
