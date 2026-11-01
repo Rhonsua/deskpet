@@ -12,7 +12,7 @@ from PySide6.QtCore import QSettings, QPoint, Qt
 from PySide6.QtGui import QImage, QPainter, QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-from main import Pet
+from deskpet.app import Pet
 
 
 app = QApplication([])

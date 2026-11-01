@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from pet_mods import ModContext, ModManager, ModManifest
+from deskpet.mods import ModContext, ModManager, ModManifest
 
 
 class FakeMod:
@@ -271,7 +271,7 @@ class ModManagerTests(unittest.TestCase):
 
     def test_storage_failure_rolls_back_settings_and_blocks_reminders(self):
         self.register()
-        with patch('pet_mods.manager.os.replace', side_effect=OSError('isolated test')):
+        with patch('deskpet.mods.manager.os.replace', side_effect=OSError('isolated test')):
             self.assertFalse(self.manager.set_enabled('goals', True))
             self.assertFalse(self.manager.is_enabled('goals'))
             self.assertFalse(self.manager.set_policy(daily_limit=20))
@@ -279,7 +279,7 @@ class ModManagerTests(unittest.TestCase):
         self.assertTrue(self.manager.warning)
         self.assertTrue(self.manager.set_enabled('goals', True))
         mod = self.instances['goals']
-        with patch('pet_mods.manager.os.replace', side_effect=OSError('isolated test')):
+        with patch('deskpet.mods.manager.os.replace', side_effect=OSError('isolated test')):
             self.assertFalse(mod.context.notify('不能记账就不提醒'))
         self.assertFalse(mod.context.notify('本次会话继续关闭提醒'))
         self.deliver.assert_not_called()

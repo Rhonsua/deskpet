@@ -1,7 +1,7 @@
 import unittest
-from singing_choreography import footwork, PHRASES, CYCLE_SECONDS
-from live2d_motion import MotionLibrary
-from live2d_renderer import MODEL_ROOT
+from deskpet.animation.singing_choreography import footwork, PHRASES, CYCLE_SECONDS
+from deskpet.animation.live2d_motion import MotionLibrary
+from deskpet.animation.live2d_renderer import MODEL_ROOT
 
 
 class SingingChoreographyTests(unittest.TestCase):

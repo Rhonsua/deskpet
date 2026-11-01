@@ -11,8 +11,8 @@ from PySide6.QtCore import QPoint, QSettings, Qt, QUrl
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QImage, QPainter, QPalette
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-from edge_docking import EDGES, dock_position
-from main import Pet
+from deskpet.animation.edge_docking import EDGES, dock_position
+from deskpet.app import Pet
 
 
 class NoStartup:

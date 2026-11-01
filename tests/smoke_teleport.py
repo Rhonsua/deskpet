@@ -15,9 +15,9 @@ from PySide6.QtCore import QSettings, Qt, QRectF
 from PySide6.QtGui import QImage, QColor, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-from main import Pet
-from teleport_controller import TeleportController
-from visual_style import APPEARANCE_REVISION
+from deskpet.app import Pet
+from deskpet.animation.teleport_controller import TeleportController
+from deskpet.ui.appearance import APPEARANCE_REVISION
 
 
 class NoStartup:

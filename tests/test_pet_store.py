@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from pet_store import PetStore
+from deskpet.pet.store import PetStore
 
 
 class PetStoreTests(unittest.TestCase):

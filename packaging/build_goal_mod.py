@@ -30,7 +30,7 @@ README = '''目标陪伴 Mod 0.1.0（桌宠 Mod API 1，适用于 TianyiPet 0.4.
 
 def build(output=None):
     root = Path(__file__).resolve().parents[1]
-    source = root / 'pet_mods' / 'goals'
+    source = root / 'deskpet/mods' / 'goals'
     output = Path(output) if output else root / 'dist' / 'TianyiPet-GoalCompanion-0.1.0.zip'
     files = {'goals/mod.json': json.dumps(MANIFEST, ensure_ascii=False, indent=2).encode('utf-8'),
              'goals/entry.py': b'"""Goal companion package entry point."""\nfrom .mod import GoalMod\n\nfactory = GoalMod\n',
@@ -40,7 +40,12 @@ def build(output=None):
         path = source / name
         if not path.resolve().is_relative_to(source.resolve()) or not path.is_file():
             raise ValueError('Missing or invalid goal source: ' + name)
-        files['goals/' + name] = path.read_bytes()
+        # Keep the published API-1 ZIP compatible with both older hosts and the
+        # grouped source layout (which also exposes these legacy entry points).
+        code = path.read_text(encoding='utf-8')
+        code = code.replace('from deskpet.mods.api import ', 'from pet_mods.api import ')
+        code = code.replace('from deskpet.ui.theme import ', 'from ui_theme import ')
+        files['goals/' + name] = code.encode('utf-8')
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
         for name, data in sorted(files.items()):

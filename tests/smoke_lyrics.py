@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontDatabase, QImage
 from PySide6.QtWidgets import QApplication, QWidget, QMessageBox
-from music_lyrics import LyricsController
+from deskpet.music.lyrics import LyricsController
 
 
 def main():

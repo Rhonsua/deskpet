@@ -14,8 +14,8 @@ from PySide6.QtCore import QPoint, QPointF, QSettings, Qt
 from PySide6.QtGui import QEnterEvent, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-from edge_docking import dock_position
-from main import Pet
+from deskpet.animation.edge_docking import dock_position
+from deskpet.app import Pet
 
 
 class NoStartup:

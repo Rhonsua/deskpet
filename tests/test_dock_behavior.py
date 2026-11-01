@@ -3,8 +3,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 from PySide6.QtCore import QPoint, QRect, QSize
-from desktop_pet import DesktopPet
-from pet_behavior import PetBehavior
+from deskpet.pet.desktop import DesktopPet
+from deskpet.pet.behavior import PetBehavior
 
 
 class DockBehaviorTests(unittest.TestCase):

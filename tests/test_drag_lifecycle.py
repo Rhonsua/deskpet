@@ -3,9 +3,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from desktop_pet import DesktopPet
-from drag_motion import DragSway
-from pet_behavior import PetBehavior
+from deskpet.pet.desktop import DesktopPet
+from deskpet.animation.drag_motion import DragSway
+from deskpet.pet.behavior import PetBehavior
 
 
 class DragLifecycleTests(unittest.TestCase):

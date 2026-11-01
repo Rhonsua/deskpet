@@ -5,7 +5,7 @@ import time
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QProcess
 from PySide6.QtWidgets import QApplication
-from netease_music.browser_login import BrowserLogin
+from deskpet.music.netease.browser_login import BrowserLogin
 
 
 def main():

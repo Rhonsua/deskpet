@@ -8,9 +8,9 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QWidget
 
-from desktop_pet import DesktopPet
-from glove_cursor import GLOVE_HOTSPOT, make_glove_cursor
-from mouse_interactions import ActiveHeadPetting, MouseInteractions
+from deskpet.pet.desktop import DesktopPet
+from deskpet.animation.glove_cursor import GLOVE_HOTSPOT, make_glove_cursor
+from deskpet.animation.mouse_interactions import ActiveHeadPetting, MouseInteractions
 
 
 class CursorSubject(QWidget):
@@ -37,6 +37,7 @@ class CursorSubject(QWidget):
         self.hold_timer = Mock()
         self.bubble = Mock()
         self.reveal_dock = Mock()
+        self.stop_roaming = Mock()
 
 
 class PettingCursorTests(unittest.TestCase):
@@ -79,7 +80,7 @@ class PettingCursorTests(unittest.TestCase):
         self.assertEqual(self.pet.cursor().hotSpot(), GLOVE_HOTSPOT)
 
     def test_quantized_cache_is_bounded_and_never_repaints_cached_poses(self):
-        with patch('glove_cursor.make_glove_cursor', wraps=make_glove_cursor) as build:
+        with patch('deskpet.animation.glove_cursor.make_glove_cursor', wraps=make_glove_cursor) as build:
             self.pet.start_petting()
             for _ in range(3):
                 for contact in (0, .25, .5, .75, 1):

@@ -9,10 +9,10 @@ from unittest.mock import patch
 
 from PySide6.QtCore import QObject, QSettings, Signal, QTimer
 from PySide6.QtWidgets import QApplication, QWidget
-from music_tools.library import MusicLibrary
-from music_lyrics import LyricsController
-from netease_music.download_queue import NeteaseDownloads
-from netease_music.service import Service
+from deskpet.music.tools.library import MusicLibrary
+from deskpet.music.lyrics import LyricsController
+from deskpet.music.netease.download_queue import NeteaseDownloads
+from deskpet.music.netease.service import Service
 
 
 class Cloud(QWidget):
@@ -58,10 +58,13 @@ def main():
         original_paths = list(library.paths)
         settings = QSettings(str(root / 'settings.ini'), QSettings.Format.IniFormat)
         pet.panel = SimpleNamespace(settings=settings, library=library, render_library=lambda: None)
+        from deskpet.music.tools.library_storage import LibraryStorage
+        storage = LibraryStorage(settings, root)
+        pet.panel.persist_library = lambda: (storage.save(library) or True)
         companion = QObject()
         companion.pet = pet
         companion.lyrics = LyricsController(pet, root)
-        with patch('netease_music.download_queue.Client', Client), patch('netease_music.download_queue.Downloader', Transfer):
+        with patch('deskpet.music.netease.download_queue.Client', Client), patch('deskpet.music.netease.download_queue.Downloader', Transfer):
             queue = NeteaseDownloads(companion, cloud)
         try:
             tracks = [dict(id=str(i+1), title=f'合成曲目{i}', artists='测试') for i in range(101)]
@@ -119,7 +122,7 @@ def main():
             def choose_directory(*args):
                 cloud.sessionChanged.emit()
                 return str(root)
-            with patch('netease_music.download_queue.QFileDialog.getExistingDirectory', side_effect=choose_directory):
+            with patch('deskpet.music.netease.download_queue.QFileDialog.getExistingDirectory', side_effect=choose_directory):
                 queue.start_playlist('987')
             assert not queue.running and queue.epoch != epoch
 

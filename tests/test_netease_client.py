@@ -7,8 +7,8 @@ import unittest
 
 from PySide6.QtCore import QCoreApplication
 
-from netease_music.client import Client
-from netease_music.service import Request
+from deskpet.music.netease.client import Client
+from deskpet.music.netease.service import Request
 
 
 class NeteaseClientTests(unittest.TestCase):

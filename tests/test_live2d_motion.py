@@ -1,11 +1,24 @@
 import unittest
 
-from live2d_motion import Curve, MotionLibrary
-from live2d_renderer import MODEL_ROOT, POSE_SCALE
-from pet_behavior import PetBehavior
+from deskpet.animation.live2d_motion import Curve, MotionLibrary
+from deskpet.animation.live2d_renderer import MODEL_ROOT, POSE_SCALE
+from deskpet.pet.behavior import PetBehavior
 
 
 class Live2DMotionTests(unittest.TestCase):
+    @unittest.skipUnless((MODEL_ROOT / 'action-map.json').is_file(), 'local model assets are not distributed with source')
+    def test_upper_body_uses_playback_phase_only_during_singing(self):
+        library = MotionLibrary(MODEL_ROOT)
+        beat = dict(available=True, beat_index=2, phase=.25)
+        first, parts = library.sample('sing', .1, beat)
+        later, later_parts = library.sample('sing', 7.8, beat)
+        for key in ('ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamBodyAngleX',
+                    'ParamBodyAngleZ', 'ParamSingArm', 'ParamLegLSwing', 'ParamLegRSwing'):
+            self.assertAlmostEqual(first[key], later[key], msg=key)
+        self.assertEqual(parts, later_parts)
+        for activity in ('idle', 'turn', 'sleep', 'phone', 'lift'):
+            self.assertEqual(library.sample(activity, .4, beat), library.sample(activity, .4))
+
     @unittest.skipUnless((MODEL_ROOT / 'action-map.json').is_file(), 'local model assets are not distributed with source')
     def test_singing_turn_has_clear_opposite_yaw_and_seamless_loop(self):
         library = MotionLibrary(MODEL_ROOT)
@@ -28,6 +41,15 @@ class Live2DMotionTests(unittest.TestCase):
         step = Curve([0, 0, 2, 2, 1])
         self.assertEqual(step.sample(1.999), 0)
         self.assertEqual(step.sample(2), 1)
+
+    def test_psd2live_smooth_curves_and_mixed_segments(self):
+        curve = Curve([0, 0, 1, .1, 0, .8, 1, 1, 1, 2, 2, 3])
+        self.assertEqual(curve.sample(-1), 0)
+        self.assertAlmostEqual(curve.sample(.4625), .5, places=6)
+        self.assertEqual(curve.sample(1.5), 1)
+        self.assertEqual(curve.sample(2), 3)
+        with self.assertRaises(ValueError):
+            Curve([0, 0, 1, .8, 0, .1, 1, 1, 1])
 
     @unittest.skipUnless((MODEL_ROOT / 'action-map.json').is_file(), 'local model assets are not distributed with source')
     def test_every_activity_resets_other_pose_groups(self):

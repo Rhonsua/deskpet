@@ -157,7 +157,7 @@ characters/
 
 人格插件是角色文件夹里的一个可选 JSON 文件，与图片配置相互独立。旧的纯 PNG 角色包仍可正常使用；外部角色没有人格文件时使用通用陪伴人格，不会借用洛天依身份。格式错误或读取失败时也回退，并在聊天界面提示。
 
-复制 [通用人格模板](example/personality.json.example) 到自己的角色目录，改名为 `personality.json`，用 UTF-8 保存（支持 BOM）。可参考 [洛天依人格资料](../docs/洛天依人格资料与插件.md)。初音未来的独立模板在 [pet_chat/personas/miku.json](../pet_chat/personas/miku.json)，使用时也须复制到自己的角色目录并改名；仅修改角色显示名称或 `id` 不会自动绑定这份模板。背景与创作区别见 [初音未来人格资料](../docs/初音未来人格资料.md)。
+复制 [通用人格模板](example/personality.json.example) 到自己的角色目录，改名为 `personality.json`，用 UTF-8 保存（支持 BOM）。可参考 [洛天依人格资料](../docs/guides/洛天依人格资料与插件.md)。初音未来的独立模板在 [pet_chat/personas/miku.json](../deskpet/chat/personas/miku.json)，使用时也须复制到自己的角色目录并改名；仅修改角色显示名称或 `id` 不会自动绑定这份模板。背景与创作区别见 [初音未来人格资料](../docs/guides/初音未来人格资料.md)。
 
 ```text
 characters/
@@ -199,4 +199,4 @@ characters/
 .\.venv\Scripts\python.exe character_packs.py "characters/我的角色"
 ```
 
-开发接口位于 `character_packs.py`：`discover_packs(root)` 按需扫描配置；`read_pack(folder)` 读取配置或推断约定文件名；`validate_images(pack)` 校验并返回解码图片；`pack.state_path(action)` 解析动作回退。启动只解码当前选中的外部角色，不批量解码全部角色；打开设置或点击刷新时再扫描候选包。
+开发接口位于 `deskpet/pet/characters.py`：`discover_packs(root)` 按需扫描配置；`read_pack(folder)` 读取配置或推断约定文件名；`validate_images(pack)` 校验并返回解码图片；`pack.state_path(action)` 解析动作回退。启动只解码当前选中的外部角色，不批量解码全部角色；打开设置或点击刷新时再扫描候选包。

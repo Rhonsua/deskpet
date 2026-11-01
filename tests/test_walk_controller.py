@@ -2,7 +2,7 @@ import random
 import unittest
 from unittest.mock import patch
 
-from walk_controller import WalkController
+from deskpet.animation.walk_controller import WalkController
 
 
 class Clock:

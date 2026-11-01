@@ -1,3 +1,0 @@
--r requirements.txt
-imageio-ffmpeg==0.6.0
-Pillow==13.0.0

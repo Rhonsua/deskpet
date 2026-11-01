@@ -17,11 +17,11 @@ sys.path.insert(0, str(ROOT))
 from PySide6.QtCore import QPoint, QSettings, Qt, QTimer, QProcess
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-from main import Pet
-from pet_chat.config import ProviderConfig
-from pet_chat.remote import ChatClient
-from visual_style import APPEARANCE_REVISION
-from worker_command import worker_command
+from deskpet.app import Pet
+from deskpet.chat.config import ProviderConfig
+from deskpet.chat.remote import ChatClient
+from deskpet.ui.appearance import APPEARANCE_REVISION
+from deskpet.runtime.workers import worker_command
 
 
 class Server(BaseHTTPRequestHandler):
@@ -86,7 +86,7 @@ with tempfile.TemporaryDirectory(dir=output) as scratch:
         program, args = worker_command('chat')
         delayed = [ '-c', 'import time,runpy;time.sleep(1.2);runpy.run_path(' +
                    repr(args[0]) + ',run_name="__main__")']
-        with patch('pet_chat.remote.worker_command', return_value=(program, delayed)):
+        with patch('deskpet.chat.remote.worker_command', return_value=(program, delayed)):
             chat.input.setPlainText('今天陪我聊聊吧')
             started = time.monotonic()
             chat.send_message()
@@ -132,7 +132,7 @@ with tempfile.TemporaryDirectory(dir=output) as scratch:
             completed, failed = [], []
             cold.completed.connect(completed.append)
             cold.failed.connect(failed.append)
-            with patch('pet_chat.remote.worker_command', return_value=(program, delayed)):
+            with patch('deskpet.chat.remote.worker_command', return_value=(program, delayed)):
                 cold.start(chat.config, [dict(role='user', content='cancel me')])
             cold.cancel()
             wait_for(lambda: cold.ready)

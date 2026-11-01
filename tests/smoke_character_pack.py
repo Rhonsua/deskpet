@@ -15,10 +15,10 @@ os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QImage, QPainter, QColor, QFont
 from PySide6.QtWidgets import QApplication
-from character_packs import read_pack, validate_images, STATES
-from main import Pet
-from pet_behavior import PetBehavior
-from visual_style import APPEARANCE_REVISION
+from deskpet.pet.characters import read_pack, validate_images, STATES
+from deskpet.app import Pet
+from deskpet.pet.behavior import PetBehavior
+from deskpet.ui.appearance import APPEARANCE_REVISION
 
 app = QApplication([])
 folder = Path(sys.argv[1]).resolve()

@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import Mock
 from PySide6.QtCore import QCoreApplication, QProcess
-from pet_chat.remote import ChatClient
+from deskpet.chat.remote import ChatClient
 
 
 class RemoteTests(unittest.TestCase):

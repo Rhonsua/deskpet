@@ -13,7 +13,7 @@ if not (STAGE/'action-map.json').exists():
 from PySide6.QtCore import QEvent, QPoint, QSettings, Qt
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
-import live2d_renderer
+import deskpet.animation.live2d_renderer as live2d_renderer
 
 
 class CandidateRenderer(live2d_renderer.Live2DRenderer):
@@ -22,8 +22,8 @@ class CandidateRenderer(live2d_renderer.Live2DRenderer):
 
 
 live2d_renderer.Live2DRenderer = CandidateRenderer
-from main import Pet
-from visual_style import APPEARANCE_REVISION
+from deskpet.app import Pet
+from deskpet.ui.appearance import APPEARANCE_REVISION
 
 
 class NoStartup:

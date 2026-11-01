@@ -1,6 +1,6 @@
 import unittest
 
-from web_playback_guard import TailCompletion, ReplayRecovery
+from deskpet.music.players.web_playback_guard import TailCompletion, ReplayRecovery
 
 
 def report(**changes):

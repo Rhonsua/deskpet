@@ -9,8 +9,8 @@ from unittest.mock import patch
 
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
-from music_beats import BeatController
-from music_tools.preparation import MusicPreparation
+from deskpet.music.beats import BeatController
+from deskpet.music.tools.preparation import MusicPreparation
 from tests.test_beats import make_wav
 
 

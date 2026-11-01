@@ -1,0 +1,1 @@
+"""Desktop pet application module."""

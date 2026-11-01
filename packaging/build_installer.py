@@ -4,10 +4,18 @@ import subprocess
 import hashlib
 import zipfile
 import argparse
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from deskpet.version import VERSION
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--portable', action='store_true', help='另外输出免安装 ZIP')
+parser.add_argument('--version', default=VERSION)
 args = parser.parse_args()
+version = args.version
+if version != VERSION:
+    raise SystemExit('Installer version must match deskpet/version.py')
 
 root = Path(__file__).resolve().parents[1]
 stage = root / 'build' / 'installer-stage'
@@ -18,19 +26,21 @@ if not (bundle / 'TianyiPet.exe').is_file():
 with zipfile.ZipFile(stage / 'payload.zip', 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
     for path in bundle.rglob('*'):
         if path.is_file(): archive.write(path, path.relative_to(bundle))
-    archive.writestr('VERSION.txt', '0.5.0\n')
-    archive.write(root / 'docs/0.5.0更新公告.txt', '更新公告.txt')
-portable = root / 'dist' / 'TianyiPet-0.5.0-portable.zip'
+    archive.writestr('VERSION.txt', version + '\n')
+    archive.write(root / 'docs/release-notes' / (version + '更新公告.txt'), '更新公告.txt')
+portable = root / 'dist' / ('TianyiPet-' + version + '-portable.zip')
 if args.portable:
     from build_portable import build
-    build('0.5.0')
+    build(version)
 compiler = Path('C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe')
+source = stage / 'Setup.generated.cs'
+source.write_text((root / 'packaging/Setup.cs').read_text(encoding='utf-8').replace('__APP_VERSION__', version), encoding='utf-8-sig')
 subprocess.run([str(compiler), '/nologo', '/target:winexe', '/platform:x64',
                 '/win32icon:' + str(root / 'assets' / 'icons' / 'tianyi.ico'),
                 '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll',
                 '/reference:System.IO.Compression.dll', '/reference:System.IO.Compression.FileSystem.dll',
-                '/out:' + str(stage / 'Setup.exe'), str(root / 'packaging' / 'Setup.cs')], check=True)
-output = root / 'dist' / 'TianyiPet-0.5.0-Setup.exe'
+                '/out:' + str(stage / 'Setup.exe'), str(source)], check=True)
+output = root / 'dist' / ('TianyiPet-' + version + '-Setup.exe')
 sed = stage / 'package.sed'
 sed.write_text('''[Version]
 Class=IEXPRESS

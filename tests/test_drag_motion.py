@@ -1,5 +1,5 @@
 import unittest
-from drag_motion import DragSway, interaction_pose
+from deskpet.animation.drag_motion import DragSway, interaction_pose
 
 
 class DragMotionTests(unittest.TestCase):

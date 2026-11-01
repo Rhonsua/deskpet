@@ -1,6 +1,6 @@
 from pathlib import Path
 import json
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules, copy_metadata
 
 root = Path(SPECPATH).parent
 datas = [(str(path), str(path.parent.relative_to(root)))
@@ -12,13 +12,19 @@ datas = [(str(path), str(path.parent.relative_to(root)))
 # Include only validated walking frames; generation sheets/previews stay local.
 import sys
 sys.path.insert(0, str(root))
-from character_packs import builtin_walk, validate_walk_images
+sdk_site = root / '.harness-venv/Lib/site-packages'
+if not (sdk_site / 'deepseek_harness').is_dir():
+    raise ValueError('Install the verified Harness SDK before building')
+sys.path.insert(0, str(sdk_site))
+datas += copy_metadata('deepseek-harness-sdk')
+datas += copy_metadata('pydantic')
+from deskpet.pet.characters import builtin_walk, validate_walk_images
 walk = builtin_walk()
 if walk is not None:
     validate_walk_images(walk)
     walk_files = set(walk.left + walk.right) | {root / 'assets/character/walk/walk.json'}
     datas += [(str(path), str(path.parent.relative_to(root))) for path in sorted(walk_files)]
-datas += [(str(root / 'bilibili_probe.js'), '.'), (str(root / 'bilibili_early.js'), '.'),
+datas += [(str(root / 'deskpet/music/players/bilibili_probe.js'), 'deskpet/music/players'), (str(root / 'deskpet/music/players/bilibili_early.js'), 'deskpet/music/players'),
           (str(root / 'LICENSE'), '.'), (str(root / 'README.md'), '.'),
           (str(root / 'assets' / 'README.md'), 'assets'),
           (str(root / 'characters' / 'README.md'), 'characters'),
@@ -27,7 +33,9 @@ datas += [(str(root / 'bilibili_probe.js'), '.'), (str(root / 'bilibili_early.js
           (str(root / 'characters' / 'example' / 'personality.json.example'), 'characters/example')]
 datas += collect_data_files('webview')
 datas.append((str(root / 'assets' / 'icons' / 'tianyi.ico'), 'assets/icons'))
-datas.append((str(root / 'pet_chat' / 'personas' / 'luotianyi.json'), 'pet_chat/personas'))
+datas.append((str(root / 'deskpet/chat' / 'personas' / 'luotianyi.json'), 'deskpet/chat/personas'))
+datas.append((str(root / 'deskpet/chat' / 'harness_permission_bridge.mjs'), 'deskpet/chat'))
+datas.append((str(root / 'deskpet/chat' / 'runtime_package_lock.json'), 'deskpet/chat'))
 # Only aligned original hand poses: exclude generation sheets and references.
 hand_root = root / 'assets' / 'ui' / 'headpat'
 for name in ('hand-hover.png', 'hand-contact.png', 'manifest.json'):
@@ -57,14 +65,26 @@ for path in sorted(files):
     if not path.resolve().is_relative_to(model_root.resolve()) or not path.is_file():
         raise ValueError('Missing or invalid Tianyi model asset: ' + str(path))
     datas.append((str(path), str(path.parent.relative_to(root))))
+
+# Current separate poses only: runtime files, never PSD/Cubism projects/backups.
+for pose in ('work', 'crawl'):
+    pose_root = root / 'assets/live2d' / ('tianyi-' + pose)
+    entry = pose_root / ('tianyi-' + pose + '.model3.json')
+    model = json.loads(entry.read_text(encoding='utf-8'))
+    pose_files = {entry} | {pose_root / name for name in referenced_files(model['FileReferences'])}
+    for path in sorted(pose_files):
+        if not path.resolve().is_relative_to(pose_root.resolve()) or not path.is_file():
+            raise ValueError('Missing pose asset: ' + str(path))
+        datas.append((str(path), str(path.parent.relative_to(root))))
 datas += collect_data_files('live2d')
 binaries = collect_dynamic_libs('live2d')
-a = Analysis([str(root / 'app_entry.py')], pathex=[str(root)], datas=datas, binaries=binaries,
+a = Analysis([str(root / 'app_entry.py')], pathex=[str(root), str(sdk_site)], datas=datas, binaries=binaries,
              hiddenimports=['webview.platforms.edgechromium', 'webview.platforms.winforms',
-                            'live2d._live2d', 'OpenGL.platform.win32'],
+                            'live2d._live2d', 'OpenGL.platform.win32',
+                            *collect_submodules('deepseek_harness')],
              excludes=['webview.platforms.qt', 'webview.platforms.gtk', 'webview.platforms.cef',
                        'webview.platforms.cocoa', 'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets',
-                       'tkinter', 'pytest', 'pet_mods.goals',
+                       'tkinter', 'pytest', 'deskpet.mods.goals',
                        'PIL.AvifImagePlugin', 'PIL._avif'], noarchive=False)
 # These optional Qt plugins drag in PDF/QML/virtual-keyboard engines. The app
 # uses native Windows widgets/IME and PNG artwork, not either plugin. Keep

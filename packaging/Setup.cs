@@ -11,6 +11,7 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 
 class Setup {
+    const string Version = "__APP_VERSION__";
     const string Key = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\TianyiPet";
     static string[] Args;
     static bool Has(string value) { return Args.Contains(value); }
@@ -59,15 +60,19 @@ class Setup {
             throw new IOException("请选择空目录，或之前安装此版本桌宠的目录。");
         var installed = new System.Collections.Generic.List<string>();
         File.WriteAllLines(manifestPath, new string[] { "installed-files.txt" });
+        using (var journal = new StreamWriter(manifestPath, true, System.Text.Encoding.UTF8))
         using (ZipArchive zip = ZipFile.OpenRead(archive)) {
             long total = Math.Max(1, zip.Entries.Sum(e => e.Length)), copied = 0;
             foreach (ZipArchiveEntry entry in zip.Entries) {
                 if (String.IsNullOrEmpty(entry.Name)) continue;
                 string target = Child(root, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
                 Directory.CreateDirectory(Path.GetDirectoryName(target));
+                // Record partial files too, without rewriting a growing 40k-file
+                // manifest for every dependency in the bundled backend.
+                journal.WriteLine(entry.FullName.Replace('/', Path.DirectorySeparatorChar));
+                journal.Flush();
                 entry.ExtractToFile(target, true);
                 installed.Add(entry.FullName.Replace('/', Path.DirectorySeparatorChar));
-                File.WriteAllLines(manifestPath, installed.Concat(new string[] { "installed-files.txt" }));
                 copied += entry.Length;
                 progress((int)(copied * 95 / total));
             }
@@ -79,7 +84,7 @@ class Setup {
         if (!test) {
             using (RegistryKey key = Registry.CurrentUser.CreateSubKey(Key)) {
                 key.SetValue("DisplayName", "洛天依桌宠");
-                key.SetValue("DisplayVersion", "0.5.0");
+                key.SetValue("DisplayVersion", Version);
                 key.SetValue("InstallLocation", root);
                 key.SetValue("DisplayIcon", Path.Combine(root, "TianyiPet.exe"));
                 key.SetValue("UninstallString", "\"" + Path.Combine(root, "TianyiSetup.exe") + "\" --uninstall --dir \"" + root + "\"");
@@ -124,6 +129,8 @@ class Setup {
         }
     }
     [STAThread] static int Main(string[] args) {
+        AppContext.SetSwitch("Switch.System.IO.UseLegacyPathHandling", false);
+        AppContext.SetSwitch("Switch.System.IO.BlockLongPaths", false);
         Args = args;
         Application.EnableVisualStyles();
         string destination = Option("--dir", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "TianyiPet"));
@@ -144,7 +151,7 @@ class Setup {
                 return 0;
             }
             if (quiet) { Install(destination, false, test, value => { }); return 0; }
-            Form form = new Form { Text = "安装洛天依桌宠 0.5.0", ClientSize = new Size(490, 265), StartPosition = FormStartPosition.CenterScreen, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false };
+            Form form = new Form { Text = "安装洛天依桌宠 " + Version, ClientSize = new Size(490, 265), StartPosition = FormStartPosition.CenterScreen, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false };
             Label title = new Label { Text = "洛天依桌宠", Font = new Font("Microsoft YaHei UI", 17), Bounds = new Rectangle(22, 18, 440, 36) };
             Label detail = new Label { Text = "Windows 10 / 11 64 位 · 无需安装 Python\nB站播放需要 Microsoft Edge WebView2。", Bounds = new Rectangle(24, 60, 440, 42) };
             TextBox pathBox = new TextBox { Text = destination, Bounds = new Rectangle(24, 112, 350, 25) };

@@ -1,5 +1,5 @@
 import unittest
-from pointer_follow import PointerFollow, apply_pointer
+from deskpet.animation.pointer_follow import PointerFollow, apply_pointer
 
 
 class PointerFollowTests(unittest.TestCase):

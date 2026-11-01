@@ -7,8 +7,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from pet_mods.goals.store import GoalStore
-from pet_mods.goals.mod import GoalMod
+from deskpet.mods.goals.store import GoalStore
+from deskpet.mods.goals.mod import GoalMod
 
 
 class GoalTests(unittest.TestCase):

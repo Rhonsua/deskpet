@@ -2,7 +2,7 @@ import random
 import unittest
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QColor, QImage
-from visual_style import sprite_bounds
+from deskpet.ui.appearance import sprite_bounds
 
 
 class ImageSprite:

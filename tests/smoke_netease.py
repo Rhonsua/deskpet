@@ -7,10 +7,10 @@ from unittest.mock import patch
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtGui import QFont, QFontDatabase
-from netease_music import NeteaseWidget
-from netease_music.widget import login_pixmap
-from netease_music.service import ApiError
-from compact_ui import COMPACT_STYLE
+from deskpet.music.netease import NeteaseWidget
+from deskpet.music.netease.widget import login_pixmap
+from deskpet.music.netease.service import ApiError
+from deskpet.ui.compact import COMPACT_STYLE
 
 
 def main():
@@ -107,7 +107,7 @@ def main():
             assert len(session_changes) == before + 1
             assert widget.collections.topLevelItemCount() == 0
             assert widget.account_buttons['扫码登录网易云'].isVisible()
-            from netease_music.browser_login import BrowserLogin, STATUS
+            from deskpet.music.netease.browser_login import BrowserLogin, STATUS
             with patch.object(BrowserLogin, 'start') as start, patch.object(BrowserLogin,'request_check') as check:
                 widget.remember.setChecked(False)
                 widget.account_buttons['扫码登录网易云'].click()

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from pet_chat.personality import load_personality
+from deskpet.chat.personality import load_personality
 
 
 def valid():
@@ -18,7 +18,7 @@ def valid():
 class PersonalityTests(unittest.TestCase):
     def test_distributed_character_personality_templates_load(self):
         project = Path(__file__).resolve().parents[1]
-        for relative in ('pet_chat/personas/miku.json', 'characters/example/personality.json.example'):
+        for relative in ('deskpet/chat/personas/miku.json', 'characters/example/personality.json.example'):
             with self.subTest(template=relative):
                 data = (project / relative).read_bytes()
                 plugin, warning = self.load_data(data)
@@ -121,7 +121,7 @@ class PersonalityTests(unittest.TestCase):
         self.assertTrue(warning)
 
     def test_builtin_missing_and_damaged_use_authored_fallback(self):
-        from pet_chat import persona
+        from deskpet.chat import persona
         scope = dict(allowed=['闲聊'], decline=['解题'], guidance='说明边界')
         with patch.object(persona, 'TIANYI_SCOPE', scope, create=True), \
              patch.object(persona, 'TIANYI_EXAMPLES', [dict(user='hi', assistant='你好')], create=True):

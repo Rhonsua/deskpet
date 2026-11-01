@@ -1,7 +1,7 @@
 from http.cookies import SimpleCookie
 import unittest
 
-from netease_player_worker import official_page, login_cookie
+from deskpet.music.players.netease_player_worker import official_page, login_cookie
 
 
 class BrowserBoundaryTests(unittest.TestCase):

@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from live2d_motion import MotionLibrary
+from deskpet.animation.live2d_motion import MotionLibrary
 
 
 class Live2DWalkTests(unittest.TestCase):

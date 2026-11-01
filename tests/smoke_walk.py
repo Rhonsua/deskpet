@@ -14,9 +14,9 @@ from PySide6.QtCore import QSettings, Qt, QPoint
 from PySide6.QtGui import QImage, QColor, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-from main import Pet
-from visual_style import APPEARANCE_REVISION
-from walk_controller import WalkController, WALK_SPEED_MULTIPLIER
+from deskpet.app import Pet
+from deskpet.ui.appearance import APPEARANCE_REVISION
+from deskpet.animation.walk_controller import WalkController, WALK_SPEED_MULTIPLIER
 
 
 class NoStartup:

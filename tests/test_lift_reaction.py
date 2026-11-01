@@ -2,7 +2,7 @@
 
 import unittest
 
-from lift_reaction import (
+from deskpet.animation.lift_reaction import (
     FLAPS_PER_BURST, FLAPS_PER_SECOND, LIFT_RELEASE_SECONDS,
     LIFT_START_SECONDS, PAUSE_SECONDS, LiftReactionOverlay,
     sample_lift_reaction,

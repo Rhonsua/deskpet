@@ -1,4 +1,5 @@
 .venv/
+.harness-venv/
 __pycache__/
 *.pyc
 *.db
@@ -25,7 +26,7 @@ assets/references/
 assets/live2d/
 assets/icons/*.png
 assets/icons/*.ico
-# New character artwork is local; previously tracked files are unchanged.
+# Character artwork stays local, including earlier generated versions.
 assets/character/**/*.png
 assets/character/*.png
 # Locally generated head-petting artwork is distributed with other runtime art.
@@ -45,6 +46,7 @@ characters/example/*
 *.psd
 *.psb
 local-work/
+docs/media/
 
 # Local Cubism editing notes and user feedback stay with the model projects.
 docs/Cubism操作说明.md

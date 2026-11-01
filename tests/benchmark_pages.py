@@ -10,8 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QSettings
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication
-from main import Pet
-from visual_style import APPEARANCE_REVISION
+from deskpet.app import Pet
+from deskpet.ui.appearance import APPEARANCE_REVISION
 
 
 class Startup:

@@ -6,9 +6,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from netease_music.links import api_base, canonical_link, music_id, parse_link
-from netease_music.service import ApiError, Request, Service, SessionExpired, lrc_info
-from netease_music.storage import Cache
+from deskpet.music.netease.links import api_base, canonical_link, music_id, parse_link
+from deskpet.music.netease.service import ApiError, Request, Service, SessionExpired, lrc_info
+from deskpet.music.netease.storage import Cache
 
 
 def song(item_id):
@@ -225,7 +225,7 @@ class NeteaseStorageTests(unittest.TestCase):
     def test_credential_encryption_failure_preserves_prior_file(self):
         self.cache.write('session.json', dict(old='encrypted'))
         before = self.cache.path('session.json').read_bytes()
-        with patch('netease_music.storage.protect', side_effect=ValueError('test')):
+        with patch('deskpet.music.netease.storage.protect', side_effect=ValueError('test')):
             with self.assertRaises(ValueError):
                 self.cache.save_session(SESSION)
         self.assertEqual(self.cache.path('session.json').read_bytes(), before)

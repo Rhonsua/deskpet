@@ -1,8 +1,8 @@
 import random
 import unittest
 
-from pet_behavior import PetBehavior
-from teleport_controller import TeleportController, visual_at
+from deskpet.pet.behavior import PetBehavior
+from deskpet.animation.teleport_controller import TeleportController, visual_at
 
 
 class TeleportTests(unittest.TestCase):
@@ -96,7 +96,7 @@ class TeleportTests(unittest.TestCase):
         self.assertFalse(PetBehavior('sleep').begin_teleport())
 
     def test_cloud_is_round_and_cached(self):
-        from teleport_effects import cloud_image
+        from deskpet.animation.teleport_effects import cloud_image
         image = cloud_image(360, 360, 10, 10, 340, 340)
         self.assertIs(image, cloud_image(360, 360, 10, 10, 340, 340))
         # Inspect opaque extent, independent of antialiasing and row padding.

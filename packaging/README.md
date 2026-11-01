@@ -1,12 +1,35 @@
 # Windows 试用安装包
 
+## 0.6.0 测试版
+
+运行 `TianyiPet-0.6.0-Setup.exe`。安装包只带 Python SDK 和自动安装脚本；首次开始工作时先从 Node.js 官网下载 `24.20.0` Windows x64 免安装版并核验 SHA-256，再通过它自带的 npm 从官方 registry 安装锁定的 `@deepseek-ai/dsh 0.2.2-alpha.2`。工作模式通过 `TianyiWorker.exe --harness-worker` 启动，无需手动安装 Python、Node.js 或 Harness。首次需要联网，显示进度、支持取消，成功后继续原任务；下载失败可直接重试。
+
+工作会话放在应用用户数据目录的 `work-sessions` 中，运行文件在同级 `work-runtime/dsh-0.2.2-alpha.2-node-24.20.0-x64` 中。程序更新和官方 DSH 重装根目录都不会覆盖它们；不修改系统 PATH。完整安装后写就绪标记，已安装时直接复用；中断不会留下假成功标记。源码开发环境仍使用项目内的隔离后端。安装日志位于 `work-runtime/setup.log`，不传入用户 API Key。
+
+本版新增聊天/歌单背景、工作姿势和概率触发的蛄蛹动作。只包含当前天依模型，排除 Miku、Mod 本体、用户配置、音乐和聊天记录。安装包不包含完整 Node/npm 后端目录，保持较小体积。下载依赖时保留其官方许可证。
+
+构建：
+
+```powershell
+.\.venv\Scripts\python.exe -m PyInstaller --noconfirm packaging/deskpet.spec
+.\.venv\Scripts\python.exe packaging/build_installer.py --version 0.6.0
+.\.venv\Scripts\python.exe tests/harness_smoke.py --worker dist/TianyiPet/TianyiWorker.exe --runtime local-work/bootstrap-release-check/runtime --strict-path --report dist/TEST-REPORT-0.6.0-harness.json
+.\.venv\Scripts\python.exe tests/smoke_installer.py
+```
+
+`--strict-path` 验证只提供系统路径，屏蔽开发机的 Node.js、Python、PowerShell 7 等 PATH 依赖；使用本机模拟模型接口，不消耗 API。验证覆盖读写文件、命令执行、允许/拒绝审批、取消与恢复会话。安装检查只向临时目录安装，不改变实际快捷方式和注册表。
+
+自动安装脚本也可以在开发环境单独运行：`.\.venv\Scripts\python.exe -m deskpet.chat.harness_bootstrap --directory local-work/bootstrap-release-check/runtime`。版本和依赖清单随桌宠版本更新，不直接追踪未经验证的最新后端。
+
+## 0.5.0 历史发行说明
+
 最新发行物为 **0.5.0 EXE 安装包与免安装 ZIP**：包含 API 加载并行、边缘收起优化、摸头反馈、Live2D 左右散步、拖起闭眼挥臂，以及歌词跟随位置调整。运行 `TianyiPet-0.5.0-Setup.exe` 安装，或完整解压 ZIP 后运行 `TianyiPet.exe`。安装包剔除未使用的 Qt PDF、虚拟键盘及 QML 依赖和 AVIF 解码器，采用高压缩率；保留软件 OpenGL 与音频、TLS 后端。下文 0.4.2 功能说明为历史记录。
 
 构建 0.5.0 ZIP：先执行 `.\.venv\Scripts\python.exe -m PyInstaller --noconfirm packaging/deskpet.spec`，然后执行 `.\.venv\Scripts\python.exe packaging/build_portable.py --version 0.5.0`。输出 `dist/TianyiPet-0.5.0-portable.zip` 及同名 `.zip.sha256` 校验文件；压缩包包含 `VERSION.txt` 和 `更新公告.txt`。只收录当前正在使用的洛天依模型及其依赖，不收录旧模型备份、工程、Miku、Mod 本体或用户数据。
 
 0.4.2 阶段新增网易云网页登录及播放、歌词右键颜色/隐藏/左键穿透，并修复中文描边遮挡和本地 MP3 节拍解码。默认使用 Live2D 洛天依，包含静态切换、自定义 PNG 角色接口、弹性拖拽、鼠标互动与背景效果，以及可选 API 文字聊天、洛天依人格插件、本地陪伴任务限制和头像图标，面向 Windows 10 / 11 x64。包含 Python、Qt、Live2D 运行依赖、当前洛天依模型与内置静态角色图片、本地音频辅助程序及 B站网页辅助程序，无需用户安装 Python。B站仍需系统安装 Microsoft Edge WebView2 Runtime；网页登录、验证码与网站播放限制由用户在网页处理。
 
-主程序只带 Mod 接口、管理页面与加载器，不包含目标陪伴代码或任何内置注册的 Mod。新数据目录中的扩展列表为空，默认没有启用任何 Mod。目标陪伴作为单独的 ZIP 分享，主程序和免安装包均排除 `pet_mods.goals`。
+主程序只带 Mod 接口、管理页面与加载器，不包含目标陪伴代码或任何内置注册的 Mod。新数据目录中的扩展列表为空，默认没有启用任何 Mod。目标陪伴作为单独的 ZIP 分享，主程序和免安装包均排除 `deskpet.mods.goals`。
 
 默认安装到当前用户的 `%LOCALAPPDATA%\Programs\TianyiPet`，无需管理员权限，可选桌面快捷方式，并添加开始菜单及 Windows 卸载入口。关闭旧桌宠后再安装。开机自启仍在桌宠设置中由用户选择。
 
@@ -19,7 +42,7 @@
 在 Windows x64 的项目根目录执行：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements/build.txt
 .\.venv\Scripts\python.exe -m PyInstaller --noconfirm packaging/deskpet.spec
 .\.venv\Scripts\python.exe packaging/build_goal_mod.py
 .\.venv\Scripts\python.exe packaging/build_installer.py --portable
@@ -43,4 +66,4 @@
 
 在桌宠的「扩展功能 / Mod」中点击「打开 Mod 文件夹」，把独立 ZIP 解压到该应用数据下的 `mod-packages` 文件夹，使 `goals/mod.json` 和 `goals/entry.py` 直接位于其中。退出并重新打开桌宠后启用「目标陪伴」。扫描只读取信息；仅启用后执行代码，已启用状态可在重启后恢复。目标数据库独立保存在应用数据 `mods/goals/goals.db`，停用不删除数据。Python 扩展没有沙箱，仅安装和启用可信来源的包。
 
-安装检查会读取可执行文件的 CArchive/PYZ，断言无 `pet_mods.goals`，然后使用冻结程序 `--self-check --mod-pack <独立ZIP> --report <临时报告>`，在隔离数据路径先验证空扩展列表，再解压独立 ZIP、启用、创建页面、保存目标、经统一通知接口提醒和检查持久化。此过程不触碰真实存档，也不调用模型服务。
+安装检查会读取可执行文件的 CArchive/PYZ，断言无 `deskpet.mods.goals`，然后使用冻结程序 `--self-check --mod-pack <独立ZIP> --report <临时报告>`，在隔离数据路径先验证空扩展列表，再解压独立 ZIP、启用、创建页面、保存目标、经统一通知接口提醒和检查持久化。此过程不触碰真实存档，也不调用模型服务。

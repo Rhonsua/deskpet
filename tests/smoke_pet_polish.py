@@ -12,9 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QSettings, QPoint, Qt
 from PySide6.QtGui import QColor, QCursor, QImage, QPainter
 from PySide6.QtWidgets import QApplication
-from main import Pet
-from pet_behavior import PetBehavior, MODES
-from singing_choreography import footwork
+from deskpet.app import Pet
+from deskpet.pet.behavior import PetBehavior, MODES
+from deskpet.animation.singing_choreography import footwork
 
 app = QApplication([])
 ROOT = Path(__file__).resolve().parents[1]

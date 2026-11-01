@@ -11,10 +11,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QObject, QSettings, Signal
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import QApplication
-from main import Pet
-from music_tools.clock import playback_snapshot
-from audio.remote import RemotePlayer
-from visual_style import APPEARANCE_REVISION
+from deskpet.app import Pet
+from deskpet.music.tools.clock import playback_snapshot
+from deskpet.music.audio.remote import RemotePlayer
+from deskpet.ui.appearance import APPEARANCE_REVISION
 
 
 class NoStartup:
@@ -80,7 +80,7 @@ def main():
             engine = AudioStub()
             panel.engine = engine
             panel._player = player = RemotePlayer(engine)
-            with patch('netease_music.playback.Client', ControlledClient):
+            with patch('deskpet.music.netease.playback.Client', ControlledClient):
                 companion.open(0)
             playback, cloud = companion.playback, companion.cloud
             assert isinstance(playback.client, ControlledClient)
@@ -116,7 +116,7 @@ def main():
             assert playback.current['id'] == '102'
             resolve();panel.step(1)
             assert playback.current['id'] == '103', 'manual next must escape single repeat'
-            with patch('music_tools.library.random.shuffle', side_effect=lambda bag: bag.reverse()):
+            with patch('deskpet.music.tools.library.random.shuffle', side_effect=lambda bag: bag.reverse()):
                 start('shuffle', 0);resolve()
                 first = playback.current['id']
                 panel.media_changed(QMediaPlayer.MediaStatus.EndOfMedia)
@@ -186,7 +186,7 @@ def main():
             def logout_while_choosing(*args, **kwargs):
                 cloud.sessionChanged.emit()
                 return str(root)
-            with patch('netease_music.download_queue.QFileDialog.getExistingDirectory', side_effect=logout_while_choosing), \
+            with patch('deskpet.music.netease.download_queue.QFileDialog.getExistingDirectory', side_effect=logout_while_choosing), \
                  patch.object(companion.downloads.client, 'run') as prepare_request:
                 companion.downloads.start(TRACKS)
                 prepare_request.assert_not_called()

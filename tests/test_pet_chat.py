@@ -10,11 +10,11 @@ from types import SimpleNamespace
 
 from PySide6.QtCore import QCoreApplication
 
-from pet_chat.config import ConfigFile, ProviderConfig, endpoint
-from pet_chat.prompts import build_messages, parse_reply
-from pet_chat.protocol import SSEParser, ProtocolError, content_from_json, request_payload
-from pet_chat.client import ChatClient
-from pet_chat.store import ChatStore
+from deskpet.chat.config import ConfigFile, ProviderConfig, endpoint
+from deskpet.chat.prompts import build_messages, parse_reply
+from deskpet.chat.protocol import SSEParser, ProtocolError, content_from_json, request_payload
+from deskpet.chat.client import ChatClient
+from deskpet.chat.store import ChatStore
 
 
 class ChatTests(unittest.TestCase):
@@ -36,8 +36,8 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(len(messages), 2)
 
     def test_builtin_json_and_fallback_stay_identical(self):
-        from pet_chat.persona import TIANYI_PERSONA, TIANYI_SCOPE, TIANYI_EXAMPLES
-        data = json.loads((Path(__file__).resolve().parents[1] / 'pet_chat' / 'personas' /
+        from deskpet.chat.persona import TIANYI_PERSONA, TIANYI_SCOPE, TIANYI_EXAMPLES
+        data = json.loads((Path(__file__).resolve().parents[1] / 'deskpet/chat' / 'personas' /
                            'luotianyi.json').read_text(encoding='utf-8'))
         self.assertEqual(data['persona'], TIANYI_PERSONA)
         self.assertEqual(data['scope'], TIANYI_SCOPE)
@@ -193,7 +193,7 @@ class ChatTests(unittest.TestCase):
             file = ConfigFile(Path(temp) / 'config.json')
             file.save(ProviderConfig('https://example.com', 'old', '', False))
             before = file.path.read_bytes()
-            with patch('pet_chat.config._protect', side_effect=ValueError('failed')):
+            with patch('deskpet.chat.config._protect', side_effect=ValueError('failed')):
                 with self.assertRaises(ValueError):
                     file.save(ProviderConfig('https://example.com', 'new', 'secret', True))
             self.assertEqual(file.path.read_bytes(), before)

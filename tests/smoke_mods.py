@@ -14,9 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QSettings, QDateTime
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QMessageBox
-from main import Pet
-from visual_style import APPEARANCE_REVISION
-from pet_mods.api import ModManifest
+from deskpet.app import Pet
+from deskpet.ui.appearance import APPEARANCE_REVISION
+from deskpet.mods.api import ModManifest
 
 
 class Startup:
@@ -30,11 +30,11 @@ fonts = QFontDatabase.applicationFontFamilies(font_id)
 if fonts:
     app.setFont(QFont(fonts[0], 9))
 
-with tempfile.TemporaryDirectory(prefix='mods-ui-') as temp, patch('pet_mods.host.QApplication.beep') as beep:
+with tempfile.TemporaryDirectory(prefix='mods-ui-') as temp, patch('deskpet.mods.host.QApplication.beep') as beep:
     root = Path(temp)
     package = root / 'mod-packages' / 'goals'
     package.mkdir(parents=True)
-    source = Path(__file__).resolve().parents[1] / 'pet_mods' / 'goals'
+    source = Path(__file__).resolve().parents[1] / 'deskpet/mods' / 'goals'
     for name in ('__init__.py', 'mod.py', 'store.py', 'widget.py'):
         shutil.copyfile(source / name, package / name)
     (package / 'mod.json').write_text(json.dumps(dict(id='goals', name='目标陪伴', version='0.1.0',
@@ -117,7 +117,7 @@ with tempfile.TemporaryDirectory(prefix='mods-ui-') as temp, patch('pet_mods.hos
         window.tabs.setCurrentIndex(1)
         assert window.grab().save(str(output / 'mods-reminders.png'))
         editor.title_input.setText('尚未保存的编辑')
-        with patch('pet_mods.window.QMessageBox.question', return_value=QMessageBox.StandardButton.No) as confirm:
+        with patch('deskpet.mods.window.QMessageBox.question', return_value=QMessageBox.StandardButton.No) as confirm:
             window.enabled.setChecked(False)
             assert confirm.call_count == 1
             assert host.manager.is_enabled('goals') and window.enabled.isChecked()
@@ -134,7 +134,7 @@ with tempfile.TemporaryDirectory(prefix='mods-ui-') as temp, patch('pet_mods.hos
         assert persisted['policy']['sound_enabled'] is False
         # Optional UI hooks and invalid plugin pages stay inside the host boundary.
         with patch.object(editor, 'has_unsaved_changes', side_effect=ValueError('broken hook')):
-            with patch('pet_mods.window.QMessageBox.question', return_value=QMessageBox.StandardButton.No):
+            with patch('deskpet.mods.window.QMessageBox.question', return_value=QMessageBox.StandardButton.No):
                 window.enabled.setChecked(False)
                 assert host.manager.is_enabled('goals') and window.enabled.isChecked()
         for key, page, expected in [('headless', None, True), ('badui', 42, False)]:

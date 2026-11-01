@@ -3,7 +3,7 @@ import tempfile
 from pathlib import Path
 import unittest
 from PySide6.QtCore import QSettings
-from visual_style import APPEARANCE_REVISION, preferred_variant
+from deskpet.ui.appearance import APPEARANCE_REVISION, preferred_variant
 
 
 class AppearanceTests(unittest.TestCase):

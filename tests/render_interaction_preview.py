@@ -13,7 +13,7 @@ import imageio_ffmpeg
 from PySide6.QtCore import QSettings, QRect
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
-from main import Pet
+from deskpet.app import Pet
 
 
 class PreviewStartup:

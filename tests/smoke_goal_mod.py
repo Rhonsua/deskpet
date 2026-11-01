@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QMessageBox
-from pet_mods.goals.mod import GoalMod
+from deskpet.mods.goals.mod import GoalMod
 
 
 def main():

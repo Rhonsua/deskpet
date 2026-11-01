@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QPoint, QSettings, Qt
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import QApplication
-from main import Pet
+from deskpet.app import Pet
 
 
 class NoStartup:

@@ -7,12 +7,13 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from pet_mods import ModContext, ModManager, ModManifest
-from pet_mods.loader import discover
+from deskpet.mods import ModContext, ModManager, ModManifest
+from deskpet.mods.loader import discover
 
 
 ENTRY = '''from .helper import VALUE
 from pet_mods.api import ModContext
+from ui_theme import apply_light_palette
 class Example:
     def __init__(self, context):
         assert isinstance(context, ModContext)
@@ -117,11 +118,11 @@ class ModLoaderTests(unittest.TestCase):
 
     def test_file_and_package_budgets_are_checked(self):
         self.package()
-        with patch('pet_mods.loader._MAX_FILE_BYTES', 10):
+        with patch('deskpet.mods.loader._MAX_FILE_BYTES', 10):
             self.assertTrue(discover(self.root)[1])
-        with patch('pet_mods.loader._MAX_PACKAGE_BYTES', 10):
+        with patch('deskpet.mods.loader._MAX_PACKAGE_BYTES', 10):
             self.assertTrue(discover(self.root)[1])
-        with patch('pet_mods.loader._MAX_ENTRIES', 1):
+        with patch('deskpet.mods.loader._MAX_ENTRIES', 1):
             self.assertTrue(discover(self.root)[1])
 
     def test_outside_link_is_rejected_without_opening(self):

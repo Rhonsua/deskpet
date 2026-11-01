@@ -1,7 +1,7 @@
 import unittest
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QImage, QPainter
-from pet_effects import draw_effects
+from deskpet.animation.pet_effects import draw_effects
 
 
 class PetEffectsTests(unittest.TestCase):

@@ -8,7 +8,7 @@ from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QCursor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton
-from music_lyrics.overlay import LyricsOverlay
+from deskpet.music.lyrics.overlay import LyricsOverlay
 
 
 def main():

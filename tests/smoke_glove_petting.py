@@ -16,8 +16,8 @@ from PySide6.QtGui import QContextMenuEvent, QKeyEvent
 from PySide6.QtCore import QEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-from main import Pet
-from visual_style import APPEARANCE_REVISION
+from deskpet.app import Pet
+from deskpet.ui.appearance import APPEARANCE_REVISION
 
 
 class NoStartup:
@@ -63,7 +63,7 @@ with tempfile.TemporaryDirectory(prefix='test-', dir=output) as temp:
 
         def stroke(point, visible=True):
             pet.last_frame_time = time.monotonic() - .1
-            with patch('desktop_pet.QCursor.pos', return_value=pet.mapToGlobal(point)), \
+            with patch('deskpet.pet.desktop.QCursor.pos', return_value=pet.mapToGlobal(point)), \
                     patch.object(pet, 'pointer_reaches_pet', return_value=visible):
                 pet.animate()
 

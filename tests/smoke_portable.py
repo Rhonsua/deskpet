@@ -26,7 +26,7 @@ def check(archive_path):
                 assert (installed / name).resolve().is_relative_to(installed), name
             assert archive.read('VERSION.txt').decode().strip() == '0.5.0'
             assert '更新公告.txt' in names
-            assert not any('miku' in name.lower() or '/pet_mods/goals/' in name.lower()
+            assert not any('miku' in name.lower() or '/deskpet/mods/goals/' in name.lower()
                            or name.lower().endswith(('.db', '.mp3', '.cmo3', '.psd')) for name in names)
             character_files = [name for name in names if '/characters/' in name]
             assert set(character_files) <= {'_internal/characters/README.md',
@@ -45,10 +45,10 @@ def check(archive_path):
             assert pure_names
             for name in pure_names:
                 modules = bundle.open_embedded_archive(name).toc
-                assert not any(module == 'pet_mods.goals' or module.startswith('pet_mods.goals.')
+                assert not any(module == 'deskpet.mods.goals' or module.startswith('deskpet.mods.goals.')
                                for module in modules)
                 assert all(module in modules for module in ('walk_controller', 'walk_runtime',
-                    'pet_chat.remote', 'chat_player_worker'))
+                    'deskpet.chat.remote', 'chat_player_worker'))
         report = folder / 'self-check.json'
         env = os.environ.copy()
         env.pop('QT_QPA_PLATFORM', None)

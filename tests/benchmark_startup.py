@@ -11,7 +11,7 @@ from pathlib import Path
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 started = time.perf_counter()
-from main import Pet
+from deskpet.app import Pet
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 imported = time.perf_counter()

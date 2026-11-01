@@ -6,7 +6,7 @@ import time
 from PIL import Image
 from PySide6.QtCore import QBuffer, QIODevice
 from PySide6.QtGui import QColor, QImage, QPainter
-from teleport_controller import TeleportController
+from deskpet.animation.teleport_controller import TeleportController
 
 
 def export(pet, output):

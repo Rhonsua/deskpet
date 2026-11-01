@@ -1,6 +1,6 @@
 import unittest
 from PySide6.QtCore import QPoint, QRect, QSize
-from edge_docking import (clamp_position, dock_position, nearest_edge, pushed_edge,
+from deskpet.animation.edge_docking import (clamp_position, dock_position, nearest_edge, pushed_edge,
                           edge_gap, keep_drag_docked, dock_ease)
 
 

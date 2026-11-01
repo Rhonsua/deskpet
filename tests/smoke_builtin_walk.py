@@ -11,8 +11,8 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QImage, QPainter, QColor
 from PySide6.QtWidgets import QApplication
-from main import Pet
-from visual_style import APPEARANCE_REVISION
+from deskpet.app import Pet
+from deskpet.ui.appearance import APPEARANCE_REVISION
 
 
 class NoStartup:
@@ -77,7 +77,7 @@ with tempfile.TemporaryDirectory(prefix='test-', dir=output) as temp:
         assert sheet.save(str(output / 'runtime-contact-sheet.png'))
         # Capability follows the installed native model, including older exports.
         if pet.set_variant('live2d'):
-            from live2d_motion import MotionLibrary
+            from deskpet.animation.live2d_motion import MotionLibrary
             renderer = pet.live2d_renderer
             installed = MotionLibrary(renderer.motions.root)
             installed.validate_walk_model(renderer.parameter_ids, renderer.parts)

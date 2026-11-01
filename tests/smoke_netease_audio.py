@@ -21,7 +21,7 @@ from PySide6.QtCore import QSettings, QUrl
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import QApplication
 
-from audio.remote import AudioEngine
+from deskpet.music.audio.remote import AudioEngine
 
 
 def main():
@@ -137,7 +137,7 @@ def main():
                 pump(.4)
                 assert abs(player.position() - before) <= 180, 'pause did not freeze playback position'
                 if '--route-test' in sys.argv:
-                    from audio.routing import device_id
+                    from deskpet.music.audio.routing import device_id
                     current = device_id(engine.audio.device())
                     alternatives = [d for d in engine.router.outputs if device_id(d) != current]
                     assert alternatives, 'Two active outputs are required for the routing test'
@@ -165,7 +165,7 @@ def main():
                 player.setPosition(8000)
                 wait(lambda: abs(player.position() - 8000) <= 250, 'seek while paused')
                 assert player.playbackState() == QMediaPlayer.PlaybackState.PausedState
-                from music_tools.clock import playback_snapshot
+                from deskpet.music.tools.clock import playback_snapshot
                 panel = SimpleNamespace(playback_source='netease', _player=player, engine=engine,
                     cloud_player=SimpleNamespace(current=dict(id='123', title='合成静音'),
                                                   media_ready=True, trial_offset=60000))

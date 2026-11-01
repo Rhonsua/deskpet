@@ -17,9 +17,9 @@ from PySide6.QtCore import QSettings
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtTest import QTest
-from main import Pet
-from visual_style import APPEARANCE_REVISION
-from pet_chat.config import ProviderConfig
+from deskpet.app import Pet
+from deskpet.ui.appearance import APPEARANCE_REVISION
+from deskpet.chat.config import ProviderConfig
 
 
 received = []
@@ -139,7 +139,7 @@ with tempfile.TemporaryDirectory() as temp:
         assert chat.memory_input.toPlainText() == '外部角色记忆'
         chat.persona_input.undo()
         assert chat.persona_input.toPlainText() == '外部角色自己编辑的人设'
-        with patch('pet_chat.window.load_personality', side_effect=AssertionError('unchanged character reloaded')):
+        with patch('deskpet.chat.window.load_personality', side_effect=AssertionError('unchanged character reloaded')):
             chat.show_chat()
             chat.tabs.setCurrentIndex(2)
             chat.tabs.setCurrentIndex(1)

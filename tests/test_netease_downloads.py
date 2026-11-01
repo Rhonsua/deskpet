@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 import wave
 from PySide6.QtCore import QCoreApplication
-from netease_music.downloads import Downloader,export_lrc,safe_stem,MAX_BYTES
+from deskpet.music.netease.downloads import Downloader,export_lrc,safe_stem,MAX_BYTES
 
 def fixture():
     data=io.BytesIO()
@@ -46,7 +46,7 @@ class DownloadsTests(unittest.TestCase):
         self.downloader=Downloader();self.done=[];self.failed=[];self.warnings=[];self.skipped=[]
         self.downloader.skipped.connect(lambda:self.skipped.append(True))
         self.downloader.completed.connect(lambda *args:self.done.append(args));self.downloader.failed.connect(self.failed.append);self.downloader.warning.connect(self.warnings.append)
-        self.patch=patch('netease_music.downloads.validate_media_url',side_effect=lambda value:value);self.patch.start()
+        self.patch=patch('deskpet.music.netease.downloads.validate_media_url',side_effect=lambda value:value);self.patch.start()
     def tearDown(self):self.downloader.cancel();self.patch.stop();self.temp.cleanup()
     def start(self,path,**kwargs):self.downloader.start(f'http://127.0.0.1:{self.server.server_port}'+path,self.directory,'test','mp3',**kwargs)
     def wait(self):
@@ -84,7 +84,7 @@ class DownloadsTests(unittest.TestCase):
         audio,lrc=map(Path,self.done[0]);self.assertEqual(audio.name,'test (1).wav');self.assertEqual(lrc.stem,audio.stem)
         self.assertEqual(lrc.read_text(),'new');self.assertEqual((self.directory/'test.lrc').read_text(),'old')
     def test_lyric_write_failure_keeps_audio(self):
-        with patch('netease_music.downloads.export_lrc',side_effect=OSError('disk full')):
+        with patch('deskpet.music.netease.downloads.export_lrc',side_effect=OSError('disk full')):
             self.start('/audio',lrc='new');self.wait()
         self.assertTrue(self.done);self.assertTrue(self.warnings);self.assertEqual(self.done[0][1],'')
         self.assertTrue(Path(self.done[0][0]).is_file())
@@ -142,7 +142,7 @@ class DownloadsTests(unittest.TestCase):
     def test_failed_atomic_replace_preserves_old_audio(self):
         audio=self.directory/'test.wav';audio.write_bytes(b'old')
         self.downloader.resolve_conflict=lambda paths:'overwrite'
-        with patch('netease_music.downloads.os.replace',side_effect=PermissionError('in use')):
+        with patch('deskpet.music.netease.downloads.os.replace',side_effect=PermissionError('in use')):
             self.start('/audio');self.wait()
         self.assertTrue(self.failed);self.assertEqual(audio.read_bytes(),b'old')
         self.assertEqual(list(self.directory.iterdir()),[audio])

@@ -4,8 +4,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from music_lyrics.parser import parse_lrc, parse_srt, MAX_TEXT
-from music_lyrics.store import LyricsStore, read_lyric_file, validate_source
+from deskpet.music.lyrics.parser import parse_lrc, parse_srt, MAX_TEXT
+from deskpet.music.lyrics.store import LyricsStore, read_lyric_file, validate_source
 
 
 class ParserTests(unittest.TestCase):
@@ -118,7 +118,7 @@ class StoreTests(unittest.TestCase):
             self.store.offset(self.source, 600001)
 
     def test_bilibili_bv_av_and_part_limits_match_video_url(self):
-        from bilibili_links import video_url
+        from deskpet.music.players.bilibili_links import video_url
         for video in ('BV1synthetic', 'av12345'):
             for part in (1, 2, 10000):
                 key = f'bilibili:{video}:{part}'

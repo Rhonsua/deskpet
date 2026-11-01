@@ -11,10 +11,10 @@ from unittest.mock import Mock, patch
 from PySide6.QtCore import QCoreApplication, QUrl
 from PySide6.QtNetwork import QNetworkReply, QNetworkRequest, QSslSocket
 
-from netease_music.client import Client
-from netease_music.direct import cookie_header, cookie_values, qr_url, request_values, response_cookie, validate_url, prepare_request
-from netease_music.service import ApiError, Request, Service, SessionExpired
-from netease_music.storage import Cache, session_data
+from deskpet.music.netease.client import Client
+from deskpet.music.netease.direct import cookie_header, cookie_values, qr_url, request_values, response_cookie, validate_url, prepare_request
+from deskpet.music.netease.service import ApiError, Request, Service, SessionExpired
+from deskpet.music.netease.storage import Cache, session_data
 from tests.test_netease_music import drive
 
 
@@ -26,7 +26,7 @@ class NeteaseDirectTests(unittest.TestCase):
         from Crypto.Cipher import AES
         from Crypto.Util.Padding import unpad
         for path in ('login/qrcode/unikey', 'login/qrcode/client/login', 'w/nuser/account/get'):
-            with self.subTest(path=path), patch('netease_music.direct.secrets.choice', return_value='a'):
+            with self.subTest(path=path), patch('deskpet.music.netease.direct.secrets.choice', return_value='a'):
                 address, wire, cookie = prepare_request('https://music.163.com/api/' + path,
                                                        dict(type=3, key='fake-key'), DIRECT['cookie'])
                 self.assertEqual(address, 'https://music.163.com/weapi/' + path)

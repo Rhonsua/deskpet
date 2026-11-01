@@ -2,7 +2,7 @@
 from copy import deepcopy
 import unittest
 
-from pet_chat.scope import companion_history, request_refusal, response_refusal
+from deskpet.chat.scope import companion_history, request_refusal, response_refusal
 
 
 def turn(user, assistant):

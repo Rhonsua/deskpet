@@ -17,8 +17,8 @@ import imageio_ffmpeg
 from PySide6.QtCore import QSettings, QUrl, QEvent, QCoreApplication
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import QApplication
-from main import MusicPanel
-from audio.routing import device_id
+from deskpet.app import MusicPanel
+from deskpet.music.audio.routing import device_id
 
 
 def wait_for(condition, timeout=15):

@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace as Box
-from music_tools.clock import playback_snapshot, bilibili_key, beat_values, apply_music_beat
+from deskpet.music.tools.clock import playback_snapshot, bilibili_key, beat_values, apply_music_beat, singing_beat_time
 
 
 class MusicClockTests(unittest.TestCase):
@@ -66,6 +66,34 @@ class MusicClockTests(unittest.TestCase):
         self.assertEqual(left['ParamAngleX'], original['ParamAngleX'])
         self.assertEqual(left['MicVisible'], 1)
         self.assertEqual(apply_music_beat(original, None), original)
+
+    def test_upper_body_follows_same_beat_without_moving_mic_arm(self):
+        original = dict(ParamAngleX=18, ParamBodyAngleX=6, ParamArmLSwing=7,
+                        ParamMouthOpenY=.4, MicVisible=1)
+        on_beat = apply_music_beat(original, Box(available=True, beat_index=0, phase=0))
+        between = apply_music_beat(original, Box(available=True, beat_index=0, phase=.5))
+        opposite = apply_music_beat(original, Box(available=True, beat_index=1, phase=.5))
+        self.assertEqual(on_beat['ParamAngleY'], -5)
+        self.assertEqual(between['ParamAngleY'], 0)
+        for key in ('ParamAngleZ', 'ParamSingArm'):
+            self.assertGreater(between[key], 0)
+            self.assertAlmostEqual(between[key], -opposite[key])
+        for key in ('ParamArmLSwing', 'ParamMouthOpenY', 'MicVisible', 'ParamAngleX'):
+            self.assertEqual(between[key], original[key])
+        self.assertNotIn('ParamSingArm', original)
+
+    def test_beat_wrap_is_continuous_and_turn_is_seek_deterministic(self):
+        keys = ('ParamAngleY', 'ParamAngleZ', 'ParamSingArm', 'ParamBodyAngleZ')
+        for index in (0, 1, 7, 8):
+            before = apply_music_beat({}, Box(available=True, beat_index=index, phase=1-1e-7))
+            after = apply_music_beat({}, Box(available=True, beat_index=index+1, phase=0))
+            for key in keys:
+                self.assertAlmostEqual(before[key], after[key], places=4)
+        beat = Box(available=True, beat_index=3, phase=.25)
+        self.assertEqual(singing_beat_time(1, beat), singing_beat_time(999, beat))
+        self.assertEqual(singing_beat_time(7, None), 7)
+        self.assertEqual(singing_beat_time(7, Box(available=False)), 7)
+        self.assertEqual(singing_beat_time(1, Box(available=True, beat_index=8, phase=0)), 0)
 
 
 if __name__ == '__main__':

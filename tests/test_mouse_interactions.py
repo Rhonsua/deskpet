@@ -1,9 +1,9 @@
 import unittest
-from mouse_interactions import (MouseInteractions, ActiveHeadPetting,
+from deskpet.animation.mouse_interactions import (MouseInteractions, ActiveHeadPetting,
                                 apply_active_petting, apply_mouse_reaction, REACTION_SECONDS)
-from live2d_motion import MotionLibrary
-from live2d_renderer import MODEL_ROOT
-from pet_behavior import PetBehavior
+from deskpet.animation.live2d_motion import MotionLibrary
+from deskpet.animation.live2d_renderer import MODEL_ROOT
+from deskpet.pet.behavior import PetBehavior
 
 
 class MouseInteractionTests(unittest.TestCase):

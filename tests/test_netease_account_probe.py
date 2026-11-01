@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
 
-from netease_music.account_probe import AccountProbe, NoRedirect, verify_browser_cookie
+from deskpet.music.netease.account_probe import AccountProbe, NoRedirect, verify_browser_cookie
 
 
 class AccountProbeTests(unittest.TestCase):
@@ -15,7 +15,7 @@ class AccountProbeTests(unittest.TestCase):
         response.__exit__ = Mock(return_value=False)
         return response
 
-    @patch('netease_music.account_probe.build_opener')
+    @patch('deskpet.music.netease.account_probe.build_opener')
     def test_verifies_encrypted_fixed_origin_with_current_cookie(self, opener):
         opener.return_value.open.return_value = self.response(
             dict(code=200, profile=dict(userId=77, nickname='测试账号')))
@@ -30,7 +30,7 @@ class AccountProbeTests(unittest.TestCase):
         self.assertEqual(opener.return_value.open.call_args.kwargs, dict(timeout=8))
         self.assertIsInstance(opener.call_args.args[0], NoRedirect)
 
-    @patch('netease_music.account_probe.build_opener')
+    @patch('deskpet.music.netease.account_probe.build_opener')
     def test_empty_rejected_and_malformed_are_not_logins(self, opener):
         for body, stage in [
             ({'code': 200, 'profile': None}, 'verification_session'),
@@ -44,7 +44,7 @@ class AccountProbeTests(unittest.TestCase):
                 opener.return_value.open.return_value = self.response(body)
                 self.assertEqual(verify_browser_cookie('MUSIC_U=synthetic-only'), (None, stage))
 
-    @patch('netease_music.account_probe.build_opener')
+    @patch('deskpet.music.netease.account_probe.build_opener')
     def test_network_errors_do_not_expose_raw_details(self, opener):
         for error, stage in [(URLError('secret'), 'verification_network'),
                              (HTTPError('secret', 403, 'secret', {}, None), 'verification_rejected')]:

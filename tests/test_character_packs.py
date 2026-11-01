@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from PySide6.QtGui import QImage
-from character_packs import read_pack, validate_images, builtin_sources, discover_packs, selected_folder
+from deskpet.pet.characters import read_pack, validate_images, builtin_sources, discover_packs, selected_folder
 
 
 class CharacterPackTests(unittest.TestCase):

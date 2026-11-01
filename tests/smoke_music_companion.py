@@ -12,9 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QObject, QSettings, QUrl
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QMessageBox
-from main import Pet
-from audio.remote import RemotePlayer
-from visual_style import APPEARANCE_REVISION
+from deskpet.app import Pet
+from deskpet.music.audio.remote import RemotePlayer
+from deskpet.ui.appearance import APPEARANCE_REVISION
 
 
 class Startup:
@@ -91,7 +91,7 @@ with tempfile.TemporaryDirectory(prefix='music-companion-') as temporary:
         companion.open(0)
         assert companion.window.isVisible() and companion.cloud is not None
         assert companion.cloud.client.reply is None  # Opening a page never makes a network request.
-        with patch('music_tools.companion.QMessageBox.question', return_value=QMessageBox.StandardButton.Yes):
+        with patch('deskpet.music.tools.companion.QMessageBox.question', return_value=QMessageBox.StandardButton.Yes):
             companion.online_lyrics('123', '人工云歌曲', '[00:00.00]云歌词测试\n[00:01.00]云歌词测试二')
         assert companion.bindings['123'] == 'local:' + str(song)
         assert companion.lyrics.store.binding(companion.snapshot.source_key)['song_id'] == '123'

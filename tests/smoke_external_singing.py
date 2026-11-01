@@ -13,9 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QTransform
 from PySide6.QtWidgets import QApplication, QWidget
-from character_packs import STATES, read_pack, validate_images
-from desktop_pet import DesktopPet
-from pet_behavior import PetBehavior
+from deskpet.pet.characters import STATES, read_pack, validate_images
+from deskpet.pet.desktop import DesktopPet
+from deskpet.pet.behavior import PetBehavior
 
 
 class SpriteCanvas(QWidget):

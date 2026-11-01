@@ -10,8 +10,8 @@ from PySide6.QtCore import QSettings, QPoint, Qt
 from PySide6.QtGui import QImage, QPainter, QColor
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
-from main import Pet
-from pet_behavior import PetBehavior
+from deskpet.app import Pet
+from deskpet.pet.behavior import PetBehavior
 
 app = QApplication([])
 
@@ -113,7 +113,7 @@ with tempfile.TemporaryDirectory(prefix='test-', dir=output) as temp:
         pet.set_mouse_passthrough(False)
         pet.panel.appearance.setCurrentIndex(pet.panel.appearance.findData('refined'))
         assert pet.variant == 'refined' and pet.live2d_renderer is None
-        from visual_style import preferred_variant
+        from deskpet.ui.appearance import preferred_variant
         reopened_settings = QSettings(str(Path(temp) / 'settings.ini'), QSettings.Format.IniFormat)
         assert preferred_variant(reopened_settings) == 'refined', 'static selection must survive restart'
         assert pet.set_variant('live2d'), pet.panel.character_note.text()
@@ -131,7 +131,7 @@ with tempfile.TemporaryDirectory(prefix='test-', dir=output) as temp:
         b = renderer.frame('sleep', 0)
         assert a == b, 'resting pose must ignore pointer tracking'
         renderer.pointer = (0, 0, 0)
-        from music_beats import BeatSample
+        from deskpet.music.beats import BeatSample
         left_beat = BeatSample(0, .5, True, 120)
         right_beat = BeatSample(1, .5, True, 120)
         left_frame = renderer.frame('sing', .7, left_beat)

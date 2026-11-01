@@ -5,7 +5,7 @@ import unittest
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtWidgets import QApplication
-from glove_cursor import (ART_ROOT, HAND_CANVAS_WIDTH, HAND_CANVAS_HEIGHT,
+from deskpet.animation.glove_cursor import (ART_ROOT, HAND_CANVAS_WIDTH, HAND_CANVAS_HEIGHT,
                           HAND_CONTACT_ANCHOR, GLOVE_HOTSPOT, GLOVE_SIZE,
                           glove_pixmap, make_glove_cursor, hand_pixmap, hand_contact_anchor)
 

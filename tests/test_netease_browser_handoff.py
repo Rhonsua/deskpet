@@ -6,8 +6,8 @@ import weakref
 from unittest.mock import Mock
 
 from PySide6.QtCore import QCoreApplication, QEvent, QProcess
-from netease_music.browser_login import BrowserLogin
-from netease_player_worker import page_state
+from deskpet.music.netease.browser_login import BrowserLogin
+from deskpet.music.players.netease_player_worker import page_state
 
 
 class BrowserHandoffTests(unittest.TestCase):

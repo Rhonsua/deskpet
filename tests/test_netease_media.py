@@ -1,8 +1,8 @@
 """Normal media metadata, trial handling and CDN boundaries; no audio IO."""
 import unittest
 
-from netease_music.media import media_info, validate_media_url
-from netease_music.service import ApiError, Service, SessionExpired
+from deskpet.music.netease.media import media_info, validate_media_url
+from deskpet.music.netease.service import ApiError, Service, SessionExpired
 from tests.test_netease_music import SESSION, drive, song
 
 

@@ -1,7 +1,7 @@
 import unittest
 from PySide6.QtCore import QCoreApplication, QObject, QUrl, Signal
 from PySide6.QtMultimedia import QMediaPlayer as MP
-from audio.output_switch import OutputSwitch
+from deskpet.music.audio.output_switch import OutputSwitch
 
 
 class Player(QObject):

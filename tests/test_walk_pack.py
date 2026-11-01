@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from PySide6.QtGui import QImage
 
-from character_packs import read_pack, validate_images, validate_walk_images
+from deskpet.pet.characters import read_pack, validate_images, validate_walk_images
 
 
 class WalkPackTests(unittest.TestCase):

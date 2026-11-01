@@ -1,6 +1,6 @@
 import json
 import unittest
-from bilibili_links import video_url, load_web_tracks, EndLatch
+from deskpet.music.players.bilibili_links import video_url, load_web_tracks, EndLatch
 
 
 class BilibiliLinksTests(unittest.TestCase):

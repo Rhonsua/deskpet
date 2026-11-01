@@ -7,7 +7,7 @@ import unittest
 import uuid
 from pathlib import Path
 
-from windows_startup import WindowsStartup, launch_command, winreg
+from deskpet.runtime.startup import WindowsStartup, launch_command, winreg
 
 
 @unittest.skipUnless(os.name == 'nt', 'Windows-specific launch and registry tests')
@@ -57,7 +57,7 @@ class StartupTests(unittest.TestCase):
     def test_packaged_app_does_not_need_python_script(self):
         command = launch_command(r'C:\天依 桌宠\deskpet.exe', frozen=True)
         self.assertTrue(command.endswith(' --autostart'))
-        self.assertNotIn('main.py', command)
+        self.assertNotIn('deskpet/app.py', command)
 
 
 if __name__ == '__main__':

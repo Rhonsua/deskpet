@@ -9,8 +9,8 @@ import tempfile
 import unittest
 import wave
 from PySide6.QtCore import QCoreApplication
-from music_beats import BeatController
-from music_beats.core import estimate
+from deskpet.music.beats import BeatController
+from deskpet.music.beats.core import estimate
 
 class BeatsTests(unittest.TestCase):
     @classmethod
@@ -75,7 +75,7 @@ class BeatsTests(unittest.TestCase):
         self.assertAlmostEqual(data['bpm'],120)
         self.assertGreater(len(data['beats_ms']),20)
     def test_netease_manual_bpm_has_no_local_audio_analysis(self):
-        from music_beats.core import netease_source_id
+        from deskpet.music.beats.core import netease_source_id
         self.assertEqual(netease_source_id('netease:123'),'123')
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as root:
             controller=BeatController(root);controller.set_enabled(True);controller.set_source('netease:123')
@@ -129,7 +129,7 @@ class BeatsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as root:
             audio=Path(root)/'fixture.wav';make_wav(audio)
             c=BeatController(root);c.set_enabled(True);c.set_source('local:'+str(audio.resolve()))
-            with patch('music_beats.controller.sys.executable',str(Path(root)/'missing-python.exe')):
+            with patch('deskpet.music.beats.controller.sys.executable',str(Path(root)/'missing-python.exe')):
                 c.analyze()
                 end=time.monotonic()+3
                 while c.process is not None and time.monotonic()<end:
@@ -142,7 +142,7 @@ class BeatsTests(unittest.TestCase):
     def test_decode_wav(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as root:
             path=Path(root)/'pulses.wav';make_wav(path)
-            proc=subprocess.run([sys.executable,'-m','music_beats.worker',str(path)],capture_output=True,text=True,timeout=40,encoding='utf-8')
+            proc=subprocess.run([sys.executable,'-m','deskpet.music.beats.worker',str(path)],capture_output=True,text=True,timeout=40,encoding='utf-8')
             messages=[json.loads(line) for line in proc.stdout.splitlines() if line.startswith('{')]
             results=[m['data'] for m in messages if m['type']=='result']
             self.assertTrue(results,(proc.stdout,proc.stderr))
@@ -151,7 +151,7 @@ class BeatsTests(unittest.TestCase):
     def test_opposite_phase_stereo_does_not_become_silence(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as root:
             path=Path(root)/'opposite-stereo.wav';make_wav(path,rate=48000,channels=2,anti_phase=True)
-            proc=subprocess.run([sys.executable,'-m','music_beats.worker',str(path)],capture_output=True,text=True,timeout=20,encoding='utf-8')
+            proc=subprocess.run([sys.executable,'-m','deskpet.music.beats.worker',str(path)],capture_output=True,text=True,timeout=20,encoding='utf-8')
             messages=[json.loads(line) for line in proc.stdout.splitlines() if line.startswith('{')]
             results=[m['data'] for m in messages if m['type']=='result']
             self.assertEqual(len(results),1,(proc.stdout,proc.stderr))
@@ -162,7 +162,7 @@ class BeatsTests(unittest.TestCase):
     def test_invalid_audio_emits_one_failure_without_later_analysis(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as root:
             path=Path(root)/'broken.mp3';path.write_bytes(b'not an audio file')
-            proc=subprocess.run([sys.executable,'-m','music_beats.worker',str(path)],capture_output=True,text=True,timeout=10,encoding='utf-8')
+            proc=subprocess.run([sys.executable,'-m','deskpet.music.beats.worker',str(path)],capture_output=True,text=True,timeout=10,encoding='utf-8')
             terminal=[json.loads(line) for line in proc.stdout.splitlines() if line.startswith('{')
                       and json.loads(line).get('type') in ('error','result')]
             self.assertEqual(len(terminal),1,(proc.stdout,proc.stderr))

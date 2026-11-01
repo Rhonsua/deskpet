@@ -1,8 +1,20 @@
 import unittest
-from pet_behavior import PetBehavior
+from deskpet.pet.behavior import PetBehavior
 
 
 class BehaviorTests(unittest.TestCase):
+    def test_landing_finishes_before_new_intent_or_reaction(self):
+        state=PetBehavior()
+        state.begin_drag();state.end_drag()
+        state.set_mode('sleep')
+        self.assertEqual(state.activity,'land')
+        state.react('happy',1)
+        self.assertEqual(state.activity,'land')
+        state.tick(.65)
+        self.assertEqual(state.activity,'happy')
+        state.tick(1)
+        self.assertEqual(state.activity,'sleep')
+
     def test_walk_is_discarded_on_drag_without_changing_saved_mode(self):
         state = PetBehavior('listen')
         self.assertTrue(state.begin_walk('left'))

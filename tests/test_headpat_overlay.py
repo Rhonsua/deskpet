@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QPainter, QPixmap, QRegion
 from PySide6.QtWidgets import QApplication, QWidget
-from desktop_pet import DesktopPet
+from deskpet.pet.desktop import DesktopPet
 
 
 class OverlayTests(unittest.TestCase):
@@ -106,8 +106,9 @@ class OverlayTests(unittest.TestCase):
             toolbar=SimpleNamespace(hide=lambda: None),
             behavior=SimpleNamespace(has_action=lambda _: False),
             bubble=SimpleNamespace(say=messages.append),
-            end_petting=lambda: exits.append(True), glove_cursor_cache={})
-        with patch('glove_cursor.hand_pixmap', side_effect=ValueError('missing')):
+            end_petting=lambda: exits.append(True), stop_roaming=lambda: None,
+            glove_cursor_cache={})
+        with patch('deskpet.animation.glove_cursor.hand_pixmap', side_effect=ValueError('missing')):
             DesktopPet.start_petting(state)
         self.assertEqual(exits, [True])
         self.assertIn('素材', messages[0])

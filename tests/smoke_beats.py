@@ -9,7 +9,7 @@ import sys
 import tempfile
 import time
 from PySide6.QtWidgets import QApplication
-from music_beats import BeatController
+from deskpet.music.beats import BeatController
 from tests.test_beats import make_wav
 
 def run():

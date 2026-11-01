@@ -10,7 +10,7 @@ os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QSettings, QProcess
 from PySide6.QtWidgets import QApplication
-from main import MusicPanel
+from deskpet.app import MusicPanel
 
 
 app = QApplication([])
@@ -21,7 +21,7 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-loops-', ignore_cleanup_erro
                        settings=QSettings(str(Path(scratch)/'test.ini'), QSettings.Format.IniFormat))
     web = panel.bilibili
     if '--packaged' in sys.argv:
-        import bilibili_player
+        import deskpet.music.players.bilibili_player as bilibili_player
         worker = Path(__file__).resolve().parents[1] / 'dist' / 'TianyiPet' / 'TianyiWorker.exe'
         assert worker.is_file()
         bilibili_player.worker_command = lambda _: (str(worker), ['--web-worker'])

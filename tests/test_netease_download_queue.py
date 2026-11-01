@@ -2,8 +2,8 @@
 from types import SimpleNamespace
 import unittest
 
-from netease_music.download_queue import NeteaseDownloads
-from netease_music.service import ApiError, SessionExpired
+from deskpet.music.netease.download_queue import NeteaseDownloads
+from deskpet.music.netease.service import ApiError, SessionExpired
 
 
 ITEM = dict(id='123', title='合成曲目', artists='人工测试')

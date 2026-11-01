@@ -4,7 +4,11 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import sys
 import zipfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from deskpet.version import VERSION
 
 
 def build(version):
@@ -15,7 +19,7 @@ def build(version):
     for name in ('TianyiPet.exe', 'TianyiWorker.exe', '_internal/assets/live2d/tianyi/action-map.json'):
         if not (bundle / name).is_file():
             raise ValueError('Build the PyInstaller bundle first: ' + name)
-    notes = root / 'docs' / (version + '更新公告.txt')
+    notes = root / 'docs/release-notes' / (version + '更新公告.txt')
     if not notes.is_file():
         raise ValueError('Missing release notes: ' + str(notes))
     output = root / 'dist' / ('TianyiPet-' + version + '-portable.zip')
@@ -42,5 +46,5 @@ def build(version):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--version', default='0.5.0')
+    parser.add_argument('--version', default=VERSION)
     build(parser.parse_args().version)
