@@ -94,6 +94,119 @@ class WorkspaceTests(unittest.TestCase):
             self.assertEqual(b.log.messages,[])
             restored.shutdown()
 
+    def test_new_button_reuses_empty_conversation_in_current_project(self):
+        with tempfile.TemporaryDirectory() as folder,patch('deskpet.chat.work_client.WorkClient',FakeClient):
+            w=Workspaces(lambda:'config',folder)
+            first=w.add_project(folder)
+            w.new_button.click();w.new_compact.click()
+            self.assertEqual(len(w.pages),1)
+            self.assertIs(w.stack.currentWidget(),first)
+            first.log.append_message('user','先看看项目结构')
+            empty=w.new_conversation()
+            other=w.add_project(str(Path(folder)/'other'))
+            w.new_button.click()
+            self.assertIs(w.stack.currentWidget(),other)
+            w.select_conversation(first.conversation_id)
+            w.search.setText('找不到的对话')
+            w.new_button.click()
+            self.assertIs(w.stack.currentWidget(),empty)
+            self.assertEqual(len(w.pages),3)
+            self.assertEqual(w.search.text(),'')
+            empty.prompt.setPlainText('还没发出的草稿')
+            fresh=w.new_conversation()
+            self.assertIsNot(fresh,empty)
+            self.assertEqual(empty.prompt.toPlainText(),'还没发出的草稿')
+            self.assertEqual(len(w.pages),4)
+            w.shutdown()
+
+    def test_empty_placeholders_are_not_saved_but_empty_projects_can_be_reopened(self):
+        with tempfile.TemporaryDirectory() as folder,patch('deskpet.chat.work_client.WorkClient',FakeClient):
+            w=Workspaces(lambda:'config',folder)
+            used=w.add_project(folder);used.log.append_message('user','检查文件')
+            unused=w.new_conversation();unused.prompt.setPlainText('  \n ')
+            empty_project=w.add_project(str(Path(folder)/'empty'))
+            project_key=empty_project.project_key
+            w.save()
+            data=json.loads(w.path.read_text('utf8'))
+            self.assertEqual([p['id'] for p in data['projects'][0]['conversations']],[used.conversation_id])
+            self.assertEqual(data['projects'][0]['selected'],used.conversation_id)
+            self.assertEqual(data['projects'][1]['conversations'],[])
+            self.assertIsNone(data['selected'])
+            self.assertEqual(data['selected_project'],project_key)
+            w.shutdown()
+            self.assertNotIn(unused.conversation_id,w.pages)
+            restored=Workspaces(lambda:'config',folder)
+            self.assertTrue(restored.storage_ok)
+            self.assertEqual(len(restored.pages),1)
+            self.assertEqual(restored.selected_project_key,project_key)
+            self.assertIs(restored.stack.currentWidget(),restored.empty)
+            self.assertFalse(restored.project_items[project_key].isHidden())
+            with patch.object(restored,'choose_project') as choose:
+                restored.new_button.click()
+                choose.assert_not_called()
+            current=restored.stack.currentWidget()
+            self.assertEqual(current.project_key,project_key)
+            restored.shutdown()
+            self.assertEqual(json.loads(restored.path.read_text('utf8'))['projects'][1]['conversations'],[])
+
+    def test_legacy_empty_conversations_are_removed_without_losing_drafts_or_history(self):
+        with tempfile.TemporaryDirectory() as folder,patch('deskpet.chat.work_client.WorkClient',FakeClient):
+            path=Path(folder)/'work-projects.json'
+            path.write_text(json.dumps({'version':2,'selected':'empty2','projects':[{
+                'folder':folder,'selected':'empty2','conversations':[
+                    {'id':'history','messages':[{'role':'user','content':'已有消息'}]},
+                    {'id':'empty1','title':'新对话','draft':'','log':''},
+                    {'id':'draft','draft':'尚未发送的想法'},
+                    {'id':'empty2','title':'新对话','state':'准备就绪'}]}]}),encoding='utf8')
+            w=Workspaces(lambda:'config',folder)
+            self.assertEqual(set(w.pages),{'history','draft'})
+            self.assertEqual(w.selected_id,'draft')
+            self.assertEqual(w.pages['draft'].prompt.toPlainText(),'尚未发送的想法')
+            self.assertIn('已有消息',w.pages['history'].log.toPlainText())
+            w.shutdown()
+            data=json.loads(path.read_text('utf8'))
+            self.assertEqual([p['id'] for p in data['projects'][0]['conversations']],['history','draft'])
+
+    def test_started_task_is_never_treated_as_an_unused_placeholder(self):
+        with tempfile.TemporaryDirectory() as folder,patch('deskpet.chat.work_client.WorkClient',FakeClient):
+            w=Workspaces(lambda:'config',folder)
+            running=w.add_project(folder);running.prompt.setPlainText('检查项目');running.start()
+            running.prompt.clear();running.log.clear();running.pending_task=None
+            empty=w.new_conversation()
+            w.discard_unused()
+            self.assertNotIn(empty.conversation_id,w.pages)
+            self.assertIs(w.stack.currentWidget(),running)
+            self.assertTrue(running.is_running)
+            self.assertFalse(running.client.closed)
+            running.client.cancel()
+            w.shutdown()
+            restored=Workspaces(lambda:'config',folder)
+            self.assertIn(running.conversation_id,restored.pages)
+            self.assertFalse(restored.is_unused(restored.pages[running.conversation_id]))
+            restored.shutdown()
+
+    def test_closing_chat_discards_only_unused_work_conversations(self):
+        from types import SimpleNamespace
+        from PySide6.QtCore import QSettings
+        from deskpet.chat.window import ChatWindow
+        with tempfile.TemporaryDirectory() as folder,patch('deskpet.chat.work_client.WorkClient',FakeClient),\
+                patch('deskpet.chat.companion_runtime.CompanionRuntime'):
+            root=Path(folder)
+            pet=SimpleNamespace(panel=SimpleNamespace(data_dir=root,
+                settings=QSettings(str(root/'settings.ini'),QSettings.IniFormat)),
+                variant='refined',character_pack=None,character_name='洛天依')
+            window=ChatWindow(pet)
+            workspace=window.work_panel
+            draft=workspace.add_project(folder);draft.prompt.setPlainText('稍后继续写')
+            blank=workspace.new_conversation()
+            window.show();self.app.processEvents();window.close()
+            self.assertNotIn(blank.conversation_id,workspace.pages)
+            self.assertIs(workspace.stack.currentWidget(),draft)
+            self.assertEqual(draft.prompt.toPlainText(),'稍后继续写')
+            data=json.loads(workspace.path.read_text('utf8'))
+            self.assertEqual(len(data['projects'][0]['conversations']),1)
+            window.shutdown()
+
     def test_legacy_history_is_migrated_with_one_exact_backup(self):
         with tempfile.TemporaryDirectory() as folder,patch('deskpet.chat.work_client.WorkClient',FakeClient):
             path=Path(folder)/'work-projects.json'
@@ -140,12 +253,19 @@ class WorkspaceTests(unittest.TestCase):
             w.add_project(folder)
             w.resize(960,700);w.show();self.app.processEvents()
             self.assertTrue(w.sidebar.isVisible())
+            self.assertTrue(w.new_button.isVisible())
+            self.assertFalse(w.new_compact.isVisible())
             w.resize(590,600);self.app.processEvents()
             self.assertFalse(w.sidebar.isVisible())
             self.assertTrue(w.sidebar_button.isVisible())
+            self.assertFalse(w.new_button.isVisible())
+            self.assertTrue(w.new_compact.isVisible())
             w.resize(960,700);self.app.processEvents()
             self.assertTrue(w.sidebar.isVisible())
-            w.toggle_sidebar();w.shutdown();w.close()
+            self.assertFalse(w.new_compact.isVisible())
+            w.toggle_sidebar()
+            self.assertTrue(w.new_compact.isVisible())
+            w.shutdown();w.close()
             restored=Workspaces(lambda:'config',folder)
             restored.resize(960,700);restored.show();self.app.processEvents()
             self.assertFalse(restored.sidebar.isVisible())

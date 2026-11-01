@@ -740,6 +740,8 @@ class ChatWindow(ChatSurface):
         if not self.save_profile(quiet=True) or not self.save_profile_drafts():
             event.ignore()
             return
+        self.work_panel.discard_unused()
+        self.work_panel.save()
         event.accept()
 
     def shutdown(self):
