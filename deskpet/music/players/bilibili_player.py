@@ -7,7 +7,7 @@ import uuid
 
 from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, Signal, Qt
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-                              QLabel, QListWidget, QLineEdit, QComboBox)
+                              QLabel, QListWidget, QLineEdit, QComboBox, QCheckBox)
 from deskpet.music.players.bilibili_links import video_url, load_web_tracks, EndLatch
 from deskpet.music.tools.library import PlaybackQueue, MODES
 from deskpet.ui.theme import style_combo
@@ -24,9 +24,15 @@ class BilibiliPlayer(QWidget):
         self.settings = owner.settings
         self.tracks = load_web_tracks(self.settings.value('bilibili_tracks', ''))
         self.queue = PlaybackQueue(self.settings.value('bilibili_mode', 'order'))
-        self.current_url = ''
+        saved_url = self.settings.value('bilibili_current_url', '')
+        urls = [track['url'] for track in self.tracks]
+        self.current_url = saved_url if saved_url in urls else ''
+        if self.current_url:
+            self.queue.reset(urls, urls.index(self.current_url))
         self.hidden = False
         self.active = self.playing = self.ready = self.closing = False
+        self.requested_play = False
+        self.play_intent_pending = False
         self.metrics = {}
         self.last_report = 0
         self.pending_load = None
@@ -92,6 +98,15 @@ class BilibiliPlayer(QWidget):
         self.note.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.note)
         self.render()
+        self.alternate_toggle = QCheckBox('本地 / B站轮流循环')
+        self.alternate_toggle.setToolTip('与音乐页当前本地歌单轮流播放，每边一首，循环继续。')
+        self.alternate_toggle.setChecked(self.settings.value('music/alternate_sources', False, type=bool))
+        self.alternate_toggle.toggled.connect(lambda enabled: self.owner.set_alternating(enabled))
+        layout.insertWidget(1, self.alternate_toggle)
+        if self.current_url:
+            self.list.setCurrentRow(urls.index(self.current_url))
+            track = self.tracks[urls.index(self.current_url)]
+            self.title.setText(track['title'] or self.current_url)
 
     def render(self):
         selected = self.list.currentRow()
@@ -105,6 +120,7 @@ class BilibiliPlayer(QWidget):
     def save(self):
         self.settings.setValue('bilibili_tracks', json.dumps(self.tracks, ensure_ascii=False))
         self.settings.setValue('bilibili_mode', self.queue.mode)
+        self.settings.setValue('bilibili_current_url', self.current_url)
         self.settings.sync()
 
     def add_link(self):
@@ -160,16 +176,25 @@ class BilibiliPlayer(QWidget):
         selected = video_url(self.queue.paths[index])
         restart = self.active and self.current_url == selected
         self.current_url = selected
+        row = next((i for i, track in enumerate(self.tracks) if track['url'] == selected), -1)
+        if row >= 0:
+            self.list.setCurrentRow(row)
         title = next((track['title'] for track in self.tracks if track['url'] == self.current_url), '')
         self.title.setText(title or self.current_url)
         self.latch.reset(uuid.uuid4().hex)
         self.metrics = {}
         self.last_report = 0
         self.active, self.playing = True, False
+        self.requested_play = True
+        self.play_intent_pending = True
         self.starting.emit()
         self.playbackChanged.emit(False)
         self.pending_load = {'cmd': 'load', 'url': self.current_url, 'token': self.latch.token,
-                             'volume': self.owner.volume.value() / 100, 'restart': restart}
+                             'volume': self.owner.volume.value() / 100, 'restart': restart, 'autoplay': True}
+        alternating = getattr(self.owner, 'alternating', None)
+        if alternating is not None:
+            alternating.remember('web', self.current_url)
+        self.save()
         self.note.setText('正在打开 B站网页；如果未自动播放，请在网页点一次播放。')
         if self.process.state() == QProcess.ProcessState.NotRunning:
             self.start_process()
@@ -199,14 +224,20 @@ class BilibiliPlayer(QWidget):
             self.pending_load = None
 
     def toggle(self):
-        if not self.active:
+        selected = self.list.currentRow()
+        if (self.active and 0 <= selected < len(self.tracks)
+                and self.tracks[selected]['url'] != self.current_url):
+            self.play_row(selected)
+        elif not self.active or (not self.pending_load and self.process.state() == QProcess.ProcessState.NotRunning):
             self.play_row(max(0, self.list.currentRow()))
         else:
-            self.send({'cmd': 'pause' if self.playing else 'play'})
+            self.set_playing(not self.requested_play)
 
     def set_playing(self, playing):
         """Idempotent chat controls; pause also wins during initial worker boot."""
-        if not self.active:
+        self.requested_play = bool(playing)
+        self.play_intent_pending = True
+        if not self.active or (not self.pending_load and self.process.state() == QProcess.ProcessState.NotRunning):
             if playing:
                 self.play_row(max(0, self.list.currentRow()))
             return
@@ -216,6 +247,9 @@ class BilibiliPlayer(QWidget):
             self.send({'cmd':'play' if playing else 'pause'})
 
     def step(self, direction):
+        alternating = getattr(self.owner, 'alternating', None)
+        if alternating is not None and alternating.advance('web', direction):
+            return
         if not self.queue.paths:
             self.play_row(max(0, self.list.currentRow()))
             return
@@ -265,6 +299,12 @@ class BilibiliPlayer(QWidget):
         if kind != 'state':
             return
         self.metrics = value
+        if 'requested_play' in value:
+            requested = bool(value['requested_play'])
+            if requested == self.requested_play:
+                self.play_intent_pending = False
+            elif not self.play_intent_pending:
+                self.requested_play = requested
         self.last_report = time.monotonic()
         self.playing = bool(value.get('playing'))
         title = str(value.get('title', ''))[:200]
@@ -286,7 +326,10 @@ class BilibiliPlayer(QWidget):
             self.note.setText('正在从头播放，纠正网页历史续播进度…')
         elif not value.get('ended'):
             self.note.setText('视频已暂停；若网页阻止自动播放，请在网页点一次播放。')
-        if self.latch.accept(value):
+        if self.requested_play and self.latch.accept(value):
+            alternating = getattr(self.owner, 'alternating', None)
+            if alternating is not None and alternating.advance('web'):
+                return
             index = self.queue.advance(ended=True)
             if index is None:
                 self.stop()
@@ -296,6 +339,8 @@ class BilibiliPlayer(QWidget):
 
     def stop(self, *_):
         self.active = self.playing = False
+        self.requested_play = False
+        self.play_intent_pending = False
         self.pending_load = None
         self.metrics = {}
         self.playbackChanged.emit(False)

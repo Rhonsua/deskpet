@@ -39,6 +39,7 @@ class MusicTests(unittest.TestCase):
             @property
             def player(self):return self._player
         panel=Panel();panel.pet=pet;pet.panel=panel;self.pet=pet;self.p=panel
+        panel.settings=self.owner.settings
         panel.library=library;panel.bilibili=web;panel.playback_source='local'
         panel.queue=PlaybackQueue();panel.queue_owner='';panel.failed_paths=set();panel.cloud_player=None
         panel.autoplay_requested=False;panel._player=Mock()

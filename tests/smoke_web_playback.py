@@ -1,5 +1,6 @@
 """Actual WebView2/video-ended integration using a silent, local in-memory fixture."""
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -73,6 +74,27 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-test-') as scratch:
         web.remove()
         assert len(web.queue.paths) == 1, 'removed current song must leave the queue'
         print('PASS: actual WebView2 chat start, cold-start pause/resume, ended->next, window reuse, final close and silent listening accounting')
+        # Cross real native MP3 and WebView2 players using only silent fixtures.
+        import imageio_ffmpeg
+        songs = [Path(scratch) / ('local-' + str(i) + '.mp3') for i in range(2)]
+        for song in songs:
+            subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), '-v', 'error', '-f', 'lavfi',
+                '-i', 'anullsrc=r=44100:cl=mono', '-t', '2', '-codec:a', 'libmp3lame', str(song)],
+                check=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        panel.import_paths([str(song) for song in songs])
+        panel.set_alternating(True)
+        panel.play_row(0)
+        wait_for(lambda: panel.playback_source == 'local' and panel.player.position() > 200)
+        wait_for(lambda: panel.playback_source == 'web' and web.playing)
+        wait_for(lambda: panel.playback_source == 'local' and panel.current_path() == str(songs[1])
+                 and panel.player.position() > 200)
+        wait_for(lambda: panel.playback_source == 'web' and web.playing)
+        wait_for(lambda: panel.playback_source == 'local' and panel.current_path() == str(songs[0])
+                 and panel.player.position() > 200)
+        panel.autoplay_requested = False
+        panel.player.pause()
+        panel.set_alternating(False)
+        print('PASS: real silent MP3 -> WebView2 -> next MP3 -> WebView2 -> local wrap')
     finally:
         web.watchdog.stop()
         web.shutdown()

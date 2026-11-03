@@ -68,7 +68,7 @@ class SharedMusicTests(unittest.TestCase):
     def test_main_controls_route_to_kugou_and_local_selection_deactivates_it(self):
         from unittest.mock import Mock
         cloud = Mock()
-        panel = NS(playback_source='kugou', cloud_player=cloud)
+        panel = NS(playback_source='kugou', cloud_player=cloud, settings=Mock())
         MusicPanel.toggle(panel)
         MusicPanel.step(panel, 1)
         cloud.toggle.assert_called_once()

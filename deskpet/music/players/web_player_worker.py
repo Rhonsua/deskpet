@@ -279,7 +279,7 @@ def run():
                 if command is None and hidden and requested_play and value.get('paused') and not value.get('ended'):
                     command = 'resume'
                 last_playing = bool(value.get('playing'))
-                emit({'type': 'state', **value})
+                emit({'type': 'state', **value, 'requested_play': requested_play})
             except Exception as error:
                 if time.monotonic() - started > 30:
                     emit({'type': 'waiting', 'token': token, 'message': '网页暂未就绪，请查看播放窗口'})

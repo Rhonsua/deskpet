@@ -62,7 +62,9 @@ with tempfile.TemporaryDirectory(prefix='天依 音乐 ') as scratch, ExitStack(
     subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), '-v', 'error', '-f', 'lavfi', '-i',
                     'anullsrc=r=44100:cl=mono', '-t', '12', '-codec:a', 'libmp3lame', str(song)],
                    check=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-    pet = SimpleNamespace(playing=False, set_variant=lambda _: None)
+    pet = SimpleNamespace(playing=False, set_variant=lambda _: None,
+                          set_auto_walk=lambda _: None, toggle_walk=lambda: None,
+                          set_auto_teleport=lambda _: None, open_mods=lambda: None)
     settings_file = str(Path(scratch) / 'settings.ini')
     first = MusicPanel(pet, data_dir=Path(scratch) / 'first',
                        settings=QSettings(settings_file, QSettings.Format.IniFormat))

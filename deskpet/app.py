@@ -71,6 +71,10 @@ class MusicPanel(BackgroundSurface):
         self.library_storage = LibraryStorage(self.settings, data_dir)
         self.library = self.library_storage.load(legacy if isinstance(legacy, list) else [legacy])
         self.queue = PlaybackQueue(self.settings.value('play_mode', 'order'))
+        from deskpet.music.tools.alternating import AlternatingPlayback
+        self.alternating = AlternatingPlayback(self)
+        self._local_ended = False
+        self._local_selection_requested = False
         self._audio = self._player = self._audio_router = None
         self._restore_request = None
         build(self)
@@ -96,6 +100,8 @@ class MusicPanel(BackgroundSurface):
         self.refresh_startup()
         self.refresh_growth()
         self.restore_playback()
+        self.restore_web_playback()
+        self.list.itemClicked.connect(lambda _: setattr(self, '_local_selection_requested', True))
         self.tabs.currentChanged.connect(lambda index: self.ensure_audio() if index == 2 else None)
         self.tabs.currentChanged.connect(lambda index: self.pet.refresh_characters() if index == 2
                                         and hasattr(self.pet, 'refresh_characters') else None)
@@ -204,6 +210,8 @@ class MusicPanel(BackgroundSurface):
         if self.cloud_player is not None:
             self.cloud_player.deactivate()
         self.playback_source = 'web'
+        self._local_selection_requested = False
+        self.settings.setValue('playback_source', 'web')
         self.autoplay_requested = False
         if self._player is not None:
             self._player.pause()
@@ -217,6 +225,8 @@ class MusicPanel(BackgroundSurface):
         if self.cloud_player is not None:
             self.cloud_player.deactivate()
         self.playback_source = 'local'
+        self._local_selection_requested = False
+        self.settings.setValue('playback_source', 'local')
         if self.bilibili.active:
             self.bilibili.stop()
         self.last_source = self.last_position = None
@@ -229,7 +239,7 @@ class MusicPanel(BackgroundSurface):
         self.pet.playing = playing
         self.play_button.setText('暂停' if playing else '播放')
         self.set_song_title(self.bilibili.title.text())
-        self.song_meta.setText('B站网页 · ' + MODES[self.bilibili.queue.mode])
+        self.song_meta.setText('B站网页 · ' + self.play_mode_label('web'))
         self.status.setText('B站播放中' if playing else 'B站已暂停或正在加载')
 
     def reset_audio_sample(self):
@@ -319,6 +329,53 @@ class MusicPanel(BackgroundSurface):
             self.library.active_id = identifier
             self.render_library()
             self.store_library()
+            self._local_selection_requested = True
+
+    def play_active_playlist(self):
+        row = self.list.currentRow()
+        if row < 0 or self.list.item(row).isHidden():
+            row = next((i for i in range(len(self.paths)) if not self.list.item(i).isHidden()), -1)
+        if row < 0:
+            self.status.setText('当前歌单没有可播放的歌曲，请先添加 MP3 或清除搜索条件')
+            return
+        self.play_row(row)
+
+    def toggle_library(self):
+        # The library's button must honor a newly selected playlist/song, even
+        # when another source or a restored (paused) queue is still loaded.
+        if self._local_selection_requested or (self.playback_source == 'local'
+                and self.queue_owner != self.library.active_id):
+            row = self.list.currentRow()
+            selected = self.paths[row] if 0 <= row < len(self.paths) else ''
+            self._local_selection_requested = False
+            if (self.playback_source != 'local' or self.queue_owner != self.library.active_id
+                    or selected != self.current_path()):
+                self.play_active_playlist()
+                return
+        self.toggle()
+
+    def play_mode_label(self, source='local'):
+        if self.alternating.enabled:
+            return '本地 / B站轮流循环'
+        return MODES[self.bilibili.queue.mode if source == 'web' else self.queue.mode]
+
+    def set_alternating(self, enabled):
+        self.alternating.enabled = bool(enabled)
+        self.alternating.history.clear()
+        self.alternating.history_index = -1
+        self.settings.setValue('music/alternate_sources', bool(enabled))
+        for widget in (self.alternate_toggle, self.bilibili.alternate_toggle):
+            widget.blockSignals(True)
+            widget.setChecked(bool(enabled))
+            widget.blockSignals(False)
+        if self.playback_source in ('local', 'web'):
+            key = self.current_path() if self.playback_source == 'local' else self.bilibili.current_url
+            if key:
+                self.alternating.remember(self.playback_source, key)
+            prefix = '本地 MP3' if self.playback_source == 'local' else 'B站网页'
+            self.song_meta.setText(prefix + ' · ' + self.play_mode_label(self.playback_source))
+        self.settings.sync()
+        self.status.setText('已开启：本地一首、B站一首，轮流循环' if enabled else '已恢复各自的播放模式')
 
     def new_playlist(self):
         name, ok = QInputDialog.getText(self, '新建歌单', '歌单名称')
@@ -374,7 +431,7 @@ class MusicPanel(BackgroundSurface):
         self.queue.mode = self.mode_choice.itemData(index)
         self.queue.bag = []
         self.settings.setValue('play_mode', self.queue.mode)
-        self.song_meta.setText('本地 MP3 · ' + MODES[self.queue.mode])
+        self.song_meta.setText('本地 MP3 · ' + self.play_mode_label())
         if self.cloud_player is not None:
             self.cloud_player.set_mode(self.queue.mode)
 
@@ -386,7 +443,8 @@ class MusicPanel(BackgroundSurface):
                                              QMediaPlayer.MediaStatus.BufferingMedia,
                                              QMediaPlayer.MediaStatus.BufferedMedia)
         if self.pending_seek is not None and duration > 0 and self.player.isSeekable() and ready:
-            position = min(self.pending_seek, duration)
+            # Restoring an end-of-track position makes Play immediately end.
+            position = self.pending_seek if self.pending_seek < max(0, duration - 500) else 0
             self.pending_seek = None
             self.last_position = None
             self.player.setPosition(position)
@@ -399,16 +457,36 @@ class MusicPanel(BackgroundSurface):
             return
         try:
             saved_queue = json.loads(self.settings.value('current_queue', '[]'))
-            paths = [p for p in saved_queue if isinstance(p, str) and p in known]
+            from deskpet.music.tools.library import normalized
+            paths = [p for p in normalized(saved_queue if isinstance(saved_queue, list) else []) if p in known]
         except (ValueError, TypeError):
             paths = []
         if path not in paths:
             paths.append(path)
         self.queue.reset(paths, paths.index(path))
-        self.pending_seek = max(0, int(self.settings.value('current_position', 0)))
+        saved_owner = self.settings.value('current_queue_owner', '')
+        owners = [p for p in self.library.playlists if path in p['paths']]
+        owner = next((p for p in owners if p['id'] == saved_owner), None)
+        if owner is None:
+            owner = next((p for p in owners if p['id'] == self.library.active_id), owners[0])
+        self.queue_owner = owner['id']
+        try:
+            self.pending_seek = max(0, int(self.settings.value('current_position', 0)))
+        except (ValueError, TypeError, OverflowError):
+            self.pending_seek = 0
         self._restore_request = (path, self.pending_seek)
+        self.render_library()
         self.set_song_title(Path(path).stem)
         self.status.setText('已恢复上次歌曲，点击播放继续')
+
+    def restore_web_playback(self):
+        if self.settings.value('playback_source', 'local') != 'web' or not self.bilibili.current_url:
+            return
+        # Restore metadata only: no browser, sound or network until Play.
+        self.playback_source = 'web'
+        self.set_song_title(self.bilibili.title.text())
+        self.song_meta.setText('B站网页 · ' + self.play_mode_label('web'))
+        self.status.setText('已恢复上次 B站歌曲，点击播放从头播放')
 
     def seek_to(self):
         self.last_position = None
@@ -520,6 +598,7 @@ class MusicPanel(BackgroundSurface):
         if not 0 <= row < len(self.paths):
             return
         self.activate_local()
+        self._local_selection_requested = False
         self.queue.reset(self.paths, row)
         self.queue_owner = self.library.active_id
         self.failed_paths.clear()
@@ -535,6 +614,7 @@ class MusicPanel(BackgroundSurface):
             self.failed_paths.add(path)
             return False
         self.queue.index = index
+        self._local_ended = False
         companion = getattr(self.pet, 'music_companion', None)
         if companion is not None:
             companion.preparation.cancel()
@@ -542,7 +622,8 @@ class MusicPanel(BackgroundSurface):
         self.pending_seek = max(0, position)
         self.last_position = None
         source = QUrl.fromLocalFile(path)
-        if self.player.source() == source and self.player.duration() > 0:
+        if (self.player.source() == source and self.player.duration() > 0
+                and self.player.mediaStatus() != QMediaPlayer.MediaStatus.InvalidMedia):
             self.pending_seek = None
             self.player.setPosition(max(0, position))
         else:
@@ -560,9 +641,10 @@ class MusicPanel(BackgroundSurface):
         if path in self.paths:
             self.list.setCurrentRow(self.paths.index(path))
         self.set_song_title(Path(path).stem)
-        self.song_meta.setText('本地 MP3 · ' + MODES[self.queue.mode])
+        self.song_meta.setText('本地 MP3 · ' + self.play_mode_label())
         preparing = companion is not None and companion.preparation.pending
         self.status.setText(('首次准备节拍：' if preparing else '正在播放：' if autoplay else '上次听到：') + Path(path).stem)
+        self.alternating.remember('local', path)
         self.save()
         return True
 
@@ -582,12 +664,18 @@ class MusicPanel(BackgroundSurface):
             self.autoplay_requested = False
             self.player.pause()
         elif self.player.source().isEmpty():
-            row = self.list.currentRow()
-            if row < 0:
-                row = next((i for i in range(len(self.paths)) if not self.list.item(i).isHidden()), -1)
-            self.play_row(row)
+            self.play_active_playlist()
         else:
+            if (not Path(self.current_path()).is_file()
+                    or self.player.mediaStatus() == QMediaPlayer.MediaStatus.InvalidMedia):
+                self.play_active_playlist()
+                return
+            self._local_ended = False
             self.autoplay_requested = True
+            if (self.player.mediaStatus() == QMediaPlayer.MediaStatus.EndOfMedia
+                    or self.player.duration() > 0 and self.player.position() >= self.player.duration() - 500):
+                self.pending_seek = None
+                self.player.setPosition(0)
             if companion is not None and companion.beats.enabled and self.current_path():
                 source = self.player.source()
                 companion.preparation.local(self.current_path(), lambda: self.player.play()
@@ -598,6 +686,8 @@ class MusicPanel(BackgroundSurface):
     def step(self, direction):
         if self.playback_source in ('netease', 'kugou') and self.cloud_player is not None:
             self.cloud_player.step(direction)
+            return
+        if self.alternating.advance(self.playback_source, direction):
             return
         if self.playback_source == 'web':
             self.bilibili.step(direction)
@@ -650,8 +740,14 @@ class MusicPanel(BackgroundSurface):
             self.cloud_player.media_changed(status)
             return
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            if not self.autoplay_requested or self._local_ended:
+                return
+            self._local_ended = True
+            if self.alternating.advance('local'):
+                return
             index = self.queue.advance(ended=True)
             if index is None:
+                self.autoplay_requested = False
                 self.status.setText('这个歌单听完啦')
             elif not self.start_track(index):
                 self.step(1)
@@ -665,6 +761,8 @@ class MusicPanel(BackgroundSurface):
             self.settings.setValue('current_position', self.pending_seek if self.pending_seek is not None
                                    else self._player.position() if self._player is not None else 0)
         self.settings.setValue('current_queue', json.dumps(self.queue.paths, ensure_ascii=False))
+        self.settings.setValue('current_queue_owner', self.queue_owner)
+        self.settings.setValue('playback_source', self.playback_source)
         self.settings.setValue("volume", self.volume.value())
         self.settings.sync()
 
