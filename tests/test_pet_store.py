@@ -26,7 +26,7 @@ class PetStoreTests(unittest.TestCase):
 
     def test_five_minutes_and_daily_cap(self):
         self.listen(300)
-        self.assertEqual((self.store.pet()['notes'], self.store.pet()['xp']), (22, 15))
+        self.assertEqual((self.store.pet()['notes'], self.store.pet()['xp']), (26, 15))
         self.listen(15000, start=self.start + timedelta(seconds=300))
         pet = self.store.pet()
         self.assertEqual(pet['notes'], 120)
@@ -44,10 +44,10 @@ class PetStoreTests(unittest.TestCase):
         self.listen(420)
         self.store.feed('小包子', self.start + timedelta(seconds=421))
         stats = self.store.stats(self.start)
-        self.assertEqual(stats['reward_notes'], 2)
+        self.assertEqual(stats['reward_notes'], 6)
         self.assertEqual(stats['reward_limit'], 100)
         self.assertEqual(stats['reward_remaining'], 180)
-        self.assertEqual(self.store.pet()['notes'], 14)
+        self.assertEqual(self.store.pet()['notes'], 18)
         self.listen(300, reward=False, start=self.start + timedelta(seconds=425))
         self.assertEqual(self.store.stats(self.start)['reward_remaining'], 180)
 
@@ -61,25 +61,33 @@ class PetStoreTests(unittest.TestCase):
         self.assertEqual(self.store.stats(tomorrow)['reward_notes'], 0)
         self.assertEqual(self.store.stats(tomorrow)['reward_remaining'], 300)
         self.listen(300, start=tomorrow)
-        self.assertEqual(self.store.pet()['notes'], 122)
-        self.assertEqual(self.store.stats(tomorrow)['reward_notes'], 2)
+        self.assertEqual(self.store.pet()['notes'], 126)
+        self.assertEqual(self.store.stats(tomorrow)['reward_notes'], 6)
         self.assertEqual(self.store.stats(self.start)['reward_notes'], 100)
 
     def test_existing_old_cap_can_keep_earning_after_update(self):
-        self.listen(7200)
+        # Recreate the old daily-table layout and a partially earned block.
+        self.store.db.executescript("""
+            DROP TABLE daily;
+            CREATE TABLE daily(day TEXT PRIMARY KEY, seconds REAL DEFAULT 0,
+                blocks INTEGER DEFAULT 0,bonus INTEGER DEFAULT 0,feeds INTEGER DEFAULT 0);
+            INSERT INTO daily VALUES('2026-10-17',7495,24,1,0);
+            UPDATE pet SET notes=68,progress=295;
+        """)
         self.store.close()
         self.store = PetStore(self.path)
         self.assertEqual(self.store.stats(self.start)['reward_notes'], 48)
-        self.assertEqual(self.store.stats(self.start)['reward_remaining'], 300)
-        self.listen(300, start=self.start + timedelta(seconds=7200))
+        self.assertEqual(self.store.stats(self.start)['reward_remaining'], 5)
+        self.listen(5, start=self.start + timedelta(seconds=7495))
         self.assertEqual(self.store.stats(self.start)['reward_notes'], 50)
+        self.assertEqual(self.store.pet()['notes'], 70)
 
     def test_restart_retains_partial_reward(self):
         self.listen(295)
         self.store.close()
         self.store = PetStore(self.path)
         self.store.record('song.mp3', 5, True, self.start + timedelta(seconds=300))
-        self.assertEqual(self.store.pet()['notes'], 22)
+        self.assertEqual(self.store.pet()['notes'], 26)
         self.assertEqual(self.store.pet()['progress'], 0)
 
     def test_midnight_split(self):
@@ -87,6 +95,20 @@ class PetStoreTests(unittest.TestCase):
         rows = self.store.db.execute('SELECT day,seconds FROM daily ORDER BY day').fetchall()
         self.assertEqual([(r['day'], r['seconds']) for r in rows],
                          [('2026-10-17', 2), ('2026-10-18', 2)])
+        self.assertEqual(self.store.stats(datetime(2026, 10, 18))['reward_remaining'], 298)
+
+    def test_first_hour_then_standard_rate(self):
+        self.listen(3599)
+        stats = self.store.stats(self.start)
+        self.assertEqual((stats['reward_notes'], stats['next_reward_notes'], stats['reward_remaining']), (66, 6, 1))
+        self.listen(1, start=self.start + timedelta(seconds=3599))
+        stats = self.store.stats(self.start)
+        self.assertEqual((stats['reward_notes'], stats['next_reward_notes']), (72, 2))
+        self.listen(300, start=self.start + timedelta(seconds=3600))
+        self.assertEqual(self.store.stats(self.start)['reward_notes'], 74)
+        self.listen(13 * 300, start=self.start + timedelta(seconds=3900))
+        self.assertEqual(self.store.stats(self.start)['reward_notes'], 100)
+        self.assertIsNone(self.store.stats(self.start)['reward_remaining'])
 
     def test_feed_cooldown_and_fullness(self):
         ok, _ = self.store.feed('小包子', self.start)

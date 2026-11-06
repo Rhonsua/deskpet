@@ -4,8 +4,15 @@ from datetime import datetime, timedelta
 
 FOODS = {"小包子": (8, 15, 3, 3), "小笼包": (15, 30, 6, 6), "桂花糕": (12, 15, 10, 4)}
 REWARD_SECONDS = 300
-REWARD_NOTES = 2
 DAILY_REWARD_BLOCKS = 50
+BOOST_BLOCKS = 12
+BOOST_NOTES = 6
+STANDARD_NOTES = 2
+DAILY_NOTE_LIMIT = 100
+
+
+def note_amount(completed_blocks):
+    return BOOST_NOTES if completed_blocks < BOOST_BLOCKS else STANDARD_NOTES
 
 
 class PetStore:
@@ -26,7 +33,17 @@ class PetStore:
             notes INTEGER, xp INTEGER);
           CREATE TABLE IF NOT EXISTS affection(day TEXT PRIMARY KEY, count INTEGER DEFAULT 0);
         """)
-        self.db.commit()
+        # The previous schema paid exactly two notes per completed block.
+        # Keep the amount actually paid, including days already in progress.
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            columns = {row['name'] for row in self.db.execute("PRAGMA table_info(daily)")}
+            if 'earned_notes' not in columns:
+                self.db.execute("ALTER TABLE daily ADD COLUMN earned_notes INTEGER NOT NULL DEFAULT 0")
+                self.db.execute("ALTER TABLE daily ADD COLUMN note_seconds REAL NOT NULL DEFAULT 0")
+                self.db.execute("UPDATE daily SET earned_notes=blocks*2, note_seconds=blocks*?", (REWARD_SECONDS,))
+                self.db.execute("""UPDATE daily SET note_seconds=note_seconds+(SELECT progress FROM pet WHERE id=1)
+                    WHERE day=(SELECT MAX(day) FROM daily WHERE seconds>0)""")
 
     def pet(self):
         return dict(self.db.execute("SELECT * FROM pet WHERE id=1").fetchone())
@@ -58,16 +75,27 @@ class PetStore:
                 self.db.execute("""INSERT INTO listening(day,path,seconds) VALUES(?,?,?)
                     ON CONFLICT(day,path) DO UPDATE SET seconds=seconds+excluded.seconds""", (day,path,amount))
                 daily = self.db.execute("SELECT * FROM daily WHERE day=?", (day,)).fetchone()
+                notes = xp = 0
+                if reward and daily['earned_notes'] < DAILY_NOTE_LIMIT:
+                    before = daily['note_seconds']
+                    after = round(before + amount, 6)
+                    completed = int(before // REWARD_SECONDS)
+                    if int(after // REWARD_SECONDS) > completed:
+                        notes = min(note_amount(completed), DAILY_NOTE_LIMIT - daily['earned_notes'])
+                    self.db.execute("UPDATE daily SET note_seconds=?, earned_notes=earned_notes+? WHERE day=?",
+                                    (after, notes, day))
                 if reward and daily['blocks'] < DAILY_REWARD_BLOCKS:
                     progress = self.pet()['progress'] + amount
                     blocks = min(int(progress // REWARD_SECONDS), DAILY_REWARD_BLOCKS - daily['blocks'])
                     self.db.execute("UPDATE pet SET progress=? WHERE id=1", (progress - blocks * REWARD_SECONDS,))
                     if blocks:
                         self.db.execute("UPDATE daily SET blocks=blocks+? WHERE day=?", (blocks, day))
-                        self._grant(blocks * 5, blocks * REWARD_NOTES, '听歌奖励', stop)
-                        if not daily['bonus']:
-                            self.db.execute("UPDATE daily SET bonus=1 WHERE day=?", (day,))
-                            self._grant(10, 0, '每日首次听歌', stop)
+                        xp = blocks * 5
+                if xp or notes:
+                    self._grant(xp, notes, '听歌奖励', stop)
+                if xp and not daily['bonus']:
+                    self.db.execute("UPDATE daily SET bonus=1 WHERE day=?", (day,))
+                    self._grant(10, 0, '每日首次听歌', stop)
                 cursor = stop
 
     def tick_running(self, seconds):
@@ -109,15 +137,15 @@ class PetStore:
         now = now or datetime.now()
         today = now.date().isoformat()
         week = (now.date() - timedelta(days=now.weekday())).isoformat()
-        row = self.db.execute("SELECT seconds,blocks FROM daily WHERE day=?", (today,)).fetchone()
+        row = self.db.execute("SELECT seconds,earned_notes,note_seconds FROM daily WHERE day=?", (today,)).fetchone()
         weekly = self.db.execute("SELECT COALESCE(SUM(seconds),0) FROM daily WHERE day BETWEEN ? AND ?", (week,today)).fetchone()[0]
         total = self.db.execute("SELECT COALESCE(SUM(seconds),0) FROM daily").fetchone()[0]
-        blocks = row['blocks'] if row else 0
+        earned = row['earned_notes'] if row else 0
+        eligible = row['note_seconds'] if row else 0
         return {'today': row['seconds'] if row else 0, 'week': weekly, 'total': total,
-                'reward_notes': blocks * REWARD_NOTES,
-                'reward_limit': DAILY_REWARD_BLOCKS * REWARD_NOTES,
-                'reward_remaining': None if blocks >= DAILY_REWARD_BLOCKS else
-                    max(0, REWARD_SECONDS - self.pet()['progress'])}
+                'reward_notes': earned, 'reward_limit': DAILY_NOTE_LIMIT,
+                'next_reward_notes': min(note_amount(int(eligible // REWARD_SECONDS)), DAILY_NOTE_LIMIT - earned),
+                'reward_remaining': None if earned >= DAILY_NOTE_LIMIT else REWARD_SECONDS - eligible % REWARD_SECONDS}
 
     def interact(self, now=None):
         day = (now or datetime.now()).date().isoformat()

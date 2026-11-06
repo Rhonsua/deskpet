@@ -50,9 +50,16 @@ def idle_parameters(seconds):
             'ParamWorkBreath': .5 - .5 * math.cos(seconds * math.tau / 3.8)}
 
 
-def activity(pet):
+def supported(pet):
     renderer = getattr(pet, 'live2d_renderer', None)
-    if not renderer or not getattr(renderer, 'work_available', False) or not requested(pet):
+    if renderer is not None:
+        return bool(getattr(renderer, 'work_available', False))
+    pack = getattr(pet, 'character_pack', None)
+    return bool(pack and 'work' in pack.states)
+
+
+def activity(pet):
+    if not supported(pet) or not requested(pet):
         return None
     if (pet.behavior.mode not in ('idle', 'listen') or pet.behavior.layers
             or pet.dragging or pet.petting or pet.press_point is not None

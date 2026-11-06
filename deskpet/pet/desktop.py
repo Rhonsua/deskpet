@@ -485,6 +485,9 @@ class DesktopPet(TeleportRuntime, WalkRuntime, QWidget):
                 sources = {state: pack.state_path(state) for state in STATES}
                 # Keep the common canvas: independent cropping destroys pose alignment.
                 frames = {state: loaded[path] for state, path in sources.items()}
+                if 'work' in pack.states:
+                    for state in ('work', 'work-wait'):
+                        frames[state] = loaded[pack.state_path(state)]
                 walk_spec = pack.walk
                 walk_frames = {key: QPixmap.fromImage(image) for key, image in images.items()
                                if key.startswith(('walk-left:', 'walk-right:'))}
@@ -877,14 +880,14 @@ class DesktopPet(TeleportRuntime, WalkRuntime, QWidget):
             self.save_position()
 
     def preview_work_animation(self):
-        from deskpet.animation.work_visual import preview_active, sync_preview_control
+        from deskpet.animation.work_visual import preview_active, sync_preview_control, supported
         if preview_active(self):
             self.work_preview_until = 0
             sync_preview_control(self)
             self.update()
             return
-        if not self.live2d_renderer or not self.live2d_renderer.work_available:
-            self.bubble.say('请先使用内置天依 Live2D 模型，再预览工作动作。')
+        if not supported(self):
+            self.bubble.say('当前角色还没有工作姿势，请换用提供工作动作的角色。')
             return
         self.stop_roaming()
         self.reveal_dock()
@@ -1444,6 +1447,11 @@ class DesktopPet(TeleportRuntime, WalkRuntime, QWidget):
             sy = 1 + math.sin(now * 1.8) * 0.004
             angle = math.sin(now * 2.5) * 0.3
             y = -max(0, math.sin(now * 4.5)) * 0.7
+        elif activity in ('work', 'work-wait'):
+            state = activity
+            sy = 1 + math.sin(now * 1.7) * .003
+            if activity == 'work':
+                y = -abs(math.sin(now * 5)) * .6
         elif activity in ('sing', 'turn'):
             motion_time = elapsed if activity == 'turn' else now
             from deskpet.music.tools.clock import beat_values, singing_beat_time
@@ -1503,7 +1511,7 @@ class DesktopPet(TeleportRuntime, WalkRuntime, QWidget):
         painter.resetTransform()
         mask = transform.map(local_mask)
         if self.character_pack:
-            head_x, head_y = self.anchors['head']
+            head_x, head_y = self.character_pack.head_for(key)
             head_box = QRect(round((head_x - .24) * image.width()), round((head_y - .2) * image.height()),
                              round(.48 * image.width()), round(.4 * image.height()))
             self.head_region = transform.map(QRegion(head_box, QRegion.RegionType.Ellipse))

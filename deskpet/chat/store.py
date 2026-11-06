@@ -18,6 +18,8 @@ class ChatStore:
                 created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             CREATE INDEX IF NOT EXISTS messages_character ON messages(character, id);
         ''')
+        from .memory import MemoryBank
+        self.memories = MemoryBank(self.db)
 
     def profile(self, character, default_persona):
         row = self.db.execute('SELECT persona, memory FROM profiles WHERE character=?', (character,)).fetchone()
@@ -36,11 +38,17 @@ class ChatStore:
 
     def add_turn(self, character, user, assistant):
         with self.db:
-            self.db.executemany('INSERT INTO messages(character, role, content) VALUES (?, ?, ?)',
-                                [(character, 'user', user), (character, 'assistant', assistant)])
+            source = self.db.execute('INSERT INTO messages(character, role, content) VALUES (?, ?, ?)',
+                                     (character, 'user', user)).lastrowid
+            self.db.execute('INSERT INTO messages(character, role, content) VALUES (?, ?, ?)',
+                            (character, 'assistant', assistant))
+            self.memories.capture(character, user, source)
 
     def clear_history(self, character):
         with self.db:
+            # INTEGER PRIMARY KEY may reuse deleted message IDs. Retained
+            # memories must not point to new messages after history is cleared.
+            self.db.execute('UPDATE companion_memories SET source_id=0 WHERE character=?', (character,))
             self.db.execute('DELETE FROM messages WHERE character=?', (character,))
             self.db.execute('DELETE FROM proactive_messages WHERE character=?', (character,))
 

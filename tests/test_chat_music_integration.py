@@ -14,7 +14,7 @@ from deskpet.chat.window import ChatWindow
 
 
 @contextmanager
-def fake_provider():
+def fake_provider(selection=False):
     requests = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -24,7 +24,7 @@ def fake_provider():
         def do_POST(self):
             request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             requests.append(request)
-            if len(requests) == 1:
+            if len(requests) == 1 and not selection:
                 text = '[动作:music_local {"pattern":"流光"}][开心]这就选一个版本。'
             else:
                 candidates = json.loads(request['messages'][-1]['content'])['candidates']
@@ -109,6 +109,26 @@ class MusicHttpIntegrationTests(unittest.TestCase):
 
     def test_json_completion_can_start_choice_in_same_callback(self):
         self.exercise_choice(False)
+
+    def test_delegated_preference_over_real_transport_plays_once(self):
+        with fake_provider(selection=True) as (url, requests), self.window() as (window, accessor):
+            accessor.side_effect = lambda: ChatWindow.request_client(window)
+            window.config = ProviderConfig(base_url=url, model='fake-local-model', stream=True)
+            window.input.setPlainText('选一首适合放松的歌')
+            window.send_message()
+            deadline = time.monotonic() + 15
+            while window.pending and time.monotonic() < deadline:
+                QTest.qWait(10)
+            self.assertIsNone(window.pending, window.status.text())
+            self.assertEqual(len(requests), 1)
+            self.assertIn('放松', json.loads(requests[0]['messages'][-1]['content'])['preference'])
+            self.p.start_track.assert_called_once_with(1)
+            history = window.store.history(window.character)
+            self.assertEqual(len(history), 2)
+            self.assertIn('流光现场', history[-1]['content'])
+            self.assertNotIn('"id"', history[-1]['content'])
+            QTest.qWait(120)
+            self.p.start_track.assert_called_once_with(1)
 
 
 if __name__ == '__main__':

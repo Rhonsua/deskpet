@@ -22,8 +22,9 @@ from deskpet.ui.appearance import APPEARANCE_REVISION
 
 app = QApplication([])
 folder = Path(sys.argv[1]).resolve()
-images = validate_images(read_pack(folder))
-assert set(images) == set(STATES), 'this check expects a complete ten-state pack'
+pack = read_pack(folder)
+images = validate_images(pack)
+assert set(STATES) <= set(images), 'this check expects a complete ten-state pack'
 output = root / 'preview' / 'character-pack-check'
 output.mkdir(parents=True, exist_ok=True)
 
@@ -58,14 +59,16 @@ with tempfile.TemporaryDirectory(prefix='test-', dir=output) as temp:
     try:
         assert pet.variant == selected and pet.character_pack is not None
         pet.timer.stop()
-        assert len({image.cacheKey() for image in pet.frames.values()}) == 10
+        assert set(images) <= set(pet.frames)
         assert bool(pet.singing_rigs) == (pet.character_pack.singing_hem is not None)
         before = dict(pet.panel.store.pet())
-        sheet = QImage(320*5, 360*2, QImage.Format.Format_ARGB32)
+        poses = ['idle','happy','eat','lift','sleep','phone','sing-front','sing-left','sing-right','blink']
+        poses += [key for key in ('work', 'work-wait') if key in images]
+        sheet = QImage(320*5, 360*((len(poses)+4)//5), QImage.Format.Format_ARGB32)
         sheet.fill(QColor('#edf1f7'))
         p = QPainter(sheet)
         p.setFont(QFont('Segoe UI', 10))
-        for i, state in enumerate(('idle','happy','eat','lift','sleep','phone','sing-front','sing-left','sing-right','blink')):
+        for i, state in enumerate(poses):
             pet.behavior = PetBehavior()
             if state in ('sleep','phone','idle'):
                 pet.set_mode(state)
@@ -74,6 +77,12 @@ with tempfile.TemporaryDirectory(prefix='test-', dir=output) as temp:
                 pet.phase = {'sing-front':4.8,'sing-left':3.6,'sing-right':1.2}[state]
             elif state == 'blink':
                 pet.phase = 4.81
+            elif state in ('work', 'work-wait'):
+                from types import SimpleNamespace
+                pet.work_preview_until = float('inf')
+                pet.chat_window = SimpleNamespace(work_panel=SimpleNamespace(
+                    is_running=False, approval_id='preview' if state == 'work-wait' else None))
+                assert pet.display_activity() == state
             else:
                 pet.behavior.react(state, 20)
                 pet.behavior.layers[-1].elapsed = .6
@@ -85,6 +94,9 @@ with tempfile.TemporaryDirectory(prefix='test-', dir=output) as temp:
             x,y=(i%5)*320,(i//5)*360
             p.drawPixmap(x,y+20,tile)
             p.drawText(x+10,y+15,state)
+            if state in ('work', 'work-wait'):
+                pet.chat_window = None
+                pet.work_preview_until = 0
             pet.phase = 1
         p.end()
         assert sheet.save(str(output / (folder.name + '-runtime.png')))
@@ -101,6 +113,29 @@ with tempfile.TemporaryDirectory(prefix='test-', dir=output) as temp:
             pet.grab()
             assert not pet.hit_region.isEmpty(), edge
         pet.dock_edge = ''
+        if pack.walk:
+            bounds = pet.screen_bounds()
+            for direction in (-1, 1):
+                pet.set_mode('listen')
+                pet.panel.hide()
+                pet.toolbar.hide()
+                pet.bubble.hide()
+                pet.move(bounds.center().x() - pet.width() // 2, bounds.top() + 20)
+                assert pet.start_walk(direction=direction, cycles=1)
+                start_x = pet.x()
+                keys, shots = set(), set()
+                for _ in range(150):
+                    if not pet.walk_controller.active:
+                        break
+                    keys.add(pack.walk.frame_key(direction, pet.walk_controller.elapsed))
+                    shot = pet.grab().toImage()
+                    shots.add(bytes(shot.constBits()))
+                    pet.tick_walk(.02)
+                assert len(keys) >= 2 and len(shots) >= 2
+                assert (pet.x() - start_x) * direction > 0
+                assert not pet.walk_controller.active
+                assert pet.behavior.mode == 'listen' and not pet.behavior.layers
+        pet.set_mode('idle')
         pet.playing = True
         assert pet.behavior.activity == 'sing'
         pet.playing = False
@@ -117,6 +152,7 @@ with tempfile.TemporaryDirectory(prefix='test-', dir=output) as temp:
     finally:
         dispose(pet)
 (output / (folder.name+'-report.json')).write_text(json.dumps(
-    {'ok':True,'states':10,'pack':folder.name,'persistence':True,'drag_resume':True,
+    {'ok':True,'states':len(pack.states),'walk_frames':len(pack.walk.image_paths()) if pack.walk else 0,
+     'pack':folder.name,'persistence':True,'drag_resume':True,
      'four_edges':True,'music_state':True,'shared_growth':True},indent=2),encoding='utf-8')
-print('PASS: complete pack, real Qt poses, switching, persistence, drag resume, four edges and shared music/growth')
+print('PASS: complete pack, real Qt poses, optional work/walking, switching, persistence, drag resume, four edges and shared music/growth')

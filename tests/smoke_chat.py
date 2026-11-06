@@ -125,7 +125,7 @@ with tempfile.TemporaryDirectory() as temp:
                       examples=[dict(user='证明难题', assistant='这道证明我不会，但愿意听你聊聊。')])
         plugin_file.write_text(json.dumps(plugin, ensure_ascii=False), encoding='utf-8')
         pet.variant, pet.character_pack, pet.character_name = (
-            'external:plugin', SimpleNamespace(root=plugin_root), '洛天依')
+            'external:plugin', SimpleNamespace(root=plugin_root, states={}), '洛天依')
         chat.sync_character()
         assert chat.personality.id == 'mock-companion'
         assert chat.persona_input.toPlainText() == plugin['persona']
@@ -150,7 +150,7 @@ with tempfile.TemporaryDirectory() as temp:
         # Broken plugin warns and uses fallback without overwriting saved customization.
         plugin_file.write_text('{broken', encoding='utf-8')
         pet.variant, pet.character_pack, pet.character_name = (
-            'external:plugin', SimpleNamespace(root=plugin_root), '洛天依')
+            'external:plugin', SimpleNamespace(root=plugin_root, states={}), '洛天依')
         chat.sync_character()
         assert chat.personality_warning and chat.personality.id != 'luotianyi'
         assert chat.personality_warning in chat.status.text()
@@ -189,7 +189,7 @@ with tempfile.TemporaryDirectory() as temp:
         chat.memory_input.setPlainText('磁盘失败时也保留的记忆')
         chat.input.setPlainText('尚未发送的草稿')
         with patch.object(chat.store, 'save_profile', side_effect=sqlite3.OperationalError('test disk failure')):
-            pet.variant, pet.character_pack, pet.character_name = 'external:draft', object(), '草稿测试角色'
+            pet.variant, pet.character_pack, pet.character_name = 'external:draft', SimpleNamespace(states={}), '草稿测试角色'
             chat.sync_character()
             chat.close()
             assert chat.isVisible() and '洛天依' in chat.status.text()
@@ -261,7 +261,7 @@ with tempfile.TemporaryDirectory() as temp:
         chat.input.setPlainText('切换期间的消息')
         chat.send_message()
         # Switch the chat identity while an old request is still pending.
-        pet.variant, pet.character_pack, pet.character_name = 'external:test', object(), '测试角色'
+        pet.variant, pet.character_pack, pet.character_name = 'external:test', SimpleNamespace(states={}), '测试角色'
         chat.sync_character()
         QTest.qWait(500)
         assert chat.store.history(chat.character) == []

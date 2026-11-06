@@ -26,6 +26,7 @@ from deskpet.ui.compact import build, COMPACT_STYLE, COMPACT_GLASS_STYLE
 from deskpet.pet.desktop import DesktopPet
 from deskpet.music.tools.library import MusicLibrary, PlaybackQueue, MODES
 from deskpet.runtime.startup import WindowsStartup
+from deskpet.speech.packs import PACK_FOLDER
 from deskpet.music.audio.routing import device_id
 from deskpet.music.audio.remote import AudioEngine
 from deskpet.pet.characters import character_directory
@@ -161,6 +162,10 @@ class MusicPanel(BackgroundSurface):
     def shutdown_audio(self):
         # This is the terminal shutdown path, shared by app exit and isolated
         # hosts. Stop audio-dependent timers and close lyric storage as well.
+        self.pet._speech_shutting_down = True
+        speech = getattr(self.pet, '_speech_controller', None)
+        if speech is not None:
+            speech.shutdown()
         companion = getattr(self.pet, 'music_companion', None)
         if companion is not None:
             companion.shutdown()
@@ -499,8 +504,8 @@ class MusicPanel(BackgroundSurface):
         pet = self.store.pet()
         stats = self.store.stats()
         remaining = stats['reward_remaining']
-        reward_status = ('今日听歌奖励已达上限，明日恢复；听歌时长仍会累计' if remaining is None else
-                         f"再有效听歌 {clock(int(remaining * 1000 + 999))} 可获得 2 音符")
+        reward_status = ('今日听歌音符已领满，明天重新累计' if remaining is None else
+                         f"再有效听歌 {clock(int(remaining * 1000 + 999))} 可获得 {stats['next_reward_notes']} 音符")
         self.growth.setText(
             f"等级 {pet['level']} · 经验 {pet['xp']} · 音符 {pet['notes']}\n"
             f"饱食度 {pet['hunger']}/100 · 心情 {pet['mood']}/100\n"
@@ -789,6 +794,13 @@ class Pet(DesktopPet):
             self.music_companion = MusicCompanion(self)
         except Exception as error:
             self.music_startup_error = '歌词与节拍暂时无法启动：' + str(error)
+        if self.panel.settings.value('speech/enabled', False, type=bool):
+            QTimer.singleShot(0, self, self.prepare_startup_speech)
+
+    def prepare_startup_speech(self):
+        if not getattr(self, '_speech_shutting_down', False) and self.panel.settings.value('speech/enabled', False, type=bool):
+            from deskpet.speech.controller import speech_for_pet
+            speech_for_pet(self)
 
 
 def main():
@@ -800,6 +812,11 @@ def main():
     app.setOrganizationName("TianyiPet")
     data_dir = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation))
     data_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        (data_dir / PACK_FOLDER).mkdir(exist_ok=True)
+    except OSError:
+        # Voice settings can retry when the folder becomes writable.
+        pass
     lock = QLockFile(str(data_dir / "instance.lock"))
     if not lock.tryLock(100):
         if '--autostart' not in sys.argv:

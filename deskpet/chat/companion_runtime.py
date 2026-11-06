@@ -22,6 +22,8 @@ class CompanionRuntime(QObject):
         self.client.completed.connect(self._completed)
         self.client.failed.connect(lambda _: self.cancel())
         self.ticket = None
+        self.voice_delivery = None
+        self.voice_active = False
         self.started = time.monotonic()
         self.last_action = self.started
         self.timer = QTimer(self)
@@ -53,7 +55,17 @@ class CompanionRuntime(QObject):
         self.actions_enabled = bool(enabled)
         self.settings.setValue('companion/autonomous_actions', self.actions_enabled)
 
+    def release_voice(self):
+        delivery = self.voice_delivery
+        if delivery is not None:
+            delivery()
+        self.voice_active = False
+
     def cancel(self):
+        if self.voice_delivery is not None or self.voice_active:
+            self.window.speech.stop(preserve_warm=True)
+        self.voice_delivery = None
+        self.voice_active = False
         self.started = time.monotonic()
         self.coordinator.cancel()
         self.ticket = None
@@ -104,26 +116,44 @@ class CompanionRuntime(QObject):
                 self.window.memory_input.toPlainText(),
                 self.window.store.history(self.character, 12), PROACTIVE_PROMPT,
                 '当前为空闲陪伴时刻，可以自主开启新话题。以下最近主动发言只用于避免重复，不要求接续：'
-                + self.window.store.last_proactive(self.character), personality=self.window.personality)
+                + self.window.store.last_proactive(self.character), personality=self.window.personality,
+                recalled=self.window.memory_context(proactive=True))
             self.client.start(self.window.config, messages)
         except (ValueError, RuntimeError, sqlite3.Error):
             self.cancel()
 
     def _completed(self, text):
-        ticket, self.ticket = self.ticket, None
-        if self.window.character != getattr(self, 'character', None):
+        ticket = self.ticket
+        if (ticket is None or self.window.character != getattr(self, 'character', None)
+                or not self.enabled or not self.chat_enabled or not self.state().allows(45)):
             self.cancel()
-            return
-        if not self.coordinator.deliver(ticket, self.state()):
             return
         visible, tone = parse_reply(text)
         if not visible or response_refusal(visible):
-            return
-        # Text only: never open a window, steal focus or interpret model actions.
-        visible = visible[:240]
-        try:
-            self.window.store.add_proactive(self.character, visible)
-        except sqlite3.Error:
             self.cancel()
             return
-        self.pet.bubble.say(visible, 8000)
+        visible = visible[:240]
+        def delivery():
+            if self.voice_delivery is not delivery or self.ticket != ticket:
+                return False
+            self.voice_delivery = None
+            self.ticket = None
+            if (not self.enabled or not self.chat_enabled or self.window.closed
+                    or self.window.character != self.character
+                    or not self.coordinator.deliver(ticket, self.state())):
+                self.coordinator.cancel()
+                return False
+            try:
+                self.window.store.add_proactive(self.character, visible)
+            except sqlite3.Error:
+                self.cancel()
+                return False
+            self.pet.bubble.say(visible, 8000)
+            return True
+        self.voice_delivery = delivery
+        if self.window.reply_voice_enabled():
+            self.voice_active = True
+            if self.window.speech.speak(visible, deliver=delivery):
+                return
+            self.voice_active = False
+        delivery()

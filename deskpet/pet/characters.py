@@ -1,5 +1,5 @@
 """Data-only PNG character packs, discovered on request and decoded on selection."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import math
 from pathlib import Path
@@ -11,6 +11,7 @@ import sys
 
 STATES = ('idle', 'blink', 'happy', 'eat', 'lift', 'sleep', 'phone',
           'sing-front', 'sing-left', 'sing-right')
+OPTIONAL_STATES = ('work', 'work-wait')
 DEFAULT_ANCHORS = {'head': (0.5, 0.28), 'feet': (0.5, 0.98)}
 
 
@@ -58,8 +59,16 @@ class CharacterPack:
     anchors: dict
     singing_hem: float | None = None
     walk: WalkSpec | None = None
+    pose_heads: dict = field(default_factory=dict)
+
+    def head_for(self, state):
+        if state == 'work-wait' and state not in self.states:
+            state = 'work'
+        return self.pose_heads.get(state, self.anchors['head'])
 
     def state_path(self, state):
+        if state == 'work-wait' and state not in self.states:
+            return self.states.get('work', self.states['idle'])
         if state in ('sing-left', 'sing-right') and state not in self.states:
             return self.states.get('sing-front', self.states['idle'])
         return self.states.get(state, self.states['idle'])
@@ -180,7 +189,7 @@ def read_pack(folder):
         identifier = root.name if re.fullmatch(r'[a-z][a-z0-9_-]{0,63}', root.name) else (
             'pet-' + hashlib.sha256(root.name.encode('utf-8')).hexdigest()[:12])
         data = {'version': 1, 'id': identifier, 'name': root.name,
-                'states': {state: state + '.png' for state in STATES
+                'states': {state: state + '.png' for state in STATES + OPTIONAL_STATES
                            if (root / (state + '.png')).is_file()}}
     if not isinstance(data, dict) or type(data.get('version')) is not int or data['version'] != 1:
         raise ValueError('角色配置 version 必须为 1')
@@ -194,8 +203,16 @@ def read_pack(folder):
             raise ValueError('角色 ' + field + ' 格式不正确')
         metadata[field] = value.strip()
     states = data.get('states')
-    if not isinstance(states, dict) or 'idle' not in states or any(state not in STATES for state in states):
+    work_poses = data.get('work_poses', {})
+    if (not isinstance(work_poses, dict) or any(key not in OPTIONAL_STATES for key in work_poses)
+            or isinstance(states, dict) and any(key in states for key in work_poses)):
+        raise ValueError('work_poses 仅支持 work 和 work-wait，且不能与 states 重复')
+    if isinstance(states, dict):
+        states = {**states, **work_poses}
+    if not isinstance(states, dict) or 'idle' not in states or any(state not in STATES + OPTIONAL_STATES for state in states):
         raise ValueError('states 必须提供 idle，且只能使用约定的动作名称')
+    if 'work-wait' in states and 'work' not in states:
+        raise ValueError('提供 work-wait 时也需要提供 work 工作姿势')
     paths = {}
     for state, value in states.items():
         path = _inside(root, value)
@@ -208,12 +225,20 @@ def read_pack(folder):
         raise ValueError('anchors 仅支持 head 和 feet')
     for key, pair in given.items():
         if (not isinstance(pair, list) or len(pair) != 2 or
-                any(type(number) not in (int, float) or not math.isfinite(number)
-                    or not 0 <= number <= 1 for number in pair)):
+                any(type(number) not in (int, float) or not 0 <= number <= 1
+                    or not math.isfinite(number) for number in pair)):
             raise ValueError('锚点需要两个 0 到 1 的相对坐标')
         anchors[key] = tuple(pair)
     if anchors['head'][1] >= anchors['feet'][1]:
         raise ValueError('head 锚点应在 feet 锚点上方')
+    pose_heads = data.get('pose_heads', {})
+    if not isinstance(pose_heads, dict) or any(state not in paths for state in pose_heads):
+        raise ValueError('pose_heads 只能指定已提供姿势的头部位置')
+    for state, pair in pose_heads.items():
+        if (not isinstance(pair, list) or len(pair) != 2 or
+                any(type(number) not in (int, float) or not 0 <= number <= 1
+                    or not math.isfinite(number) for number in pair)):
+            raise ValueError('pose_heads 需要两个 0 到 1 的相对坐标')
     singing = data.get('singing_motion', {})
     if not isinstance(singing, dict) or any(key not in ('legs', 'hem') for key in singing):
         raise ValueError('singing_motion 仅支持 legs 和 hem')
@@ -227,6 +252,7 @@ def read_pack(folder):
     return CharacterPack(identifier, root=root, states=paths, anchors=anchors,
                          singing_hem=float(hem) if legs else None,
                          walk=read_walk_spec(root, data['walk']) if 'walk' in data else None,
+                         pose_heads={state: tuple(pair) for state, pair in pose_heads.items()},
                          **metadata)
 
 

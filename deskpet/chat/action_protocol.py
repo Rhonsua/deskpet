@@ -25,10 +25,16 @@ def parameters(text):
     if not match or match.group(2) is None:
         return {}
     data = json.loads(match.group(2))
-    if (not isinstance(data, dict) or match.group(1) not in ('music_play','music_local','music_bilibili')
-            or set(data) - {'pattern','playlist'}
+    selection = match.group(1) in ('music_random', 'music_pick')
+    allowed = {'source', 'playlist', 'preference'} if selection else {'pattern', 'playlist'}
+    if (not isinstance(data, dict) or match.group(1) not in ('music_play','music_local','music_bilibili', 'music_random', 'music_pick')
+            or set(data) - allowed
             or any(not isinstance(v,str) or not 1 <= len(v) <= 160 for v in data.values())):
         raise ValueError('无效音乐搜索参数')
+    if selection and (data.get('source') not in (None, 'local', 'web')
+            or data.get('source') == 'web' and 'playlist' in data
+            or match.group(1) == 'music_random' and 'preference' in data):
+        raise ValueError('无效自主选歌参数')
     return data
 
 
@@ -49,6 +55,13 @@ def instruction(available):
             '用户说切到 B站/本地时分别用 music_bilibili/music_local；显式音源优先于当前音源和历史。'
             '用户明确给出正则时保留原表达式；普通歌名需要转义正则特殊字符。'
             'playlist 只用于准确指定本地歌单，可省略。普通播放歌单不用 pattern。'
+            '用户说“随便唱首歌听听”“随机放一首”“你挑一首”已经授权选歌并播放，'
+            '必须调用 music_random，不能只承诺稍后放，也不用反问歌名。'
+            '按心情、场景、风格或喜好选歌时调用 music_pick，例如 '
+            '[动作:music_pick {"preference":"轻松一点，适合睡前","source":"local"}]；'
+            '程序会提供真实候选供你选编号，再执行播放。偏好不能填入 pattern 当歌名搜索。'
+            'source 可省略或为 local/web，playlist 可指定准确的本地歌单。'
+            '“唱首歌听听”是播放请求；“拿麦克风唱歌”“做个唱歌动作”才是纯表演。'
             '每次只发一个标签；不能将用户指定的歌曲降级成随便播放，找不到交由程序提示。'
             '明确点歌必须调用音乐接口搜索，不能仅凭历史或猜测说歌单没有这首歌。'
             '多首匹配由程序提供真实候选请你选一首，不必让用户反复补充关键词。'

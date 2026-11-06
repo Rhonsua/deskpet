@@ -116,6 +116,27 @@ class WorkVisualTests(unittest.TestCase):
         for t in [i/30 for i in range(300)]:
             self.assertTrue(all(0<=v<=1 for v in idle_parameters(t).values()))
 
+    def test_static_work_pose_uses_same_priority_and_saved_intent(self):
+        pet = self.pet()
+        pet.live2d_renderer = None
+        pet.character_pack = NS(states={'idle': object()})
+        self.assertIsNone(activity(pet))
+        pet.character_pack.states['work'] = object()
+        self.assertEqual(activity(pet), 'work')
+        pet.chat_window.work_panel.approval_id = 'approval'
+        self.assertEqual(activity(pet), 'work-wait')
+        pet.behavior.begin_drag()
+        self.assertIsNone(activity(pet))
+        pet.behavior.end_drag()
+        pet.behavior.tick(.65)
+        self.assertEqual(activity(pet), 'work-wait')
+        self.assertEqual(pet.behavior.mode, 'idle')
+        pet.behavior.set_mode('sleep')
+        self.assertIsNone(activity(pet))
+        self.assertEqual(pet.behavior.mode, 'sleep')
+        pet.character_pack = None
+        self.assertIsNone(activity(pet))
+
     def test_autonomous_reactions_cannot_replace_user_actions(self):
         pet=self.pet()
         pet.behavior.react('eat',2)

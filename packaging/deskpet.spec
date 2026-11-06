@@ -36,6 +36,11 @@ datas.append((str(root / 'assets' / 'icons' / 'tianyi.ico'), 'assets/icons'))
 datas.append((str(root / 'deskpet/chat' / 'personas' / 'luotianyi.json'), 'deskpet/chat/personas'))
 datas.append((str(root / 'deskpet/chat' / 'harness_permission_bridge.mjs'), 'deskpet/chat'))
 datas.append((str(root / 'deskpet/chat' / 'runtime_package_lock.json'), 'deskpet/chat'))
+
+# The optional voice runtime uses its own Python; it needs this script on disk.
+# Large engines, weights, voice references and local settings are never bundled.
+datas.append((str(root / 'deskpet/speech' / 'worker.py'), 'deskpet/speech'))
+datas.append((str(root / 'deskpet/speech' / 'packs.py'), 'deskpet/speech'))
 datas.append((str(root / 'deskpet/music/kugou/LICENSE'), 'deskpet/music/kugou'))
 # Only aligned original hand poses: exclude generation sheets and references.
 hand_root = root / 'assets' / 'ui' / 'headpat'

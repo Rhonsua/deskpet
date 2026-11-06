@@ -81,6 +81,7 @@ class ChatWindow(ChatSurface):
         self.personality = None
         self.personality_warning = ''
         self.pending = None
+        self._speech_delivery = None
         self.pending_action_context = None
         self.pending_actions = ()
         self.pending_music_snapshot = None
@@ -158,6 +159,28 @@ class ChatWindow(ChatSurface):
         self.send_button.clicked.connect(self.send_message)
         row.addWidget(self.send_button)
         layout.addLayout(row)
+        voice_row = QHBoxLayout()
+        self.speech_toggle = QCheckBox('朗读回复')
+        self.speech_toggle.setToolTip('自动朗读天依的回复，下次启动桌宠时提前准备声音。')
+        self.speech_toggle.setChecked(self.pet.panel.settings.value('speech/enabled', False, type=bool))
+        voice_row.addWidget(self.speech_toggle)
+        voice_row.addStretch()
+        self.speech_preview = QPushButton('试听' if self.speech_toggle.isChecked() else '开启并试听')
+        self.speech_preview.clicked.connect(self.preview_speech)
+        voice_row.addWidget(self.speech_preview)
+        speech_stop = QPushButton('停读')
+        speech_stop.clicked.connect(self.stop_speech)
+        voice_row.addWidget(speech_stop)
+        self.speech_toggle.toggled.connect(speech_stop.setEnabled)
+        speech_stop.setEnabled(self.speech_toggle.isChecked())
+        speech_settings = QPushButton('语音设置')
+        speech_settings.clicked.connect(self.configure_speech)
+        voice_row.addWidget(speech_settings)
+        layout.addLayout(voice_row)
+        self.speech_status = QLabel()
+        self.speech_status.setWordWrap(True)
+        self.speech_status.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(self.speech_status)
         self.tabs.addTab(chat, '陪伴模式')
 
         provider = QWidget()
@@ -230,6 +253,10 @@ class ChatWindow(ChatSurface):
         reset.clicked.connect(self.restore_persona)
         row.addWidget(reset)
         layout.addLayout(row)
+        memory_manager = QPushButton('查看 / 删除自动记忆')
+        memory_manager.setToolTip('本地保存称呼、偏好及少量生活原话，不额外调用模型；可关闭。')
+        memory_manager.clicked.connect(self.manage_memories)
+        layout.addWidget(memory_manager)
         self.tabs.addTab(profile, '人设与记忆')
         from .workspaces import Workspaces
         self.work_panel = Workspaces(lambda: self.config, self.pet.panel.data_dir, self)
@@ -242,6 +269,12 @@ class ChatWindow(ChatSurface):
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         outer.addWidget(self.status)
         self.setStyleSheet(GLASS_STYLE)
+        from deskpet.speech.controller import speech_for_pet
+        self.speech = speech_for_pet(self.pet)
+        self.speech.status.connect(self.speech_status.setText)
+        self.speech_status.setText(self.speech.status_text)
+        self.speech_status.setVisible(self.speech_toggle.isChecked())
+        self.speech_toggle.toggled.connect(self.set_speech_enabled)
         self.sync_character()
         self.set_busy(False)
         self.status.setText('；'.join(filter(None, (warning, self.personality_warning)))
@@ -252,6 +285,101 @@ class ChatWindow(ChatSurface):
         self.companion_runtime = CompanionRuntime(self)
         self.companion_runtime.set_enabled(self.companion_mode_enabled)
         QApplication.instance().aboutToQuit.connect(self.shutdown)
+
+    def speech_paths(self):
+        from deskpet.paths import PROJECT_ROOT
+        from deskpet.speech.config import speech_paths
+        return speech_paths(self.pet.panel.settings, PROJECT_ROOT, self.pet.panel.data_dir)
+
+    def configure_speech(self):
+        self.stop_speech(preserve_warm=True)
+        self.cancel_proactive()
+        from deskpet.speech.settings import settings_dialog
+        from deskpet.speech.config import speech_volume
+        from deskpet.speech.packs import PACK_FOLDER
+        values = settings_dialog(self, self.speech_paths(), speech_volume(self.pet.panel.settings),
+                                 enabled=self.speech_toggle.isChecked(),
+                                 packs_dir=self.pet.panel.data_dir / PACK_FOLDER)
+        if values is None:
+            return
+        for name, value in zip(('python', 'engine', 'config'), values):
+            self.pet.panel.settings.setValue('speech/' + name, value)
+        self.pet.panel.settings.setValue('speech/volume', values[3])
+        self.speech.player.set_volume(values[3] / 100.0)
+        self.speech.configure(*values[:3])
+        if values[4]:
+            self.preview_speech()
+
+    def set_speech_enabled(self, enabled):
+        self.pet.panel.settings.setValue('speech/enabled', enabled)
+        if not enabled:
+            self.release_speech_reply()
+        self.speech.set_enabled(enabled)
+        if enabled and self.pending:
+            self.render_timer.stop()
+            self.render_history(self.pending[1], '')
+        self.speech_preview.setText('试听' if enabled else '开启并试听')
+        self.speech_status.setVisible(enabled)
+        if enabled and self.character != 'builtin:luotianyi':
+            self.status.setText('当前角色未配置语音；仅洛天依可使用此声音。')
+
+    def release_speech_reply(self):
+        delivery = getattr(self, '_speech_delivery', None)
+        if delivery is not None:
+            delivery()
+        runtime = getattr(self, 'companion_runtime', None)
+        if runtime is not None:
+            runtime.release_voice()
+
+    def reply_voice_enabled(self):
+        return (self.speech_toggle.isChecked() and self.companion_mode_enabled
+                and self.character == 'builtin:luotianyi')
+
+    def deliver_reply(self, text, commit):
+        """Keep completed text private until audio is ready, or fall back once."""
+        pending = self.pending
+        def delivery():
+            if getattr(self, '_speech_delivery', None) is not delivery:
+                return False
+            self._speech_delivery = None
+            if (self.closed or self.pending is not pending or self.character != pending[0]
+                    or not self.companion_mode_enabled):
+                return False
+            return commit()
+        self._speech_delivery = delivery
+        if self.reply_voice_enabled():
+            self.set_busy(True)
+            self.status.setText('文字已生成，正在准备语音…')
+            if self.speech.speak(text, deliver=delivery):
+                return
+        delivery()
+
+    def stop_speech(self, *, preserve_warm=False, discard=False):
+        if discard:
+            self._speech_delivery = None
+        else:
+            self.release_speech_reply()
+        self.speech.stop(preserve_warm=preserve_warm)
+        if self.speech_toggle.isChecked() and not self.speech.warming:
+            self.speech_status.setText('语音已就绪。' if self.speech.ready else '朗读已停止。')
+
+    def say_reply(self, text):
+        if not self.speech_toggle.isChecked() or not self.companion_mode_enabled:
+            return
+        if self.character != 'builtin:luotianyi':
+            self.status.setText('当前角色未配置语音；仅洛天依可使用此声音。')
+            return
+        self.speech.speak(text)
+
+    def preview_speech(self):
+        self.stop_speech(preserve_warm=True)
+        self.cancel_proactive()
+        if self.character != 'builtin:luotianyi':
+            self.status.setText('当前角色未配置语音；仅洛天依可使用此声音。')
+            return
+        if not self.speech_toggle.isChecked():
+            self.speech_toggle.setChecked(True)
+        self.say_reply('你好呀，我是洛天依。')
 
     def set_companion_option(self, option, enabled):
         key = 'proactive_chat' if option == 'chat' else 'autonomous_actions'
@@ -270,6 +398,7 @@ class ChatWindow(ChatSurface):
         if 0 <= index < len(pages):
             self.backgrounds.activate(pages[index], self.tabs.tabText(index))
         if index == self.work_index:
+            self.stop(preserve_speech_warm=True)
             area = self.screen().availableGeometry()
             self.setMinimumSize(min(590, area.width() - 40), min(520, area.height() - 60))
             if not getattr(self, '_work_layout_opened', False):
@@ -304,6 +433,8 @@ class ChatWindow(ChatSurface):
         self.update_personality_label()
         persona, memory = self.store.profile(key, self.personality.persona)
         self.saved_profile = (persona, memory)
+        from .persona import upgrade_builtin_persona
+        persona = upgrade_builtin_persona(key, persona, self.personality.persona)
         draft_persona, draft_memory = self.profile_drafts.get(key, (persona, memory))
         self.persona_input.setPlainText(draft_persona)
         self.memory_input.setPlainText(draft_memory)
@@ -366,6 +497,16 @@ class ChatWindow(ChatSurface):
         cursor.setPosition(0)
         self.persona_input.setTextCursor(cursor)
         self.status.setText('已套用角色默认人设，可继续编辑；Ctrl+Z 可撤销，记忆保持不变。')
+
+    def memory_context(self, user='', proactive=False):
+        return self.store.memories.recall(self.character, user, proactive=proactive)
+
+    def manage_memories(self):
+        from .memory_dialog import MemoryDialog
+        try:
+            MemoryDialog(self).exec()
+        except sqlite3.Error:
+            self.status.setText('自动记忆无法读取，请检查磁盘权限。')
 
     def save_profile(self, checked=False, quiet=False):
         profile = (self.persona_input.toPlainText(), self.memory_input.toPlainText())
@@ -450,9 +591,10 @@ class ChatWindow(ChatSurface):
             self.pet.bubble.say(result.message, 5000)
 
     def send_message(self):
-        self.cancel_proactive()
         if self.pending or self.testing:
             return
+        self.speech.stop(preserve_warm=True)
+        self.cancel_proactive()
         self.sync_character()
         user = self.input.toPlainText().strip()
         if not user:
@@ -462,6 +604,18 @@ class ChatWindow(ChatSurface):
         try:
             if len(user) > 4000:
                 raise ValueError('请输入 1～4000 字符的消息。')
+            from .memory import remember_request, extract
+            if remember_request(user) is not None:
+                if not self.store.memories.enabled(self.character):
+                    reply = '自动记忆已关闭。可以在“人设与记忆”里开启，或填进手动记忆。'
+                elif extract(user) is None:
+                    reply = '这条没有加入自动记忆。请用简短的称呼、偏好或生活记录，不要放密码、密钥等信息。'
+                else:
+                    reply = '记下了：' + extract(user)[2] + '。可以在“人设与记忆”里查看或删除。'
+                self.pending = (self.character, user)
+                self.input.clear()
+                self.on_completed(reply, companion_reply=True)
+                return
             history = self.store.history(self.character, 12)
             refusal = request_refusal(user, history)
             if refusal:
@@ -474,22 +628,18 @@ class ChatWindow(ChatSurface):
                 self.on_completed(refusal, companion_reply=True)
                 return
             from .actions import recognize_action, perform_action, available_actions
-            action = recognize_action(user, self.name)
+            from .music_requests import delegated_music
+            delegated = delegated_music(user, self.name)
+            action = None if delegated else recognize_action(user, self.name)
             if action:
                 result = perform_action(self.pet, action)
                 self.input.clear()
-                try:
-                    self.store.add_turn(self.character, user, result.message)
-                    self.render_history()
-                    self.status.setText('动作已执行。' if result.executed else '动作提示：' + result.message)
-                except sqlite3.Error:
-                    self.status.setText(result.message + '（聊天记录保存失败）')
-                if self.pet.isVisible() and not self.pet.dragging and not getattr(self.pet, 'petting', False):
-                    self.pet.bubble.say(result.message, 6500)
+                self.pending = (self.character, user)
+                self.on_completed(result.message, companion_reply=True, direct_action=result)
                 return
             # Only saved provider settings are used for actual conversations.
             from . import music_actions
-            direct_song = music_actions.explicit_song(user)
+            direct_song = delegated or music_actions.explicit_song(user)
             if direct_song:
                 self.pending = (self.character, user)
                 self.pending_music_snapshot = music_actions.snapshot(self.pet)
@@ -498,7 +648,7 @@ class ChatWindow(ChatSurface):
                 try:
                     result = perform_action(self.pet, direct_song[0], direct_song[1])
                 except music_actions.MusicChoice as choice:
-                    self.start_music_choice(choice.matches)
+                    self.start_music_choice(choice.matches, choice.preference, choice.selecting)
                     return
                 self.on_completed(result.message, companion_reply=True)
                 return
@@ -516,7 +666,8 @@ class ChatWindow(ChatSurface):
             context += music_actions.context(self.pet)
             messages = build_messages(self.persona_input.toPlainText(), self.memory_input.toPlainText(),
                                       history, user, context,
-                                      personality=self.personality, actions=available_actions(self.pet))
+                                      personality=self.personality, actions=available_actions(self.pet),
+                                      recalled=self.memory_context(user))
             from .action_protocol import snapshot
             self.pending_action_context = snapshot(self.pet)
             self.pending_actions = tuple(available_actions(self.pet))
@@ -567,10 +718,14 @@ class ChatWindow(ChatSurface):
                 self.on_completed(refusal, companion_reply=True)
                 return
             self.partial_text = text
+            if self.reply_voice_enabled():
+                return
             if not self.render_timer.isActive():
                 self.render_timer.start(60)
 
     def flush_partial(self):
+        if self.reply_voice_enabled() or getattr(self, '_speech_delivery', None) is not None:
+            return
         if self.pending and self.isVisible() and self.tabs.currentIndex() == 0:
             visible, _ = parse_reply(self.partial_text, partial=True)
             visible = visible or '正在想…'
@@ -582,7 +737,7 @@ class ChatWindow(ChatSurface):
             self.history_view.update_live(visible)
             self._reply_text = visible
 
-    def on_completed(self, text, companion_reply=False):
+    def on_completed(self, text, companion_reply=False, direct_action=None):
         self.render_timer.stop()
         if not companion_reply:
             self.balance_badge.refresh()
@@ -605,7 +760,7 @@ class ChatWindow(ChatSurface):
         visible, tone = parse_reply(text)
         from .action_protocol import split_reply, snapshot, parameters
         _, action, action_error = split_reply(text)
-        action_result = None
+        action_result = direct_action
         if not companion_reply and (action or action_error):
             from .actions import perform_action, ActionResult
             from . import music_actions
@@ -624,7 +779,7 @@ class ChatWindow(ChatSurface):
                     action_result = perform_action(self.pet, action, parameters(text))
                 except music_actions.MusicChoice as choice:
                     try:
-                        self.start_music_choice(choice.matches)
+                        self.start_music_choice(choice.matches, choice.preference, choice.selecting)
                     except ValueError as error:
                         self.on_failed(str(error))
                     return
@@ -633,33 +788,37 @@ class ChatWindow(ChatSurface):
         if not visible:
             self.on_failed('模型只返回了情绪标签，没有文字，请重新发送。')
             return
-        try:
-            self.store.add_turn(character, user, visible)
-        except sqlite3.Error:
-            self.on_failed('聊天记录保存失败，请检查磁盘空间。')
-            return
-        self.pending = None
-        self.pending_action_context = None
-        self.pending_actions = ()
-        self.pending_music_snapshot = None
-        self.partial_text = ''
-        self.set_busy(False)
-        self.render_history()
-        self.status.setText('已按日常陪伴范围回复。' if companion_reply else
-                            '已回复。每次最多携带最近 6 轮、12000 字符的历史，另加人设与记忆。')
-        if action_result is not None:
-            self.status.setText('动作已执行。' if action_result.executed else '动作提示：' + action_result.message)
-        # Never interrupt resting, dragging, feeding or another transient interaction.
-        if (action_result is None and tone in ('开心', '欣喜') and not self.pet.behavior.layers
-                and self.pet.behavior.mode == 'idle' and not self.pet.dragging
-                and not getattr(self.pet, 'petting', False)
-                and getattr(self.pet, 'press_point', None) is None
-                and not self.pet.playing and self.pet.isVisible()):
-            self.pet.react('happy', 1.8)
-        if self.pet.isVisible() and not self.pet.dragging:
-            self.pet.bubble.say(visible[:160] + ('…' if len(visible) > 160 else ''), 8000)
+        def commit():
+            try:
+                self.store.add_turn(character, user, visible)
+            except sqlite3.Error:
+                self.on_failed('聊天记录保存失败，请检查磁盘空间。')
+                return False
+            self.pending = None
+            self.pending_action_context = None
+            self.pending_actions = ()
+            self.pending_music_snapshot = None
+            self.partial_text = ''
+            self.set_busy(False)
+            self.render_history()
+            self.status.setText('已按日常陪伴范围回复。' if companion_reply else
+                                '已回复。携带最近最多 6 轮对话及少量相关记忆；记忆整理不额外调用 API。')
+            if action_result is not None:
+                self.status.setText('动作已执行。' if action_result.executed else '动作提示：' + action_result.message)
+            # Never interrupt resting, dragging, feeding or another transient interaction.
+            if (action_result is None and tone in ('开心', '欣喜') and not self.pet.behavior.layers
+                    and self.pet.behavior.mode == 'idle' and not self.pet.dragging
+                    and not getattr(self.pet, 'petting', False)
+                    and getattr(self.pet, 'press_point', None) is None
+                    and not self.pet.playing and self.pet.isVisible()):
+                self.pet.react('happy', 1.8)
+            if self.pet.isVisible() and not self.pet.dragging:
+                self.pet.bubble.say(visible[:160] + ('…' if len(visible) > 160 else ''), 8000)
+            return True
+        self.deliver_reply(visible, commit)
 
     def on_failed(self, message):
+        self._speech_delivery = None
         self.render_timer.stop()
         self.music_choice = None
         if self.pending:
@@ -673,15 +832,16 @@ class ChatWindow(ChatSurface):
         self.render_history()
         self.status.setText(message)
 
-    def start_music_choice(self, matches):
+    def start_music_choice(self, matches, preference='', selecting=False):
         from .music_actions import choice_messages
         self.config.validate()
         self.music_choice = matches
         self.partial_text = ''
         self.set_busy(True)
-        self.render_history(self.pending[1], '找到几个版本，正在挑选最合适的一首…')
+        self.render_history(self.pending[1], '正在从歌单里挑一首合适的歌…' if selecting else '找到几个版本，正在挑选最合适的一首…')
         self.status.setText('正在根据你的描述选择歌曲…')
-        self.request_client().start(self.config, choice_messages(self.pending[1], matches))
+        memory = self.memory_input.toPlainText()[:600] + '\n' + self.memory_context(self.pending[1])
+        self.request_client().start(self.config, choice_messages(self.pending[1], matches, preference, selecting, memory))
 
     def finish_music_choice(self, text):
         from .music_actions import chosen_item, play_item, snapshot
@@ -700,7 +860,8 @@ class ChatWindow(ChatSurface):
             return
         self.on_completed(result.message if result else '候选里没有符合这次描述的版本，暂时不播放。', companion_reply=True)
 
-    def stop(self):
+    def stop(self, *, preserve_speech_warm=False):
+        self.stop_speech(preserve_warm=preserve_speech_warm, discard=True)
         self.cancel_proactive()
         active = self.pending or self.testing
         if self.client is not None:
@@ -736,7 +897,7 @@ class ChatWindow(ChatSurface):
         return True
 
     def closeEvent(self, event):
-        self.stop()
+        self.stop(preserve_speech_warm=True)
         if not self.save_profile(quiet=True) or not self.save_profile_drafts():
             event.ignore()
             return
@@ -749,6 +910,7 @@ class ChatWindow(ChatSurface):
             self.balance_badge.shutdown()
             self.stop()
             self.work_panel.shutdown()
+            self.speech.shutdown()
             self.companion_runtime.close()
             if self.client is not None:
                 self.client.shutdown()

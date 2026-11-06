@@ -59,8 +59,24 @@ class ActionTests(unittest.TestCase):
         self.assertTrue(perform_action(pet,'sleep').executed)
         pet.set_mode.assert_called_with('sleep')
         pet.live2d_renderer=None;pet.scaled_frames={'happy':object()}
-        self.assertFalse(perform_action(pet,'wave').executed)
+        pet.react.reset_mock()
+        self.assertTrue(perform_action(pet,'wave').executed)
+        pet.react.assert_called_once_with('mouse_wave', seconds=2.0)
         self.assertTrue(perform_action(pet,'happy').executed)
+
+    def test_static_work_preview_is_advertised_and_dispatched(self):
+        from deskpet.chat.actions import available_actions
+        pet = self.pet()
+        pet.live2d_renderer = None
+        pet.scaled_frames = {'idle': object(), 'work': object()}
+        pet.character_pack = NS(states={'idle': object(), 'work': object()})
+        pet.preview_work_animation = Mock()
+        self.assertIn('work', available_actions(pet))
+        self.assertTrue(perform_action(pet, 'work').executed)
+        pet.preview_work_animation.assert_called_once()
+        pet.character_pack = None
+        self.assertNotIn('work', available_actions(pet))
+        self.assertFalse(perform_action(pet, 'work').executed)
 
     def test_walking_and_existing_interaction_rules(self):
         pet=self.pet()

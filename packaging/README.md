@@ -1,5 +1,16 @@
 # Windows 试用安装包
 
+## 0.7.0 安装包
+
+从 [GitHub 发行页](https://github.com/Rhonsua/deskpet/releases/tag/v0.7.0) 下载 `TianyiPet-0.7.0-Setup.exe`，退出旧桌宠后运行安装程序。桌宠自带显示角色所需的美术资源。语音模型、参考录音和 GPT-SoVITS 环境请另行准备。[语音包使用说明](../deskpet/speech/README.md)
+
+在项目根目录构建安装包：
+
+```powershell
+.\.venv\Scripts\python.exe -m PyInstaller --noconfirm packaging/deskpet.spec
+.\.venv\Scripts\python.exe packaging/build_installer.py --version 0.7.0
+```
+
 ## 0.6.5 发行包
 
 运行 `TianyiPet-0.6.5-Setup.exe`。安装包只带 Python SDK 和自动安装脚本；首次开始工作时先从 Node.js 官网下载 `24.20.0` Windows x64 免安装版并核验 SHA-256，再通过它自带的 npm 从官方 registry 安装锁定的 `@deepseek-ai/dsh 0.2.2-alpha.2`。工作模式通过 `TianyiWorker.exe --harness-worker` 启动，无需手动安装 Python、Node.js 或 Harness。首次需要联网，显示进度、支持取消，成功后继续原任务；下载失败可直接重试。

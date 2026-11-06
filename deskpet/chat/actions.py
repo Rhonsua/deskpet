@@ -68,7 +68,7 @@ def supports(pet, activity):
             return False
         group = motions.group_for(activity)
         return group != 'Idle' and group in motions.references
-    state = {'happy': 'happy', 'level_up':'happy', 'eat': 'eat', 'sleep': 'sleep', 'phone': 'phone',
+    state = {'mouse_wave': 'happy', 'happy': 'happy', 'level_up':'happy', 'eat': 'eat', 'sleep': 'sleep', 'phone': 'phone',
              'sing': 'sing-front', 'turn': 'sing-front'}.get(activity)
     return bool(state and state in getattr(pet, 'scaled_frames', {}))
 
@@ -89,8 +89,10 @@ def available_actions(pet):
             continue
         if action.startswith('teleport') and not callable(getattr(pet, '_start_teleport', None)):
             continue
-        if action == 'work' and not getattr(getattr(pet, 'live2d_renderer', None), 'work_available', False):
-            continue
+        if action == 'work':
+            from deskpet.animation.work_visual import supported as work_supported
+            if not work_supported(pet):
+                continue
         available.append(action)
     return available
 
@@ -155,8 +157,8 @@ def perform_action(pet, action, parameters=None):
     if behavior.layers:
         return ActionResult('我正做着一个动作，等它结束再叫我吧；散步时也可以说“停止散步”。')
     if action == 'work':
-        from deskpet.animation.work_visual import preview_active
-        if not getattr(getattr(pet, 'live2d_renderer', None), 'work_available', False):
+        from deskpet.animation.work_visual import preview_active, supported as work_supported
+        if not work_supported(pet):
             return ActionResult('当前模型还没有工作动作。')
         if behavior.mode not in ('idle', 'listen') or pet.playing:
             return ActionResult('先叫我起床、暂停音乐，再看工作的动作吧。')

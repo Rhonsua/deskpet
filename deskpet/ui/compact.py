@@ -204,7 +204,7 @@ def build(panel):
     panel.experience.setFixedHeight(6)
     panel.experience.setTextVisible(False)
     growth.addWidget(panel.experience)
-    reward_help = text('每有效听歌 5 分钟获得 2 音符，每日最多 100 音符。\n'
+    reward_help = text('每天前 60 分钟有效听歌，每满 5 分钟得 6 音符，之后每 5 分钟得 2 音符。每日最多 100 音符。\n'
                        '暂停、拖动进度和播放器静音时不累计奖励进度。', True)
     reward_help.setWordWrap(True)
     growth.addWidget(reward_help)

@@ -41,6 +41,10 @@ with tempfile.TemporaryDirectory(prefix='installer-check-', dir=preview, ignore_
             '_internal/assets/live2d/tianyi-work/tianyi-work.model3.json',
             '_internal/assets/live2d/tianyi-crawl/tianyi-crawl.model3.json'}, models
         assert archive.read('VERSION.txt').decode().strip() == VERSION
+        assert '_internal/deskpet/speech/worker.py' in names
+        assert '_internal/deskpet/speech/packs.py' in names
+        assert not any(Path(name).suffix.lower() in {'.ckpt', '.pth', '.pt', '.safetensors', '.onnx', '.ddb'}
+                       or '/tianyi-tts/' in name.lower() for name in names), 'private voice assets in installer'
         assert not any('/harness-runtime/' in name for name in names)
         assert not any(name.endswith('/node.exe') for name in names)
         assert '_internal/deskpet/chat/runtime_package_lock.json' in names
@@ -63,6 +67,9 @@ with tempfile.TemporaryDirectory(prefix='installer-check-', dir=preview, ignore_
             pure = bundle.open_embedded_archive(name)
             assert 'deskpet.music.audio.output_switch' in pure.toc, 'installer is missing the audio route fix'
             assert 'deepseek_harness' in pure.toc and 'deskpet.chat.harness_bootstrap' in pure.toc
+            assert all(module in pure.toc for module in (
+                'deskpet.speech.controller', 'deskpet.speech.settings', 'deskpet.speech.packs',
+                'deskpet.chat.memory', 'deskpet.chat.music_requests'))
             assert all(module in pure.toc for module in (
                 'deskpet.music.kugou.service', 'deskpet.music.kugou.client',
                 'deskpet.music.kugou.widget', 'deskpet.music.tools.platform_widget'))

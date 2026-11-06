@@ -43,6 +43,58 @@ class CharacterPackTests(unittest.TestCase):
         self.data['singing_motion'] = {'legs': True}
         self.assertEqual(self.load().singing_hem, 0.64)
 
+    def test_optional_work_poses_and_wait_fallback(self):
+        self.image(self.root / 'work.png')
+        self.data['states']['work'] = 'work.png'
+        pack = self.load()
+        self.assertEqual(pack.state_path('work-wait'), self.root / 'work.png')
+        self.assertEqual(set(validate_images(pack)), {'idle', 'work'})
+        self.image(self.root / 'work-wait.png')
+        self.data['states']['work-wait'] = 'work-wait.png'
+        self.assertEqual(self.load().state_path('work-wait'), self.root / 'work-wait.png')
+        del self.data['states']['work']
+        with self.assertRaisesRegex(ValueError, '需要提供 work'):
+            self.load()
+
+    def test_work_poses_inferred_without_manifest(self):
+        self.image(self.root / 'work.png')
+        self.image(self.root / 'work-wait.png')
+        pack = read_pack(self.root)
+        self.assertEqual(set(pack.states), {'idle', 'work', 'work-wait'})
+
+    def test_top_level_work_poses_preserve_legacy_state_names(self):
+        self.image(self.root / 'work.png')
+        self.data['work_poses'] = {'work': 'work.png'}
+        pack = self.load()
+        self.assertEqual(set(self.data['states']), {'idle'})
+        self.assertEqual(set(pack.states), {'idle', 'work'})
+        for value in (None, [], {'idle': 'idle.png'}, {'work-wait': 'work.png'}):
+            self.data['work_poses'] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.load()
+        self.data['work_poses'] = {'work': '../outside.png'}
+        with self.assertRaises(ValueError):
+            self.load()
+        self.data['work_poses'] = {'work': 'work.png'}
+        self.data['states']['work'] = 'work.png'
+        with self.assertRaisesRegex(ValueError, '重复'):
+            self.load()
+
+    def test_per_pose_heads_and_fallback_keep_idle_anchor(self):
+        self.image(self.root / 'work.png')
+        self.data['states']['work'] = 'work.png'
+        self.data['pose_heads'] = {'work': [.4, .6]}
+        pack = self.load()
+        self.assertEqual(pack.head_for('work'), (.4, .6))
+        self.assertEqual(pack.head_for('work-wait'), (.4, .6))
+        self.assertEqual(pack.head_for('idle'), (.5, .28))
+        for value in (None, [], {'missing': [.5, .5]}, {'work': [True, .5]},
+                      {'work': [.5]}, {'work': [.5, float('nan')]}, {'work': [1.1, .5]},
+                      {'work': [10 ** 400, .5]}):
+            self.data['pose_heads'] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.load()
+
     def test_disabled_singing_keeps_old_pack_behavior(self):
         for value in ({}, {'legs': False}, {'hem': 0.65}, {'legs': False, 'hem': 0.65}):
             self.data['singing_motion'] = value
