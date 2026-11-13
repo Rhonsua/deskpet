@@ -1,6 +1,7 @@
 """Explicit vertical repositioning, separate from passive smoke teleportation."""
 from PySide6.QtCore import QPropertyAnimation, QPoint, QEasingCurve
 from deskpet.pet.behavior import Action
+from deskpet.animation.activity_area import roaming_bounds, roaming_allowed
 
 
 def stop_move(pet):
@@ -14,7 +15,8 @@ def stop_move(pet):
 def move_vertical(pet,direction):
     if (pet.behavior.mode not in ('idle','listen') or pet.playing or pet.dock_edge
             or pet.behavior.layers):return False
-    bounds=pet.screen_bounds()
+    bounds=roaming_bounds(pet)
+    if not roaming_allowed(pet,bounds):return False
     bottom=max(bounds.top(),bounds.bottom()+1-pet.height())
     target=max(bounds.top(),min(bottom,pet.y()+round(direction*80*pet.scale)))
     if target==pet.y():return False

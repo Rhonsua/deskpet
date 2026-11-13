@@ -45,6 +45,48 @@ class LibraryTests(unittest.TestCase):
 
 
 class QueueTests(unittest.TestCase):
+    def test_reverse_order_stops_at_front_and_manual_next_wraps(self):
+        queue = PlaybackQueue('order')
+        queue.reverse = True
+        queue.reset(['a', 'b', 'c'], 2)
+        self.assertEqual(queue.advance(ended=True), 1)
+        self.assertEqual(queue.advance(ended=True), 0)
+        self.assertIsNone(queue.advance(ended=True))
+        self.assertEqual(queue.advance(), 2)
+        self.assertEqual(queue.advance(-1), 0)
+
+    def test_reverse_loop_single_and_unselected_start(self):
+        queue = PlaybackQueue('loop')
+        queue.reverse = True
+        queue.reset(['a', 'b', 'c'], -1)
+        self.assertEqual(queue.advance(), 2)
+        queue.index = 0
+        self.assertEqual(queue.advance(ended=True), 2)
+        queue.mode = 'single'
+        self.assertEqual(queue.advance(ended=True), 2)
+        self.assertEqual(queue.advance(), 1)
+
+    def test_reordering_preserves_current_and_shuffle_identities(self):
+        queue = PlaybackQueue('shuffle')
+        queue.reset(['a', 'b', 'c', 'd'], 1)
+        queue.bag, queue.history = [2, 3], [0]
+        queue.reorder(['d', 'c', 'a', 'b'])
+        self.assertEqual(queue.paths[queue.index], 'b')
+        self.assertEqual([queue.paths[i] for i in queue.bag], ['c', 'd'])
+        self.assertEqual(queue.paths[queue.advance(-1)], 'a')
+
+    def test_reverse_empty_single_song_and_shuffle(self):
+        queue = PlaybackQueue('order')
+        queue.reverse = True
+        self.assertIsNone(queue.advance(ended=True))
+        queue.reset(['a'], 0)
+        self.assertIsNone(queue.advance(ended=True))
+        queue.mode = 'loop'
+        self.assertEqual(queue.advance(ended=True), 0)
+        queue.mode = 'shuffle'
+        queue.reset(['a', 'b', 'c'], 0)
+        self.assertEqual(set([0, queue.advance(), queue.advance()]), {0, 1, 2})
+
     def test_order_stops_at_end_but_manual_next_wraps(self):
         queue = PlaybackQueue('order')
         queue.reset(['a', 'b'], 1)

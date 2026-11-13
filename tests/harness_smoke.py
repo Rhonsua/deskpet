@@ -21,6 +21,8 @@ def main():
     parser.add_argument('--worker', type=Path)
     parser.add_argument('--strict-path', action='store_true')
     parser.add_argument('--report', type=Path)
+    parser.add_argument('--followup-only', action='store_true',
+                        help='Check in-flight and late inputs using only a local text response')
     parser.add_argument('--runtime', type=Path, help='Isolated official runtime to test')
     options = parser.parse_args()
     fresh_runtime = bool(options.runtime and not (options.runtime / 'deskpet-runtime-ready.json').exists())
@@ -31,6 +33,7 @@ def main():
     output=workspace/'result.txt'
     denied_marker=workspace/'denied.txt'
     state={'step':0,'requests':[]}
+    followups_ready = threading.Event()
     tools=[('write',{'file_path':str(output),'content':'HARNESS_WRITE_OK'}),
            ('read',{'file_path':str(output)}),
            ('pwsh',{'description':'Verify local command execution','command':"Write-Output 'HARNESS_COMMAND_OK'"}),
@@ -43,6 +46,8 @@ def main():
             state['requests'].append(data)
             state['step']+=1
             step=state['step']
+            if options.followup_only and step == 1:
+                followups_ready.wait(timeout=15)
             events=[('message_start',{'type':'message_start','message':{'id':'fake','type':'message','role':'assistant','model':'deepseek-flash','content':[],'usage':{'input_tokens':1,'output_tokens':0}}})]
             if step<=len(tools):
                 name,args=tools[step-1]
@@ -83,10 +88,27 @@ def main():
         threading.Thread(target=read,daemon=True).start()
         process.stdin.write(json.dumps(payload)+'\n');process.stdin.flush()
         deadline=time.monotonic()+1200
+        sent = 0
+        def control(**fields):
+            process.stdin.write(json.dumps(fields)+'\n')
+            process.stdin.flush()
         while time.monotonic()<deadline:
             event=messages.get(timeout=max(.1,deadline-time.monotonic()))
             assert event is not None,'worker ended without terminal event'
             events.append(event)
+            if options.followup_only:
+                data = event.get('event', {})
+                if data.get('event', {}).get('type') == 'step/start' and sent == 0:
+                    for seq in (1, 2):
+                        control(type='followup', seq=seq, text=f'DESKPET_FOLLOWUP_{seq}')
+                    sent = 2
+                if data.get('type') == 'input_received' and data.get('seq') == 2:
+                    followups_ready.set()
+                if event['type'] == 'idle':
+                    if sent == 2:
+                        control(type='followup', seq=3, text='DESKPET_LATE_3')
+                        sent = 3
+                    control(type='finish_turn', seq=event['seq'])
             if event['type']=='approval':
                 approvals.append(event['request'])
                 if cancel:
@@ -105,6 +127,20 @@ def main():
                 return
         raise AssertionError('overall worker timeout')
     try:
+        if options.followup_only:
+            tools.clear()
+            payload['interactive'] = True
+            run_turn()
+            bodies = [e['event'] for e in events if e['type'] == 'event']
+            assert [b['seq'] for b in bodies if b['type'] == 'input_received'] == [0, 1, 2, 3]
+            assert [e['seq'] for e in events if e['type'] == 'idle'] == [2, 3]
+            inserts = [b['event']['data'] for b in bodies if b.get('event', {}).get('type') == 'agent/inbox/spliced']
+            steered = [m for i in inserts if i['target']=='next-step' for m in i['inserted']]
+            for seq in (1, 2):
+                assert f'DESKPET_FOLLOWUP_{seq}' in json.dumps(steered), 'input missed the running turn'
+            assert 'DESKPET_LATE_3' in json.dumps(state['requests'][-1])
+            print('PASS real DSH: two next-step inputs, one late follow-up, one session, zero paid API calls')
+            return
         run_turn()
         setup_events = [e for e in events if e.get('type') == 'progress' and e.get('phase') == 'setup']
         if fresh_runtime:

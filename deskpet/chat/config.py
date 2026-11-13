@@ -64,13 +64,16 @@ class ProviderConfig:
     api_key: str = ''
     remember_key: bool = True
     stream: bool = True
+    transport: str = 'qt'
 
     def validate(self):
         url = endpoint(self.base_url)
         if not self.model.strip() or len(self.model) > 200:
             raise ValueError('请填写服务商提供的模型名称（最多 200 字符）。')
-        if any(c in self.api_key for c in '\r\n'):
-            raise ValueError('API Key 不能包含换行。')
+        if any(ord(c) < 32 or ord(c) == 127 for c in self.api_key):
+            raise ValueError('API Key 不能包含换行或控制字符。')
+        if self.transport not in ('qt', 'curl'):
+            raise ValueError('请选择有效的连接方式。')
         return url
 
 
@@ -82,11 +85,12 @@ class ConfigFile:
         if not self.path.exists():
             return ProviderConfig(), ''
         try:
-            raw = json.loads(self.path.read_text(encoding='utf-8'))
+            raw = json.loads(self.path.read_text(encoding='utf-8-sig'))
             config = ProviderConfig(base_url=str(raw.get('base_url', '')),
                                     model=str(raw.get('model', '')),
                                     remember_key=raw.get('remember_key', True) is True,
-                                    stream=raw.get('stream', True) is True)
+                                    stream=raw.get('stream', True) is True,
+                                    transport='curl' if raw.get('transport') == 'curl' else 'qt')
             if raw.get('key_dpapi'):
                 try:
                     config.api_key = _protect(base64.b64decode(raw['key_dpapi'], validate=True), True).decode('utf-8')
@@ -99,7 +103,7 @@ class ConfigFile:
     def save(self, config):
         config.validate()
         raw = dict(base_url=config.base_url.strip(), model=config.model.strip(),
-                   remember_key=config.remember_key, stream=config.stream)
+                   remember_key=config.remember_key, stream=config.stream, transport=config.transport)
         if config.remember_key and config.api_key:
             raw['key_dpapi'] = base64.b64encode(_protect(config.api_key.encode('utf-8'))).decode('ascii')
         self.path.parent.mkdir(parents=True, exist_ok=True)

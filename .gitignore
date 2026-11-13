@@ -33,6 +33,8 @@ assets/character/**/*.png
 assets/character/*.png
 # Locally generated head-petting artwork is distributed with other runtime art.
 assets/ui/headpat/
+assets/stickers/**/*.png
+assets/stickers/**/*.webp
 experiments/
 character-packages/
 docs/model-issues/

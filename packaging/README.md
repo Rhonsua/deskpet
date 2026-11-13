@@ -1,77 +1,52 @@
-# Windows 试用安装包
+# Windows 安装包
 
-## 0.7.0 安装包
+## 当前版本：0.7.1
 
-从 [GitHub 发行页](https://github.com/Rhonsua/deskpet/releases/tag/v0.7.0) 下载 `TianyiPet-0.7.0-Setup.exe`，退出旧桌宠后运行安装程序。桌宠自带显示角色所需的美术资源。语音模型、参考录音和 GPT-SoVITS 环境请另行准备。[语音包使用说明](../deskpet/speech/README.md)
+从 [GitHub 发行页](https://github.com/Rhonsua/deskpet/releases/tag/v0.7.1) 下载 `TianyiPet-0.7.1-Setup.exe`，退出旧桌宠后安装。版本号以 `deskpet/version.py` 为准；安装包不会自动包含后续源码修改。
 
-在项目根目录构建安装包：
+安装包包含 Python、Qt、Live2D 运行依赖和当前洛天依素材，排除 Miku、自定义角色、Mod 本体、个人音乐、聊天记录、API 配置及语音模型。语音模型和 GPT-SoVITS 环境单独准备，见[语音包说明](../deskpet/speech/README.md)。B站播放需要 Microsoft Edge WebView2 Runtime，登录或验证由用户在网页完成。
 
-```powershell
-.\.venv\Scripts\python.exe -m PyInstaller --noconfirm packaging/deskpet.spec
-.\.venv\Scripts\python.exe packaging/build_installer.py --version 0.7.0
-```
-
-## 0.6.5 发行包
-
-运行 `TianyiPet-0.6.5-Setup.exe`。安装包只带 Python SDK 和自动安装脚本；首次开始工作时先从 Node.js 官网下载 `24.20.0` Windows x64 免安装版并核验 SHA-256，再通过它自带的 npm 从官方 registry 安装锁定的 `@deepseek-ai/dsh 0.2.2-alpha.2`。工作模式通过 `TianyiWorker.exe --harness-worker` 启动，无需手动安装 Python、Node.js 或 Harness。首次需要联网，显示进度、支持取消，成功后继续原任务；下载失败可直接重试。
-
-工作会话放在应用用户数据目录的 `work-sessions` 中，运行文件在同级 `work-runtime/dsh-0.2.2-alpha.2-node-24.20.0-x64` 中。程序更新和官方 DSH 重装根目录都不会覆盖它们；不修改系统 PATH。完整安装后写就绪标记，已安装时直接复用；中断不会留下假成功标记。源码开发环境仍使用项目内的隔离后端。安装日志位于 `work-runtime/setup.log`，不传入用户 API Key。
-
-本版增加本地与 B站轮流循环，修复重启后的歌单恢复和 B站加载期间播放控制；保留普通酷狗与网易云共用音乐页、GitHub 发行版更新检测，并包含工位项目与对话侧栏、空对话复用和清理、进入对话定位最新消息，以及各页独立背景位置调整、网易云工具背景。保留原有半透明外观，不包含仅供比较的黑底和气泡预览。延续工作姿势和概率触发的蛄蛹动作。只包含当前天依模型，排除 Miku、Mod 本体、用户配置、音乐和聊天记录。安装包不包含完整 Node/npm 后端目录，保持较小体积。下载依赖时保留其官方许可证。
-
-构建：
-
-```powershell
-.\.venv\Scripts\python.exe -m PyInstaller --noconfirm packaging/deskpet.spec
-.\.venv\Scripts\python.exe packaging/build_installer.py --version 0.6.5
-.\.venv\Scripts\python.exe tests/harness_smoke.py --worker dist/TianyiPet/TianyiWorker.exe --runtime local-work/bootstrap-release-check/runtime --strict-path --report dist/TEST-REPORT-0.6.5-harness.json
-.\.venv\Scripts\python.exe tests/smoke_installer.py
-```
-
-`--strict-path` 验证只提供系统路径，屏蔽开发机的 Node.js、Python、PowerShell 7 等 PATH 依赖；使用本机模拟模型接口，不消耗 API。验证覆盖读写文件、命令执行、允许/拒绝审批、取消与恢复会话。安装检查只向临时目录安装，不改变实际快捷方式和注册表。
-
-自动安装脚本也可以在开发环境单独运行：`.\.venv\Scripts\python.exe -m deskpet.chat.harness_bootstrap --directory local-work/bootstrap-release-check/runtime`。版本和依赖清单随桌宠版本更新，不直接追踪未经验证的最新后端。
-
-## 0.5.0 历史发行说明
-
-0.5.0 历史发行物包括 **EXE 安装包与免安装 ZIP**：包含 API 加载并行、边缘收起优化、摸头反馈、Live2D 左右散步、拖起闭眼挥臂，以及歌词跟随位置调整。运行 `TianyiPet-0.5.0-Setup.exe` 安装，或完整解压 ZIP 后运行 `TianyiPet.exe`。安装包剔除未使用的 Qt PDF、虚拟键盘及 QML 依赖和 AVIF 解码器，采用高压缩率；保留软件 OpenGL 与音频、TLS 后端。下文 0.4.2 功能说明为历史记录。
-
-构建 0.5.0 ZIP：先执行 `.\.venv\Scripts\python.exe -m PyInstaller --noconfirm packaging/deskpet.spec`，然后执行 `.\.venv\Scripts\python.exe packaging/build_portable.py --version 0.5.0`。输出 `dist/TianyiPet-0.5.0-portable.zip` 及同名 `.zip.sha256` 校验文件；压缩包包含 `VERSION.txt` 和 `更新公告.txt`。只收录当前正在使用的洛天依模型及其依赖，不收录旧模型备份、工程、Miku、Mod 本体或用户数据。
-
-0.4.2 阶段新增网易云网页登录及播放、歌词右键颜色/隐藏/左键穿透，并修复中文描边遮挡和本地 MP3 节拍解码。默认使用 Live2D 洛天依，包含静态切换、自定义 PNG 角色接口、弹性拖拽、鼠标互动与背景效果，以及可选 API 文字聊天、洛天依人格插件、本地陪伴任务限制和头像图标，面向 Windows 10 / 11 x64。包含 Python、Qt、Live2D 运行依赖、当前洛天依模型与内置静态角色图片、本地音频辅助程序及 B站网页辅助程序，无需用户安装 Python。B站仍需系统安装 Microsoft Edge WebView2 Runtime；网页登录、验证码与网站播放限制由用户在网页处理。
-
-主程序只带 Mod 接口、管理页面与加载器，不包含目标陪伴代码或任何内置注册的 Mod。新数据目录中的扩展列表为空，默认没有启用任何 Mod。目标陪伴作为单独的 ZIP 分享，主程序和免安装包均排除 `deskpet.mods.goals`。
-
-默认安装到当前用户的 `%LOCALAPPDATA%\Programs\TianyiPet`，无需管理员权限，可选桌面快捷方式，并添加开始菜单及 Windows 卸载入口。关闭旧桌宠后再安装。开机自启仍在桌宠设置中由用户选择。
-
-卸载按安装清单删除程序文件，保留听歌记录、用户设置及额外放入目录的文件。不会递归删除整个用户选择的安装目录。更新已运行的程序前，安装器会要求先从托盘退出。
-
-安装包为本地生成的未签名试用版，尚未验证全新电脑、杀毒软件兼容性或系统升级场景。安装/卸载的文件操作与打包版的图片、原生 Live2D 渲染与静态切换、本地音频和 WebView2 启动已在独立临时目录测试。真实快捷方式、Windows“已安装的应用”入口及跨机器使用仍需试用确认。
+首次进入工作模式，缺少环境时会先准备校验过的 Node.js，再安装锁定版本的官方 DSH；不修改系统 PATH。工作会话和后台环境保存在应用用户数据目录，应用更新不会覆盖。版本清单以 `deskpet/chat/harness_runtime.py` 与自动安装模块为准。
 
 ## 构建
 
-在 Windows x64 的项目根目录执行：
+在项目根目录执行：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements/build.txt
 .\.venv\Scripts\python.exe -m PyInstaller --noconfirm packaging/deskpet.spec
-.\.venv\Scripts\python.exe packaging/build_goal_mod.py
-.\.venv\Scripts\python.exe packaging/build_installer.py --portable
+.\.venv\Scripts\python.exe packaging/build_installer.py
+```
+
+`build_installer.py` 默认读取当前版本，必须与源码版本一致；对应更新公告需在 `docs/release-notes/` 中。需要免安装包时才添加 `--portable`。打包使用 PyInstaller 目录模式，以及 Windows 的 IExpress 和 .NET Framework C# 编译器。前台和后台分别使用可执行入口，让音频、网页辅助进程保留通信管道。
+
+输出按当前版本命名：
+
+- `dist/TianyiPet-0.7.1-Setup.exe`：安装包。
+- `dist/SHA256SUMS.txt`：发行附件校验值。
+- `dist/TianyiPet/`：构建后的程序目录。
+- `build/`：可重新生成的构建中间文件。
+
+目标陪伴与工作人设 Mod 分别通过 `packaging/build_goal_mod.py`、`packaging/build_work_persona_mod.py` 构建为独立 ZIP。语音安装助手位于 `packaging/voice_setup/`，与桌宠安装包和语音模型分别分发。
+
+## 检查与清理
+
+```powershell
+.\.venv\Scripts\python.exe tests/run_suite.py
 .\.venv\Scripts\python.exe tests/smoke_installer.py
 ```
 
-打包使用 PyInstaller 目录模式；安装器使用 Windows 自带的 IExpress 和 .NET Framework C# 编译器，不依赖在线安装编译工具。保留两套可执行入口是为了让后台音频/网页进程拥有通信管道，前台不显示控制台。
+安装检查使用临时目录，不改变真实快捷方式和注册表。`tests/harness_smoke.py` 可单独检查打包后的工作后端；其 `--strict-path` 选项屏蔽开发机的 Node.js、Python 等 PATH 依赖，使用模拟模型接口检查读写文件、命令、审批、取消与恢复。
 
-输出文件：
+`build/`、`preview/`、临时安装测试目录与字节码缓存均可重新生成；有效回归测试保留。安装包按用户指定版本保留，不再按旧文档中“保留 0.5.0 及以后全部版本”的规则累积。2026-11-08 的本机清理保留现有 0.7.0 安装包、语音助手和独立 Mod 包；2026-11-13 将后续源码更新打包为 0.7.1，保留上一版 0.7.0。详细删除清单见本机 `local-work/cleanup-latest.json`。
 
-- `dist/TianyiPet-0.6.5-Setup.exe`：新版，有安装进度、位置选择、快捷方式和卸载入口。
-- `dist/TianyiPet-0.6.5-portable.zip`：仅加 `--portable` 时另行生成，解压后运行 `TianyiPet.exe`。
-- `dist/TianyiPet-GoalCompanion-0.1.0.zip`：单独的目标陪伴 Mod，含源码、固定入口、元数据、说明和 MIT LICENSE；不包含用户数据库。
-- 本次新版通过验证后，清理版本低于 0.5.0 的旧安装包，保留 0.5.0 及之后的版本。
-- `dist/SHA256SUMS.txt`：本次生成安装包、免安装包及已存在的目标 Mod ZIP 的 SHA-256。
-- `dist/TEST-REPORT-0.6.5-installer.json`：本机安装、启动和卸载检查结果。
+历史更新说明保留在 `docs/release-notes/`，历史构建命令不要用于当前源码。`build/` 和 `dist/` 不提交 Git；安装包只通过 Releases 附件发布。
 
-`build/` 和 `dist/` 不提交到 Git。安装包通过 GitHub Releases 附件提供，不提交到代码历史。安装包仅包含洛天依，明确排除 Miku 素材、Miku 专用人格、自定义角色包和历史模型工程；保留通用角色及人格模板。用户本地已有的 Miku 目录不会因构建而删除。
+## 安装与卸载
+
+默认安装到 `%LOCALAPPDATA%\Programs\TianyiPet`，无需管理员权限，可选桌面快捷方式，并提供开始菜单和卸载入口。更新时先退出运行中的桌宠；开机自启由用户在设置中选择。
+
+卸载依据安装清单删除程序文件，保留个人数据和额外放入目录的文件，不递归清空整个安装位置。安装包未签名，本机检查不等同于已验证所有电脑或杀毒软件环境。
 
 ## GitHub 发行版更新
 

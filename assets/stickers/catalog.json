@@ -1,0 +1,322 @@
+[
+  {
+    "id": "tianyi_hello",
+    "file": "tianyi/hello.webp",
+    "title": "你好",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_happy",
+    "file": "tianyi/happy.webp",
+    "title": "开心",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_laugh",
+    "file": "tianyi/laugh.webp",
+    "title": "笑哭",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_shy",
+    "file": "tianyi/shy.webp",
+    "title": "害羞",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_love",
+    "file": "tianyi/love.webp",
+    "title": "喜欢",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_hug",
+    "file": "tianyi/hug.webp",
+    "title": "抱抱",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_cheer",
+    "file": "tianyi/cheer.webp",
+    "title": "加油",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_thanks",
+    "file": "tianyi/thanks.webp",
+    "title": "谢谢",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_puzzled",
+    "file": "tianyi/puzzled.webp",
+    "title": "疑惑",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_thinking",
+    "file": "tianyi/thinking.webp",
+    "title": "思考",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_shocked",
+    "file": "tianyi/shocked.webp",
+    "title": "震惊",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_sulk",
+    "file": "tianyi/sulk.webp",
+    "title": "哼",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_cry",
+    "file": "tianyi/cry.webp",
+    "title": "委屈",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_tired",
+    "file": "tianyi/tired.webp",
+    "title": "累了",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_sleepy",
+    "file": "tianyi/sleepy.webp",
+    "title": "困困",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_hungry",
+    "file": "tianyi/hungry.webp",
+    "title": "饿了",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_yum",
+    "file": "tianyi/yum.webp",
+    "title": "好吃",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_music",
+    "file": "tianyi/music.webp",
+    "title": "听歌",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_work",
+    "file": "tianyi/work.webp",
+    "title": "努力中",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "tianyi_bye",
+    "file": "tianyi/bye.webp",
+    "title": "晚安",
+    "character": "洛天依",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_hello",
+    "file": "aling/hello.webp",
+    "title": "你好",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_happy",
+    "file": "aling/happy.webp",
+    "title": "开心",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_laugh",
+    "file": "aling/laugh.webp",
+    "title": "笑哭",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_shy",
+    "file": "aling/shy.webp",
+    "title": "害羞",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_love",
+    "file": "aling/love.webp",
+    "title": "喜欢",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_hug",
+    "file": "aling/hug.webp",
+    "title": "抱抱",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_cheer",
+    "file": "aling/cheer.webp",
+    "title": "加油",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_thanks",
+    "file": "aling/thanks.webp",
+    "title": "谢谢",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_puzzled",
+    "file": "aling/puzzled.webp",
+    "title": "疑惑",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_thinking",
+    "file": "aling/thinking.webp",
+    "title": "思考",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_shocked",
+    "file": "aling/shocked.webp",
+    "title": "震惊",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_sulk",
+    "file": "aling/sulk.webp",
+    "title": "哼",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_cry",
+    "file": "aling/cry.webp",
+    "title": "委屈",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_tired",
+    "file": "aling/tired.webp",
+    "title": "累了",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_sleepy",
+    "file": "aling/sleepy.webp",
+    "title": "困困",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_hungry",
+    "file": "aling/hungry.webp",
+    "title": "饿了",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_yum",
+    "file": "aling/yum.webp",
+    "title": "好吃",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_music",
+    "file": "aling/music.webp",
+    "title": "听歌",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_work",
+    "file": "aling/work.webp",
+    "title": "努力中",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  },
+  {
+    "id": "aling_bye",
+    "file": "aling/bye.webp",
+    "title": "晚安",
+    "character": "乐正绫",
+    "verified": true,
+    "source": ""
+  }
+]

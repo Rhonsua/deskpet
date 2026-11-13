@@ -52,6 +52,8 @@ with tempfile.TemporaryDirectory(prefix='installer-check-', dir=preview, ignore_
         assert not any('/work-sessions/' in name or '/local-work/harness/' in name for name in names)
         assert not any('previous-action-map' in name for name in names)
         assert not any('miku' in name.lower() for name in names)
+        assert not any(name.lower().endswith(('.ckpt', '.pth', '.safetensors', '/ref.wav'))
+                       for name in names), 'private speech files in installer'
         assert '_internal/deskpet/chat/personas/luotianyi.json' in names
         assert '_internal/assets/icons/tianyi.ico' in names
         assert not any('deskpet/mods/goals' in name.replace('\\', '/') for name in names), names
@@ -81,9 +83,18 @@ with tempfile.TemporaryDirectory(prefix='installer-check-', dir=preview, ignore_
                    check=True, timeout=240, creationflags=flags)
     result = json.loads(report.read_text(encoding='utf-8'))
     assert result.get('ok') and result.get('live2d') and result.get('chat') and result.get('avatar_icon'), result
-    assert all(result.get(key) for key in ('live2d_walk', 'live2d_work', 'live2d_crawl', 'static_walk', 'chat_worker')), result
+    assert all(result.get(key) for key in ('live2d_walk', 'live2d_work', 'live2d_crawl', 'static_walk', 'chat_worker', 'work_formula')), result
     assert result.get('goal_code_excluded') and result.get('mods_empty_by_default') and result.get('external_goal_package'), result
     assert all(result.get(key) for key in ('music_tools', 'netease_crypto', 'netease_browser', 'lyrics_menu', 'beat_worker')), result
+    # The 0.7.0 regression only reproduced on the frozen worker's Windows pipe.
+    import unittest
+    from unittest.mock import patch
+    from tests.test_chat_remote import WorkerRoundTripTests
+    command = (str(installed / 'TianyiWorker.exe'), ['--chat-worker'])
+    with patch('deskpet.chat.remote.worker_command', return_value=command):
+        suite = unittest.defaultTestLoader.loadTestsFromTestCase(WorkerRoundTripTests)
+        assert unittest.TextTestRunner().run(suite).wasSuccessful(), 'frozen Unicode chat failed'
+    result['chat_worker_unicode'] = True
     (installed / 'keep-me.txt').write_text('user file', encoding='utf-8')
     subprocess.run([str(installed / 'TianyiSetup.exe'), '--uninstall', '--quiet', '--test', '--dir', str(installed)],
                    check=True, timeout=240, creationflags=flags)

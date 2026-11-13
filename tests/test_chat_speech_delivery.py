@@ -55,6 +55,48 @@ class SynchronizedReplyTests(unittest.TestCase):
                 self.assertEqual(len(window.store.history(window.character)), 2)
                 self.assertFalse(callbacks[0]())
 
+    def test_song_requests_publish_text_without_synthesis(self):
+        with self.voiced() as (window, callbacks):
+            for command in ('随便唱首歌听听', '唱一下《三只小熊》', '帮我挑一首适合放松的歌'):
+                window.input.setPlainText(command)
+                window.send_message()
+                if command == '唱一下《三只小熊》':
+                    window.on_completed('[动作:music_play {"pattern":"三只小熊"}]这就找。')
+                if window.music_choice is not None:
+                    window.on_completed('{"id":"0"}')
+                self.assertIsNone(window.pending, command)
+                self.assertEqual(callbacks, [], command)
+                self.assertEqual(window.store.history(window.character)[-2]['content'], command)
+            self.assertGreater(self.p.start_track.call_count, 0)
+            self.complete(window)
+            self.assertEqual(len(callbacks), 1)
+
+    def test_chat_about_singing_is_spoken_and_does_not_start_music(self):
+        with self.voiced() as (window, callbacks):
+            window.input.setPlainText('唱歌累不累')
+            window.send_message()
+            window.on_completed('[温柔]唱歌很开心，不过也会想休息一下呀。')
+            self.assertEqual(len(callbacks), 1)
+            self.assertEqual(window.store.history(window.character), [])
+            self.assertTrue(callbacks[0]())
+            self.assertIn('也会想休息', window.store.history(window.character)[-1]['content'])
+            self.p.start_track.assert_not_called()
+            self.p.bilibili.start_process.assert_not_called()
+
+    def test_microphone_action_skips_speech_for_direct_and_ai_command(self):
+        with self.voiced() as (window, callbacks), patch('deskpet.chat.actions.perform_action',
+                return_value=NS(message='麦克风准备好了', executed=True)) as perform:
+            window.pet.scaled_frames = {'sing-front': object()}
+            window.input.setPlainText('唱一下')
+            window.send_message()
+            self.assertIsNone(window.pending)
+            window.input.setPlainText('今天想看你表演')
+            window.send_message()
+            window.on_completed('[动作:sing]好呀。')
+            self.assertEqual([call.args[1] for call in perform.call_args_list], ['sing','sing'])
+            self.assertIsNone(window.pending)
+            self.assertEqual(callbacks, [])
+
     def test_cancel_or_work_switch_discards_pending_and_stale_audio(self):
         for operation in ('stop', 'work', 'close'):
             with self.voiced() as (window, callbacks):
@@ -112,16 +154,28 @@ class ProactiveVoiceTests(unittest.TestCase):
         runtime.client = NS(cancel=Mock())
         return runtime, callbacks
 
-    def test_proactive_waits_and_rechecks_idle_at_delivery(self):
+    def test_proactive_voice_survives_dragging_during_synthesis_and_playback(self):
         for interrupted in (False, True):
             runtime, callbacks = self.runtime()
             runtime._completed('hello')
             runtime.window.store.add_proactive.assert_not_called()
             self.assertTrue(runtime.busy)
-            if interrupted: runtime.current_state = CompanionState(idle_seconds=0, dragging=True)
-            self.assertEqual(callbacks[0](), not interrupted)
+            if interrupted:
+                runtime.current_state = CompanionState(idle_seconds=0, dragging=True)
+                runtime.on_interaction()
+                runtime.window.speech.stop.assert_not_called()
+            self.assertTrue(callbacks[0]())
             self.assertFalse(runtime.busy)
-            self.assertEqual(runtime.window.store.add_proactive.call_count, 0 if interrupted else 1)
+            self.assertEqual(runtime.window.store.add_proactive.call_count, 1)
+            runtime.on_interaction()
+            runtime.window.speech.stop.assert_not_called()
+
+    def test_interaction_before_voice_still_cancels_unsolicited_request(self):
+        runtime, callbacks = self.runtime()
+        runtime.on_interaction()
+        self.assertIsNone(runtime.ticket)
+        runtime.client.cancel.assert_called_once()
+        runtime.window.speech.stop.assert_not_called()
 
     def test_user_cancellation_stops_synthesis_and_ignores_callback(self):
         runtime, callbacks = self.runtime()

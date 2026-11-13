@@ -29,6 +29,12 @@
     if (state.video && state.onSeeked) state.video.removeEventListener('seeked', state.onSeeked);
     state.video = video;
     state.media_id = (state.media_id || 0) + 1;
+    state.restarting = false;
+    state.restart_settled = false;
+    state.restart_origin = null;
+    state.restart_id = null;
+    state.seen_playing = false;
+    state.ended = false;
     state.onPlaying = () => { state.seen_playing = true; };
     video.addEventListener('playing', state.onPlaying);
   }
@@ -49,28 +55,59 @@
       video.currentTime = config.position;
     }
   }
-  if (config.command === 'restart') {
+  // evaluate_js may execute successfully while its reply is lost. Retrying the
+  // same host command must not seek again after the intro has already played.
+  if (config.command === 'restart' && state.restart_id !== config.restart_id) {
     state.ended = false;
     state.restarting = true;
-    video.pause();
-    // Seeking is asynchronous. Start again on seeked as well as immediately;
-    // the host verifies the result and retries if the site ignores the seek.
-    if (state.onSeeked) video.removeEventListener('seeked', state.onSeeked);
-    state.onSeeked = () => {
-      if (state.restarting && video.currentTime < 1)
-        Promise.resolve(video.play()).catch(() => {});
-    };
-    video.addEventListener('seeked', state.onSeeked, {once:true});
-    video.currentTime = 0;
-    Promise.resolve(video.play()).catch(() => {});
+    state.restart_settled = false;
+    state.restart_origin = null;
+    state.restart_target = Number.isFinite(config.position) ? Math.max(0, config.position) : 0;
+    const opening = window.__tianyiOpening;
+    const elapsed = opening ? Math.max(0, (performance.now() - opening.clock) / 1000) : 0;
+    const adopt = config.allow_opening && state.restart_target === 0 && opening?.valid &&
+      opening.video === video && !video.paused && !video.ended && !video.seeking && video.readyState >= 2 &&
+      video.currentTime >= opening.position - .1 &&
+      video.currentTime <= opening.position + elapsed * Math.max(opening.rate, video.playbackRate || 1) + .75;
+    if (adopt) {
+      state.restarting = false;
+      state.restart_settled = true;
+      state.restart_id = config.restart_id;
+      state.restart_origin = {clock:opening.clock, position:opening.position};
+    } else {
+      video.pause();
+      // Seeking is asynchronous. Start again on seeked as well as immediately;
+      // the host verifies the result and retries if the site ignores the seek.
+      if (state.onSeeked) video.removeEventListener('seeked', state.onSeeked);
+      state.onSeeked = () => {
+        if (state.restarting && Math.abs(video.currentTime - state.restart_target) < 1) {
+          state.restart_settled = true;
+          state.restarting = false;
+          if (!state.restart_origin)
+            state.restart_origin = {clock: performance.now(), position: video.currentTime};
+          Promise.resolve(video.play()).catch(() => {});
+        }
+      };
+      video.addEventListener('seeked', state.onSeeked, {once:true});
+      video.currentTime = state.restart_target;
+      state.restart_id = config.restart_id;
+      // currentTime may reach the target before the async seeked/playing events
+      // reach us. Remember this observation, even if the next poll arrives late.
+      if (Math.abs(video.currentTime - state.restart_target) < 1)
+        state.restart_origin = {clock: performance.now(), position: video.currentTime};
+      Promise.resolve(video.play()).catch(() => {});
+    }
   }
   if (config.command === 'pause') {
     state.restarting = false;
     if (state.onSeeked) video.removeEventListener('seeked', state.onSeeked);
   }
-  if (state.restarting && !video.seeking && !video.paused &&
-      video.currentTime < Math.min(2, video.duration / 2))
+  if (state.restarting && !video.seeking && Math.abs(video.currentTime - state.restart_target) < 1) {
+    state.restart_settled = true;
     state.restarting = false;
+  }
+  if (state.restart_settled && !state.restart_origin)
+    state.restart_origin = {clock: performance.now(), position: video.currentTime};
   if (config.command === 'play') { state.ended = false; Promise.resolve(video.play()).catch(() => {}); }
   if (config.command === 'resume' && !state.ended && !video.ended && video.paused)
     Promise.resolve(video.play()).catch(() => {});
@@ -81,6 +118,10 @@
     playing:!video.paused && !video.ended && video.readyState>=2, paused:video.paused,
     ended:!state.restarting && (state.ended || video.ended), seen_playing:state.seen_playing,
     media_id:state.media_id, seeking:video.seeking, ready_state:video.readyState,
+    restart_settled:!!state.restart_settled,
+    restart_observed:!!state.restart_origin,
+    restart_elapsed:state.restart_origin ? Math.max(0, (performance.now() - state.restart_origin.clock) / 1000) : 0,
+    sample_clock:performance.now() / 1000,
     playback_rate:video.playbackRate || 1, user_interacted:!!state.user_interacted,
     buffered_to_end:!!video.buffered && Array.from({length:video.buffered.length}, (_,i) => i).some(i =>
       video.buffered.start(i) <= video.currentTime + .05 && video.buffered.end(i) >= video.duration - .05),

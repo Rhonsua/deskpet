@@ -48,6 +48,7 @@ class WorkPanel(QWidget):
         self.message_seen = set()
         self.last_assistant_text = ''
         self.pending_task = None
+        self.pending_inputs = {}
         self.pending_folder = None
         self.setObjectName('workPanel')
         self.setStyleSheet(WORK_STYLE)
@@ -87,7 +88,7 @@ class WorkPanel(QWidget):
         self.session_folder = None
 
         from .conversation_view import ConversationView
-        self.log = ConversationView()
+        self.log = ConversationView(assistant_markdown=True)
         self.log.setStyleSheet('QTextBrowser { background: transparent; border: none; padding: 4px; color: #243541; font-size: 13px; }')
         self.log.setMinimumSize(0, 100)
         self.log.setPlaceholderText('在下面输入任务，和天依一起完成工作。')
@@ -254,13 +255,23 @@ class WorkPanel(QWidget):
             self.folder.setText(folder)
 
     def start(self):
+        task = self.prompt.toPlainText().strip()
         if self.is_running:
+            if task and not self.terminal_state:
+                try:
+                    seq = self.client.followup(task)
+                except ValueError as error:
+                    self.input_hint.setText(str(error))
+                    return
+                self.pending_inputs[seq] = task
+                self.log.append_message('user', task)
+                self.prompt.clear()
+                self.update_input_hint()
             return
         if not getattr(self, 'can_start', lambda: True)():
             self.on_progress('另一个对话正在工作，请等待结束或返回该对话停止任务。')
             return
         try:
-            task = self.prompt.toPlainText().strip()
             folder = self.folder.text().strip()
             if not task:
                 raise ValueError('请先填写工作任务。')
@@ -290,19 +301,29 @@ class WorkPanel(QWidget):
                               auto_approve=self.auto_approve.isChecked())
             if self.client.busy:
                 self.log.append_message('user',task)
+                self.pending_inputs[0] = task
+                self.prompt.clear()
+                self.update_input_hint()
         except (ValueError, OSError) as error:
+            self.pending_task = None
             self.on_progress(str(error))
 
+    def update_input_hint(self):
+        self.input_hint.setText(f'{len(self.pending_inputs)} 条消息等待接收'
+                                if self.pending_inputs else 'Enter 发送 · Shift+Enter 换行')
+
+    def recoverable_draft(self):
+        return self.prompt.toPlainText() or '\n\n'.join(self.pending_inputs.values())
+
     def set_busy(self, busy):
-        self.start_button.setEnabled(not busy)
-        self.start_button.setVisible(not busy)
+        self.start_button.setText('补充 ↑' if busy else '发送 ↑')
+        self.start_button.setEnabled(not busy or not self.terminal_state)
         self.stop_button.setEnabled(busy)
         self.stop_button.setVisible(busy)
         self.choose.setEnabled(not busy)
         self.continue_session.setEnabled(not busy)
         self.auto_approve.setEnabled(not busy)
         self.folder.setReadOnly(busy)
-        self.prompt.setReadOnly(busy)
         if busy and not self.terminal_state:
             self.options_button.setChecked(False)
             self.state.setText('工作中…')
@@ -324,10 +345,13 @@ class WorkPanel(QWidget):
         if event.get('type') == 'session_ready':
             self.session_folder = self.pending_folder or self.folder.text().strip()
             self.continue_session.setChecked(True)
-            if (getattr(self, 'clear_sent_prompt', False) and self.pending_task is not None
-                    and self.prompt.toPlainText().strip() == self.pending_task):
-                self.prompt.clear()
-            self.pending_task = None
+            return
+        if event.get('type') == 'input_received':
+            seq = event.get('seq')
+            self.pending_inputs.pop(seq, None)
+            if seq == 0:
+                self.pending_task = None
+            self.update_input_hint()
             return
         detail = event
         while isinstance(detail.get('event'), dict):
@@ -339,10 +363,14 @@ class WorkPanel(QWidget):
         lowered = kind.lower()
         if kind == 'assistant/message':
             # Official committed text blocks; omit reasoning and tool arguments.
-            parts=[]
-            for block in data.get('stream',[]):
-                if isinstance(block,dict) and block.get('type')=='text-chunks':
-                    parts.extend(x for x in block.get('texts',[]) if isinstance(x,str))
+            message = data.get('message') or {}
+            parts = [block['text'] for block in message.get('content', [])
+                     if isinstance(block, dict) and block.get('type') == 'text'
+                     and isinstance(block.get('text'), str)] if isinstance(message, dict) else []
+            if not parts:
+                for block in data.get('stream', []):
+                    if isinstance(block, dict) and block.get('type') == 'text-chunks':
+                        parts.extend(x for x in block.get('texts', []) if isinstance(x, str))
             text=''.join(parts)
             key=(event.get('sessionId',''),detail.get('seq'))
             if text and (key[1] is None or key not in self.message_seen):
@@ -485,6 +513,14 @@ class WorkPanel(QWidget):
         self.terminal_state = state
         self.clear_approval()
         self.state.setText(state)
+        if self.pending_inputs:
+            self.events.appendPlainText('后端未确认接收以下输入，可按需重发：\n' +
+                                        '\n\n'.join(self.pending_inputs.values()))
+            if not self.prompt.toPlainText():
+                self.prompt.setPlainText(self.recoverable_draft())
+        self.pending_task = None
+        self.pending_inputs.clear()
+        self.update_input_hint()
         if text and text != self.last_assistant_text:
             self.log.append_message('assistant',text)
         if not self.client.can_resume():
@@ -493,6 +529,7 @@ class WorkPanel(QWidget):
 
     def stop(self):
         self.terminal_state = '正在停止工作…'
+        self.start_button.setEnabled(False)
         self.clear_approval()
         self.client.cancel()
         self.state.setText(self.terminal_state)

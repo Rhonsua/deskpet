@@ -1,0 +1,199 @@
+{
+  "tool": "built-in image_gen",
+  "seeds": {
+    "tianyi": "Classic V3 reference: assets/character/tianyi-refined-v3-smooth.png; smooth figure-eight loops and ahoge, jade pendant, yellow necktie, white/cyan detached sleeves, waving hello, transparent cutout.",
+    "aling": "Yuezheng Ling classic V3: dark red-brown hair, red eyes, one long thick braid and loop ahoge, red-and-white Chinese cropped jacket, dark fingerless gloves, waving hello, transparent cutout."
+  },
+  "variants": [
+    {
+      "character": "tianyi",
+      "emotion": "happy",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Beaming closed crescent eyes, both fists held below cheeks, delighted smile and two little sparkles. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "laugh",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Laughing heartily with eyes squeezed closed, tiny tears of laughter, one hand covering mouth. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "hug",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Both arms reaching forward toward viewer asking for a hug, kind tender smile. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "love",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Making a little heart with both hands in front of chest, affectionate smile, two pink heart symbols. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "shy",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Very bashful blush, both hands touching cheeks, shy averted eyes and tiny embarrassed smile. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "cheer",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Both little fists raised encouragingly, determined smiling eyes, energetic tiny rays. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "thanks",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Hands together in gratitude, polite small head bow and warm smile. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "thinking",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: One hand under chin, eyes looking upward thoughtfully, tiny round thought bubbles. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "puzzled",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Head tilted, one finger near cheek, puzzled eyebrows and a large blue question mark symbol. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "shocked",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Wide round startled eyes, little open O mouth, hands next to cheeks, small exclamation mark. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "cry",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Big watery teary eyes, small trembling pout, both hands clutching sleeve cuffs, needing comfort. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "tired",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Head resting on folded arms atop an invisible flat edge, half-lidded exhausted eyes, tiny sigh puff. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "sleepy",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Sleeping with eyes closed, both hands together tucked under one cheek as a pillow, peaceful expression and tiny crescent moon. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "hungry",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Holding an empty little bowl and spoon, expectant sparkling eyes and slightly pleading expression. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "sulk",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Puffed cheeks and folded arms, endearingly sulky tiny pout, harmless comic steam puff. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "yum",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Holding and taking a tiny bite of a fluffy steamed bun, cheeks plumped, blissful closed eyes. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "music",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Holding a small microphone in one hand, contented singing smile, two tiny musical notes. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "work",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Typing with both little hands on a small keyboard at bottom, focused cute face, small laptop partially visible. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "aling",
+      "emotion": "happy",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Beaming closed crescent eyes, both fists held below cheeks, delighted smile and two little sparkles. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "tianyi",
+      "emotion": "bye",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Gentle sleepy half-closed eyes, waving goodnight with one hand, tiny moon and two stars. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Luo Tianyi: smooth unbraided figure-eight loops high behind head plus curved ahoge, grey hair, green eyes, blue-white V3 detached sleeves with round white/green shoulder disks, black inner cuffs, jade pendant yellow tie. Do not invent any garment pattern."
+    },
+    {
+      "character": "aling",
+      "emotion": "shy",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Very bashful blush, both hands touching cheeks, shy averted eyes and tiny embarrassed smile. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "aling",
+      "emotion": "laugh",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Laughing heartily with eyes squeezed closed, tiny tears of laughter, one hand covering mouth. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "aling",
+      "emotion": "love",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Making a little heart with both hands in front of chest, affectionate smile, two pink heart symbols. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "aling",
+      "emotion": "hug",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Both arms reaching forward toward viewer asking for a hug, kind tender smile. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "aling",
+      "emotion": "cheer",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Both little fists raised encouragingly, determined smiling eyes, energetic tiny rays. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "aling",
+      "emotion": "thanks",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Hands together in gratitude, polite small head bow and warm smile. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "aling",
+      "emotion": "shocked",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Wide round startled eyes, little open O mouth, hands next to cheeks, small exclamation mark. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "aling",
+      "emotion": "sulk",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Puffed cheeks and folded arms, endearingly sulky tiny pout, harmless comic steam puff. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "aling",
+      "emotion": "puzzled",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Head tilted, one finger near cheek, puzzled eyebrows and a large blue question mark symbol. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "aling",
+      "emotion": "tired",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Head resting on folded arms atop an invisible flat edge, half-lidded exhausted eyes, tiny sigh puff. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "aling",
+      "emotion": "thinking",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: One hand under chin, eyes looking upward thoughtfully, tiny round thought bubbles. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "aling",
+      "emotion": "hungry",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Holding an empty little bowl and spoon, expectant sparkling eyes and slightly pleading expression. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "aling",
+      "emotion": "music",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Holding a small microphone in one hand, contented singing smile, two tiny musical notes. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "aling",
+      "emotion": "cry",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Big watery teary eyes, small trembling pout, both hands clutching sleeve cuffs, needing comfort. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "aling",
+      "emotion": "sleepy",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Sleeping with eyes closed, both hands together tucked under one cheek as a pillow, peaceful expression and tiny crescent moon. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "aling",
+      "emotion": "yum",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Holding and taking a tiny bite of a fluffy steamed bun, cheeks plumped, blissful closed eyes. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "aling",
+      "emotion": "work",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Typing with both little hands on a small keyboard at bottom, focused cute face, small laptop partially visible. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    },
+    {
+      "character": "aling",
+      "emotion": "bye",
+      "prompt": "Edit this reference sticker into a NEW expression-and-pose variant for the same coordinated pack. Keep the exact character design, face shape, hairstyle, hair color, eye color, costume details, render style and proportions consistent. Change expression and both arms/hands as needed: Gentle sleepy half-closed eyes, waving goodnight with one hand, tiny moon and two stars. Exactly ONE clean crisp cute chibi upper-body sticker on TRANSPARENT background, no panels or other characters. Keep entire hair and hands and small props inside square canvas with clear transparent margins, no cropping. Fine brown outlines and thin white cutout border. No Chinese or Latin text or lettering, no watermark. Yuezheng Ling 阿绫: dark red-brown hair, single thick long braid, loop ahoge, red eyes, white cropped V3 Chinese jacket red piping and frog closure, red inner top, dark fingerless gloves."
+    }
+  ]
+}

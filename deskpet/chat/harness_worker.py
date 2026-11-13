@@ -1,9 +1,9 @@
 """Isolated Harness worker. stdin/stdout are JSONL; credentials never become argv."""
 import json
 import os
+import queue
 import sys
 import threading
-import uuid
 import re
 import time
 from types import SimpleNamespace
@@ -31,12 +31,77 @@ def emit(kind, **fields):
     with _lock:
         print(json.dumps(redact(dict(type=kind, **fields)), ensure_ascii=False), flush=True)
 
+def run_conversation(client, request, commands, progress, session_ready):
+    """Multiplex native composer input and DSH events on one session subscription."""
+    from deepseek_harness.api import final_response, finish_reason
+    session_id = request['session_id']
+    awaiting = {}
+    results = []
+    seq = 0
+    idle = False
+    received_first = False
+
+    def submit(number, text):
+        message_id = client.session_prompt(session_id, [{'type': 'text', 'text': text}])
+        awaiting[message_id] = number
+
+    with client.subscribe_session_notifications(session_id) as subscription:
+        def notifications():
+            try:
+                while True:
+                    commands.put(('notification', subscription.next()))
+            except Exception as error:
+                commands.put(('error', error))
+
+        submit(0, request['prompt'])
+        threading.Thread(target=notifications, daemon=True).start()
+        while True:
+            kind, value = commands.get()
+            if kind == 'error':
+                raise value
+            if kind == 'followup':
+                seq = value['seq']
+                idle = False
+                submit(seq, value['text'])
+                continue
+            if kind == 'finish_turn':
+                if idle and value['seq'] == seq:
+                    break
+                continue
+            payload = value.payload
+            root = payload.get('sessionId') == session_id
+            event = payload.get('event', {})
+            if root and value.method == 'session.event' and event.get('type') == 'agent/inbox/spliced':
+                for message in event['data']['inserted']:
+                    number = awaiting.pop(message.get('id'), None)
+                    if number is not None:
+                        if number == 0:
+                            received_first = True
+                            session_ready()
+                        emit('event', event={'type':'input_received', 'seq':number})
+            if not received_first:
+                continue
+            progress(value)
+            if root and value.method == 'session.event' and event.get('type') in ('assistant/message', 'turn/end'):
+                results.append(event)
+            if root and value.method == 'session.status':
+                idle = payload.get('status') == 'idle' and not awaiting
+                if idle:
+                    if not request.get('interactive'):
+                        break
+                    # A last keystroke can cross this notification in transit.
+                    # Only the composer knows whether it has sent a newer input.
+                    emit('idle', seq=seq)
+    return SimpleNamespace(events=results, final_response=final_response(results),
+                           finish_reason=finish_reason(results))
+
 def main():
     global _secret
     request = json.loads(sys.stdin.readline())
     _secret = request['api_key']
     cancelled = threading.Event()
     pending = {}
+    commands = queue.Queue()
     holder = SimpleNamespace(client=None)
 
     def controls():
@@ -45,21 +110,25 @@ def main():
                 command = json.loads(line)
                 if command.get('type') == 'cancel':
                     cancelled.set()
+                    commands.put(('error', RuntimeError('工作已停止。')))
                     if holder.client:
                         holder.client.close()
                     return
+                if command.get('type') in ('followup', 'finish_turn'):
+                    commands.put((command['type'], command))
+                    continue
                 key = str(command.get('id'))
-                if holder.client and key in pending:
+                if command.get('type') == 'approval' and holder.client and key in pending:
                     holder.client.respond(pending.pop(key), {'outcome': 'allowed-once' if command.get('approved') is True else 'rejected'})
             except Exception:
                 pass
         cancelled.set()  # Parent closed its pipe; don't keep installing/running.
+        commands.put(('error', EOFError('工作窗口已退出。')))
         if holder.client:
             holder.client.close()
 
     threading.Thread(target=controls, daemon=True).start()
     from deepseek_harness import HarnessClient, HarnessConfig
-    from deepseek_harness.api import Session
     from deepseek_harness.models import InitializeResponse
     root = Path(request['workspace']).resolve(strict=True)
     if not root.is_dir():
@@ -95,7 +164,6 @@ def main():
     client = HarnessClient(HarnessConfig(dsh_bin=str(npm_cli), cwd=str(root), dsh_home=str(home), profile='sdk',
         patches=(str(patch),), env=environment), _launch_args=launch_args)
     holder.client = client
-    harness = SimpleNamespace(client=client, start=lambda: None, close=client.close)
     started_at = time.monotonic()
     stage = 'launch'
     ready = False
@@ -112,12 +180,12 @@ def main():
     def approvals():
         try:
             while True:
-                incoming = harness.client.next_request()
+                incoming = client.next_request()
                 if incoming.method == 'approval/request':
                     pending[str(incoming.id)] = incoming.id
                     emit('approval', request=dict(incoming.payload, id=str(incoming.id)))
                 else:
-                    harness.client.respond_error(incoming.id, code=-32601, message='Unsupported client request')
+                    client.respond_error(incoming.id, code=-32601, message='Unsupported client request')
         except Exception:
             pass
     try:
@@ -142,8 +210,6 @@ def main():
         emit('event', event={'type':'started', 'session_id':session_id})
         def progress(notification):
             payload = notification.payload
-            if payload.get('sessionId') == session_id:
-                session_ready()
             structured = dict(payload, type=notification.method)
             if len(json.dumps(structured)) < 200000:
                 emit('event', event=structured)
@@ -153,8 +219,7 @@ def main():
             if kind in labels:
                 emit('progress', text=labels[kind])
         stage = 'prompt'
-        result = Session(harness, session_id).run(request['prompt'], on_notification=progress)
-        session_ready()
+        result = run_conversation(client, request, commands, progress, session_ready)
         if result.finish_reason == 'error':
             detail = next((str(item.get('data', {}).get('reason', {}).get('error', {}).get('message', '')) for item in reversed(result.events) if item.get('type') == 'turn/end'), '')
             emit('event', event={'type':'failed','detail':redact(detail)[:2000]})
@@ -174,7 +239,7 @@ def main():
             else:
                 emit('failed', text='工作失败：' + (detail[:300] or type(error).__name__))
     finally:
-        harness.close()
+        client.close()
 
 def run():
     try:

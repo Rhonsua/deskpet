@@ -24,6 +24,7 @@ def run():
     closed = threading.Event()
     script = (Path(__file__).parent / 'bilibili_probe.js').read_text(encoding='utf-8')
     self_test = '--self-test' in sys.argv
+    start_hidden = '--start-hidden' in sys.argv
     fixture = reload_fixture = ''
     if self_test:
         import base64
@@ -36,11 +37,23 @@ def run():
                 wav.writeframes(bytes([128]) * (4000 * 210))
             else:
                 wav.setparams((1, 2, 8000, 0, 'NONE', 'not compressed'))
-                wav.writeframes(bytes(8000 * 2 * 4))
+                long_clip = any(flag in sys.argv for flag in ('--self-test-slow-start', '--self-test-lost-reply'))
+                wav.writeframes(bytes(8000 * 2 * (20 if long_clip else 4)))
         fixture = ('<title>天依网页播放测试</title><div class="bpx-player-video-wrap">'
                    '<video autoplay muted loop controls width="640" src="data:audio/wav;base64,' +
                    base64.b64encode(audio.getvalue()).decode() + '"></video></div>')
         reload_fixture = fixture
+        if '--self-test-slow-start' in sys.argv:
+            # Audio is advancing while the page reports a buffering state.
+            # The previous two-second recovery timer replayed its intro.
+            fixture += '''<script>
+              const v = document.querySelector('video');
+              const ready = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'readyState');
+              const bufferingUntil = performance.now() + 4500;
+              Object.defineProperty(v, 'readyState', {get() {
+                return performance.now() < bufferingUntil ? 1 : ready.get.call(v);
+              }});
+            </script>'''
         if '--self-test-history' in sys.argv:
             fixture += '''<script>
               const v = document.querySelector('video');
@@ -84,7 +97,8 @@ def run():
                 fixture = fixture.replace('ignoreReset = true', 'ignoreReset = 4').replace(
                     'ignoreReset = false; return;', 'ignoreReset -= 1; return;')
     window = webview.create_window('天依 · B站播放', html='<p>正在准备播放窗口…</p>',
-                                   width=1024, height=720, min_size=(640, 480), focus=not self_test)
+                                   width=1024, height=720, min_size=(640, 480),
+                                   hidden=start_hidden, focus=not (self_test or start_hidden))
     window.events.closed += lambda: closed.set()
     minimizing = threading.Event()
     def on_minimize():
@@ -117,15 +131,27 @@ def run():
             registration = window.native.Invoke(Func[Object](lambda:
                 window.native.webview.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(early)))
             registration.GetAwaiter().GetResult()
+            # Keep this media page active inside WebView2 even while its native
+            # window is hidden. This does not activate or focus the OS window.
+            background_media = window.native.Invoke(Func[Object](lambda:
+                window.native.webview.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                    'Emulation.setFocusEmulationEnabled', '{"enabled":true}')))
+            background_media.GetAwaiter().GetResult()
         except Exception as error:
             emit({'type': 'fatal', 'message': '网页初始化失败：' + str(error)[:160]})
             window.destroy()
             return
         current, token, command, volume, seek_position = '', '', None, 0.6, None
+        restart_id = 0
+        allow_opening = False
+        dropped_test_reply = False
         desired_volume = 0.6
         started, next_probe, requested_play = 0, 0, False
-        hidden, last_playing = False, False
+        hidden, last_playing = start_hidden, False
         tail, replay = TailCompletion(), ReplayRecovery()
+        from deskpet.music.players.bilibili_account import AccountBridge
+        account = AccountBridge(window, webview, emit)
+        emit({'type': 'visibility', 'hidden': hidden})
         emit({'type': 'ready'})
         while not closed.is_set():
             try:
@@ -134,14 +160,24 @@ def run():
                 item = {}
             kind = item.get('cmd')
             if kind == 'close':
+                account.close()
                 window.destroy()
                 return
+            if kind == 'import-account':
+                account.request(str(item.get('request', ''))[:100], bool(item.get('login')))
+            elif kind == 'cancel-import-account':
+                account.cancel(str(item.get('request', '')))
+            account.poll()
             if kind == 'load':
                 try:
                     selected = video_url(item.get('url'))
                 except ValueError as error:
                     emit({'type': 'error', 'token': item.get('token'), 'message': str(error)})
                     continue
+                if item.get('background'):
+                    hidden = True
+                    window.hide()
+                    emit({'type': 'visibility', 'hidden': True})
                 restart = selected == current and item.get('restart') and window.events.loaded.is_set()
                 if restart and not self_test:
                     try:
@@ -158,6 +194,9 @@ def run():
                 # Every explicitly selected track starts at zero, including
                 # navigation/reopening, which can restore Bilibili history.
                 command = 'restart' if requested_play else 'pause'
+                restart_id += 1
+                allow_opening = not restart
+                seek_position = None
                 tail.reset()
                 replay.start(started, settle_for=15)
                 if not requested_play:
@@ -220,7 +259,8 @@ def run():
                     window.evaluate_js("document.querySelectorAll('video').forEach(v=>v.pause())")
                     continue
                 config = {'token': token, 'command': command,
-                          'position': seek_position, 'volume': volume}
+                          'position': seek_position, 'volume': volume, 'restart_id': restart_id,
+                          'allow_opening': allow_opening}
                 applied_command = command
                 value = window.evaluate_js(script.replace('__CONFIG__', json.dumps(config)))
                 if not isinstance(value, dict):
@@ -232,7 +272,15 @@ def run():
                     if now - started > 30:
                         emit({'type': 'waiting', 'token': token, 'message': '未检测到视频，请在网页完成登录/验证，或手动切下一首'})
                     continue
+                if (self_test and '--self-test-lost-reply' in sys.argv and
+                        applied_command == 'restart' and not dropped_test_reply):
+                    # Isolated silent fixture: the page executed the command,
+                    # but IPC lost its response while audio kept advancing.
+                    dropped_test_reply = True
+                    time.sleep(3.2)
+                    continue
                 command, volume, seek_position = None, None, None
+                allow_opening = False
                 if value.get('user_interacted') or not requested_play:
                     replay.cancel()
                 recovering = replay.blocking
@@ -242,15 +290,20 @@ def run():
                     # An old ended bit must not complete the new iteration.
                     value['ended'] = False
                     value['playing'] = False
-                    value['starting_from_zero'] = True
+                    value['restoring_position' if replay.target > 0 else 'starting_from_zero'] = True
                     tail.reset()
-                if action == 'restart':
+                if action in ('restart', 'restore'):
                     command = 'restart'
+                    restart_id += 1
+                    seek_position = replay.target
                 elif action == 'reload':
                     # One bounded page reload if all same-page seeks failed.
                     # Keep the window hidden and retain the selected token.
                     started = time.monotonic()
                     command, volume = 'restart', desired_volume
+                    restart_id += 1
+                    allow_opening = True
+                    seek_position = None
                     replay.start(started, allow_reload=False, settle_for=15)
                     last_playing = False
                     if self_test:
@@ -262,11 +315,13 @@ def run():
                     continue
                 elif action == 'failed':
                     requested_play = False
+                    command = 'pause'
                     emit({'type': 'waiting', 'token': token,
                           'message': '重播仍未成功，请显示网页检查网络、登录或播放提示'})
                     continue
                 if (not hidden and not minimizing.is_set() and applied_command is None and
-                        not recovering and last_playing and not value.get('playing') and not value.get('ended')):
+                        not recovering and last_playing and value.get('paused') and
+                        not value.get('seeking') and not value.get('playing') and not value.get('ended')):
                     requested_play = False
                 if not recovering and tail.update(value, time.monotonic(), requested_play):
                     value['ended'] = True
@@ -283,11 +338,19 @@ def run():
             except Exception as error:
                 if time.monotonic() - started > 30:
                     emit({'type': 'waiting', 'token': token, 'message': '网页暂未就绪，请查看播放窗口'})
+        account.close()
         emit({'type': 'closed'})
 
-    storage = Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'TianyiPet' / 'WebPlayer'
-    storage.mkdir(parents=True, exist_ok=True)
-    webview.start(loop, gui='edgechromium', private_mode=self_test, storage_path=str(storage))
+    if self_test:
+        # pywebview may delete private-mode storage on exit: never point tests
+        # at the real profile, even when the browser itself is in private mode.
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix='tianyi-web-test-') as storage:
+            webview.start(loop, gui='edgechromium', private_mode=True, storage_path=storage)
+    else:
+        storage = Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'TianyiPet' / 'WebPlayer'
+        storage.mkdir(parents=True, exist_ok=True)
+        webview.start(loop, gui='edgechromium', private_mode=False, storage_path=str(storage))
 
 
 if __name__ == '__main__':

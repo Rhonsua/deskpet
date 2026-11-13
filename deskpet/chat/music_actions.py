@@ -24,27 +24,6 @@ class MusicChoice(Exception):
         self.selecting = selecting
 
 
-def explicit_song(text):
-    """Route unambiguous imperative song requests to a real local search first."""
-    prefix = r'(?:(?:洛天依|天依)[，,\s]*)?(?:(?:请|帮我|给我|能不能|你能不能|可以|你可以|麻烦你|你)\s*){0,3}'
-    match = re.fullmatch(prefix + r'(播放|唱(?:一下|一首|首|个)?|来一首)\s*(本地|[bB]站)?\s*(.{1,160})', text.strip())
-    if not match:
-        return None
-    verb, source, title = match.groups()
-    if any(word in title for word in ('歌单', '匹配', '正则', '然后', '如果', '不要', '别唱', '不想')):
-        return None
-    title = title.strip().rstrip('。！!？?～~').strip()
-    if verb != '播放':
-        title = re.sub(r'(?:给我听|让我听听)(?:吧|呀|好吗)?$', '', title).strip()
-        title = re.sub(r'(?:可以吗|好吗|好不好|吧|呀)$', '', title).strip()
-    title = title.strip('《》“”"').strip()
-    if title in ('音乐', '歌曲', '歌', '一下', '一首歌', '首歌', '给我听') or not title:
-        return None
-    if source in ('B站','b站') and title in ('合集','合辑','歌曲合集'):
-        return 'music_bilibili', {'pattern':r'合集|合辑|歌单|串烧'}
-    return {'本地':'music_local','B站':'music_bilibili','b站':'music_bilibili'}.get(source,'music_play'), {'pattern':re.escape(title)}
-
-
 def choice_messages(user, matches, preference='', selecting=False, memory=''):
     rows = [dict(id=str(i), title=m['title'][:300], source=m['source'],
                  playlist=m.get('playlist_name','B站')) for i,m in enumerate(matches)]
@@ -239,7 +218,7 @@ def _play_default(panel, source, playlist=None):
         if panel.playback_source == 'web' and web.active:
             web.set_playing(True)
         else:
-            web.play_row(max(0, web.list.currentRow()))
+            web.play_row(web.selected_or_start_row())
         return
     selected = panel.library.active
     if playlist:
@@ -257,7 +236,8 @@ def _play_default(panel, source, playlist=None):
         _resume(panel)
     else:
         row=panel.list.currentRow()
-        panel.play_row(row if row in rows else rows[0])
+        fallback = rows[-1] if panel.queue.reverse and panel.queue.mode != 'shuffle' else rows[0]
+        panel.play_row(row if row in rows else fallback)
 
 
 def perform(pet, action, parameters=None):

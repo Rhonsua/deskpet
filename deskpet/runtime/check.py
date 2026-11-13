@@ -207,6 +207,15 @@ def run():
             workspace = chat.work_panel
             assert chat.tabs.widget(chat.work_index) is workspace
             first = workspace.add_project(scratch)
+            # Detect missing frozen font/symbol data that would silently show raw TeX.
+            first.log.append_message('assistant', r'概率为 \(\boxed{\frac18}\)。')
+            doc = first.log.document()
+            formula = doc.find('\ufffc')
+            assert not formula.isNull() and formula.charFormat().isImageFormat()
+            image_url = QUrl(formula.charFormat().toImageFormat().name())
+            from PySide6.QtGui import QTextDocument
+            assert not doc.resource(QTextDocument.ImageResource, image_url).isNull()
+            result['work_formula'] = True
             first.prompt.setPlainText('保留第一段草稿')
             second = workspace.new_conversation()
             second.prompt.setPlainText('保留第二段草稿')

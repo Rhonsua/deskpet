@@ -1,0 +1,7 @@
+{
+  "id": "tianyi-work-persona",
+  "name": "天依工作人设",
+  "version": "0.1.0",
+  "api_version": 1,
+  "description": "为选定项目导入可编辑的天依工作人设，工作后端通过 AGENTS.local.md 读取。支持移除本 Mod 导入的部分。"
+}

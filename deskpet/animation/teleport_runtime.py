@@ -3,6 +3,7 @@ import time
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QRegion
 from deskpet.animation.teleport_controller import TeleportController
+from deskpet.animation.activity_area import roaming_bounds, roaming_allowed
 
 
 class TeleportRuntime:
@@ -45,7 +46,9 @@ class TeleportRuntime:
     def _start_teleport(self, *, automatic=True, direction=None):
         if not self.teleport_eligible(manual=not automatic):
             return False
-        bounds = self.screen_bounds()
+        bounds = roaming_bounds(self)
+        if not roaming_allowed(self, bounds):
+            return False
         if self.x() < bounds.left() or self.x() + self.width() > bounds.right() + 1:
             return False
         if not self.teleport_controller.start(self.y(), bounds.top(),
@@ -91,11 +94,11 @@ class TeleportRuntime:
     def tick_teleport(self, delta):
         controller = self.teleport_controller
         if controller.active:
-            bounds = self.screen_bounds()
+            bounds = roaming_bounds(self)
             changed_bounds = bounds != self.teleport_bounds
-            if not self.teleport_eligible(starting=False) or changed_bounds:
+            if not self.teleport_eligible(starting=False) or changed_bounds or not roaming_allowed(self, bounds):
                 self.stop_teleport()
-                if changed_bounds:
+                if changed_bounds and getattr(self, 'activity_area', None) is None:
                     from deskpet.animation.edge_docking import clamp_position
                     self.move(clamp_position(self.pos(), self.size(), bounds))
                     self.save_position()

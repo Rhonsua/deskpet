@@ -16,7 +16,9 @@ from deskpet.app import MusicPanel
 app = QApplication([])
 with tempfile.TemporaryDirectory(prefix='tianyi-web-loops-', ignore_cleanup_errors=True) as scratch:
     os.environ['LOCALAPPDATA'] = scratch
-    panel = MusicPanel(SimpleNamespace(playing=False, set_variant=lambda _: None),
+    panel = MusicPanel(SimpleNamespace(playing=False, set_variant=lambda _: None,
+                       set_auto_walk=lambda _: None, toggle_walk=lambda: None,
+                       set_auto_teleport=lambda _: None, open_mods=lambda: None),
                        data_dir=Path(scratch)/'data',
                        settings=QSettings(str(Path(scratch)/'test.ini'), QSettings.Format.IniFormat))
     web = panel.bilibili
@@ -32,6 +34,10 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-loops-', ignore_cleanup_erro
         web.worker_args.append('--self-test-reload')
     if '--history' in sys.argv:
         web.worker_args.append('--self-test-history')
+    if '--slow-start' in sys.argv:
+        web.worker_args.append('--self-test-slow-start')
+    if '--lost-reply' in sys.argv:
+        web.worker_args.append('--self-test-lost-reply')
     panel.volume.setValue(0)
     def wait(condition, timeout=25):
         deadline = time.monotonic()+timeout
@@ -52,15 +58,30 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-loops-', ignore_cleanup_erro
             web.input.setText(url)
             assert web.add_link()
         web.mode.setCurrentIndex(web.mode.findData('single'))
+        if '--background' in sys.argv:
+            panel.set_alternating(True)
+        opening_positions = []
+        original_handler = web.handle_event
+        def capture_opening(value):
+            if value.get('type') == 'state' and value.get('has_video'):
+                opening_positions.append(value.get('position', 0))
+            original_handler(value)
+        web.handle_event = capture_opening
         web.play_row(0)
         wait(lambda: web.playing)
+        if '--slow-start' in sys.argv or '--lost-reply' in sys.argv:
+            assert web.metrics['position'] > 3, 'late readiness / lost reply must preserve the intro already played'
+            assert all(b >= a - .1 for a, b in zip(opening_positions, opening_positions[1:])), opening_positions
+        if '--background' in sys.argv:
+            assert web.hidden and '--start-hidden' in web.process.arguments()
+            panel.set_alternating(False)
         pid = web.process.processId()
         web.send({'cmd': 'minimize'})
         wait(lambda: web.hidden)
         if '--history' in sys.argv:
             history_token = web.latch.token
             wait(lambda: web.metrics.get('title') == '历史进度恢复到末尾' and
-                 web.playing and web.metrics.get('position', 999) < 2)
+                 web.playing and web.metrics.get('position', 999) < 5)
             assert web.latch.token == history_token, 'history tail must not complete the newly selected track'
             assert web.metrics['duration'] == 210
             stable_until = time.monotonic() + 2
@@ -99,6 +120,13 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-loops-', ignore_cleanup_erro
             assert web.metrics['position'] < 2, 'single loop must restart from zero'
         web.send({'cmd': 'show'})
         wait(lambda: not web.hidden)
+        if '--background' in sys.argv:
+            # Reuse the already visible worker when a new alternating turn begins.
+            panel.set_alternating(True)
+            web.play_row(0)
+            wait(lambda: web.hidden and web.playing)
+            assert web.process.processId() == pid
+            panel.set_alternating(False)
         web.send({'cmd': 'hide'})
         wait(lambda: web.hidden)
         web.mode.setCurrentIndex(web.mode.findData('loop'))

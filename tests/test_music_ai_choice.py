@@ -6,7 +6,7 @@ from types import SimpleNamespace as NS
 from unittest.mock import Mock, patch
 from PySide6.QtWidgets import QApplication, QWidget
 from tests.test_companion_music import MusicTests
-from deskpet.chat.music_actions import explicit_song, chosen_item
+from deskpet.chat.music_actions import chosen_item
 
 
 class ChoiceTests(unittest.TestCase):
@@ -34,22 +34,52 @@ class ChoiceTests(unittest.TestCase):
                 try:yield w,remote
                 finally:w.shutdown();pet.close()
 
-    def test_explicit_requests_are_real_searches_not_model_claims(self):
-        for text in ('播放反乌托邦','请播放本地《流光》','播放B站普通DISCO'):
-            self.assertIsNotNone(explicit_song(text))
-        self.assertEqual(explicit_song('请播放本地《流光》。')[1]['pattern'], '流光')
-        for text in ('昨天我播放流光','不要播放流光','如果播放流光会怎样','他说“播放流光”'):
-            self.assertIsNone(explicit_song(text))
+    def test_music_mentions_are_conversation_until_api_requests_an_action(self):
+        phrases = ('唱歌累不累', '唱歌是不是很开心', '你喜欢唱歌吗',
+                   '唱《普通DISCO》的时候累吗', '播放音乐会打扰你吗',
+                   '走路累不累', '睡觉舒服吗', '唱一下是什么意思',
+                   '昨天我播放流光', '不要播放流光', '如果播放流光会怎样',
+                   '他说“播放流光”', '播放《普通DISCO》这件事先别做')
+        with self.window() as (w, remote), patch('deskpet.chat.music_actions.search') as search, patch(
+                'deskpet.chat.actions.perform_action') as perform:
+            # Previous successful commands must not authorize the next chat turn.
+            w.store.add_turn(w.character, '唱一下普通DISCO', '这就播放。')
+            for phrase in phrases:
+                with self.subTest(phrase=phrase):
+                    w.input.setPlainText(phrase)
+                    self.assertTrue(w.send_message())
+                    messages = remote.return_value.start.call_args.args[1]
+                    self.assertEqual(messages[-1]['content'], phrase)
+                    self.assertIsNone(w.music_choice)
+                    self.assertIn('先理解整句话是在聊天还是要求现在执行', messages[0]['content'])
+                    w.on_completed('[温柔]有你陪着，感觉很开心呀。')
+                    self.assertIsNone(w.pending)
+                    self.assertEqual(w.store.history(w.character)[-1]['content'], '有你陪着，感觉很开心呀。')
+            self.assertEqual(remote.return_value.start.call_count, len(phrases))
+            search.assert_not_called()
+            perform.assert_not_called()
+            self.p.start_track.assert_not_called()
+            self.p.bilibili.start_process.assert_not_called()
+
+    def test_api_confirmed_requests_search_real_tracks_before_claiming_success(self):
         with self.window() as (w,remote):
             w.input.setPlainText('播放本地普通DISCO');w.send_message()
-            remote.assert_not_called();self.p.start_track.assert_called_once_with(2)
+            self.assertEqual(remote.return_value.start.call_count, 1)
+            self.p.start_track.assert_not_called()
+            w.on_completed('[动作:music_local {"pattern":"普通DISCO"}]好呀。')
+            self.p.start_track.assert_called_once_with(2)
             self.assertIn('普通DISCO',w.store.history(w.character)[-1]['content'])
             w.input.setPlainText('播放不存在的歌');w.send_message()
-            remote.assert_not_called();self.assertIn('没找到',w.store.history(w.character)[-1]['content'])
+            w.on_completed('[动作:music_play {"pattern":"不存在的歌"}]好呀。')
+            self.assertEqual(remote.return_value.start.call_count, 2)
+            self.assertIn('没找到',w.store.history(w.character)[-1]['content'])
+            self.p.start_track.assert_called_once_with(2)
 
     def test_ambiguous_choice_has_no_paths_and_executes_once(self):
         with self.window() as (w,remote):
             w.input.setPlainText('播放流光');w.send_message()
+            self.assertIsNone(w.music_choice)
+            w.on_completed('[动作:music_play {"pattern":"流光"}]这就找。')
             messages=remote.return_value.start.call_args.args[1]
             serialized=json.dumps(messages,ensure_ascii=False)
             self.assertNotIn(self.temp.name,serialized);self.assertNotIn('https://',serialized)
@@ -67,6 +97,7 @@ class ChoiceTests(unittest.TestCase):
         with self.window() as (w,_):
             for event in ('invalid','cancel','changed'):
                 w.input.setPlainText('播放流光');w.send_message()
+                w.on_completed('[动作:music_play {"pattern":"流光"}]这就找。')
                 if event=='invalid':w.on_completed('{"id":"../../etc/passwd"}')
                 elif event=='cancel':w.stop();w.on_completed('{"id":"0"}')
                 else:
@@ -83,31 +114,44 @@ class ChoiceTests(unittest.TestCase):
 
     def test_singing_a_named_song_uses_the_same_real_playlist(self):
         from deskpet.chat.actions import recognize_action
-        for text in ('唱一下反乌托邦','你给我唱一下反乌托邦','你唱一下反乌托邦','唱首《反乌托邦》','能不能给我唱一下反乌托邦好吗',
-                     '天依，唱《反乌托邦》给我听吧','来一首反乌托邦'):
-            action,args=explicit_song(text)
-            self.assertEqual(action,'music_play',text)
-            self.assertEqual(args['pattern'],'反乌托邦',text)
-        self.assertEqual(explicit_song('唱一下本地《流光》')[0],'music_local')
         self.assertEqual(recognize_action('唱一下'),'sing')
-        for text in ('不要唱反乌托邦','昨天你唱反乌托邦','他说“唱一下反乌托邦”','唱一下'):
-            self.assertIsNone(explicit_song(text),text)
         with self.window() as (w,remote):
-            w.input.setPlainText('唱一下本地《普通DISCO》');w.send_message()
-            remote.assert_not_called();self.p.start_track.assert_called_once_with(2)
+            for text in ('唱一下本地《普通DISCO》', '能不能给我唱一下普通DISCO好吗',
+                         '天依，唱《普通DISCO》给我听吧', '来一首普通DISCO'):
+                w.input.setPlainText(text);w.send_message()
+                self.assertEqual(remote.return_value.start.call_args.args[1][-1]['content'], text)
+                before = self.p.start_track.call_count
+                w.on_completed('[动作:music_local {"pattern":"普通DISCO"}]好呀。')
+                self.assertEqual(self.p.start_track.call_count, before + 1)
+                self.p.start_track.assert_called_with(2)
+                self.assertIsNone(w.pending)
 
     def test_switch_source_and_bilibili_collection_are_executable(self):
         from deskpet.chat.actions import recognize_action
         for text in ('切b站','切到B站','换成b站播放','播放b站','给我播放B站歌单'):
             self.assertEqual(recognize_action(text),'music_bilibili',text)
         self.assertEqual(recognize_action('切回本地'),'music_local')
-        self.assertEqual(explicit_song('给我播放b站合集'),('music_bilibili',{'pattern':'合集|合辑|歌单|串烧'}))
         with self.window() as (w,remote):
             self.p.playback_source='local'
             self.p.bilibili.tracks[1]['title']='【洛天依歌单】华风夏韵，洛水天依'
             w.input.setPlainText('给我播放b站合集');w.send_message()
-            remote.assert_not_called()
+            self.assertEqual(remote.return_value.start.call_count, 1)
+            w.on_completed('[动作:music_bilibili {"pattern":"合集|合辑|歌单|串烧"}]好呀。')
             self.assertEqual(self.p.playback_source,'web')
             self.p._player.pause.assert_called()
             self.assertEqual(self.p.bilibili.current_url,self.p.bilibili.tracks[1]['url'])
             self.assertIn('准备播放B站',w.store.history(w.character)[-1]['content'])
+
+    def test_failed_or_cancelled_intent_request_never_falls_back_to_playback(self):
+        with self.window() as (w, remote):
+            for failure in ('offline', 'cancel'):
+                w.input.setPlainText('唱歌累不累');w.send_message()
+                if failure == 'offline':
+                    w.on_failed('连接超时')
+                else:
+                    w.stop()
+                w.on_completed('[动作:music_play {"pattern":"普通DISCO"}]好呀。')
+                self.assertIsNone(w.pending)
+                self.assertEqual(w.input.toPlainText(), '唱歌累不累')
+            self.p.start_track.assert_not_called()
+            self.p.bilibili.start_process.assert_not_called()

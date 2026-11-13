@@ -25,6 +25,8 @@ class AlternatingTests(unittest.TestCase):
         self.panels = []
         self.transports = patch('deskpet.music.audio.remote.AudioEngine.start')
         self.transports.start()
+        from deskpet.music.players.bilibili_player import BilibiliPlayer
+        self.start_web_process = BilibiliPlayer.start_process
         self.web_transport = patch('deskpet.music.players.bilibili_player.BilibiliPlayer.start_process')
         self.web_transport.start()
         self.panel = self.make_panel()
@@ -80,6 +82,7 @@ class AlternatingTests(unittest.TestCase):
             self.end_local()
             self.assertEqual(p.playback_source, 'web')
             self.assertEqual(self.web.current_url, self.urls[expected_web])
+            self.assertTrue(self.web.pending_load['background'])
             self.assertFalse(p.autoplay_requested)
             token = self.web.latch.token
             self.end_web()
@@ -108,6 +111,152 @@ class AlternatingTests(unittest.TestCase):
         self.assertEqual(self.web.current_url, self.urls[0])
         p.step(1)
         self.assertEqual(p.current_path(), self.local[1])
+
+    def test_web_reverse_direction_is_used_while_alternating(self):
+        p = self.panel
+        self.web.reverse_toggle.setChecked(True)
+        p.set_alternating(True)
+        p.play_row(0)
+        self.end_local()
+        self.assertEqual(self.web.current_url, self.urls[-1])
+        self.end_web()
+        self.assertEqual(p.current_path(), self.local[1])
+        self.end_local()
+        self.assertEqual(self.web.current_url, self.urls[0])
+        self.end_web()
+        self.end_local()
+        self.assertEqual(self.web.current_url, self.urls[-1])
+
+    def test_reorder_during_alternation_uses_song_identity(self):
+        p = self.panel
+        p.set_alternating(True)
+        self.web.play_row(0)
+        self.web.move_song(1)
+        self.assertEqual(self.web.current_url, self.urls[0])
+        self.end_web()
+        self.end_local()
+        self.assertEqual(self.web.current_url, self.urls[1])
+
+    def test_local_reverse_starts_at_end_stops_at_front_and_loops(self):
+        p = self.panel
+        p.reverse_toggle.setChecked(True)
+        self.assertFalse(self.web.queue.reverse)
+        p.play_active_playlist()
+        self.assertEqual(p.current_path(), self.local[1])
+        self.end_local()
+        self.assertEqual(p.current_path(), self.local[0])
+        self.end_local()
+        self.assertFalse(p.autoplay_requested)
+        p.mode_choice.setCurrentIndex(p.mode_choice.findData('loop'))
+        p.play_row(0)
+        self.end_local()
+        self.assertEqual(p.current_path(), self.local[1])
+
+    def test_local_reverse_uses_last_visible_song_without_selection(self):
+        p = self.panel
+        p.reverse_toggle.setChecked(True)
+        p.search.setText('第一首')
+        p.play_active_playlist()
+        self.assertEqual(p.current_path(), self.local[0])
+        p.search.setText('不存在的歌曲')
+        p.play_active_playlist()
+        self.assertIn('没有可播放', p.status.text())
+
+    def test_local_reorder_preserves_position_shuffle_and_saved_current_queue(self):
+        p = self.panel
+        p.play_row(0)
+        p.pending_seek = None
+        p.player.values.update(position=42000, duration=100000, state=1)
+        p.mode_choice.setCurrentIndex(p.mode_choice.findData('shuffle'))
+        p.queue.bag, p.queue.history = [1], [1]
+        with patch.object(p.engine, 'send') as send:
+            p.move_down_button.click()
+            p.reverse_toggle.setChecked(True)
+        send.assert_not_called()
+        self.assertEqual(p.current_path(), self.local[0])
+        self.assertEqual(p.player.position(), 42000)
+        self.assertTrue(p.autoplay_requested)
+        self.assertEqual(p.paths, list(reversed(self.local)))
+        self.assertEqual(p.queue.index, 1)
+        self.assertEqual(p.queue.bag, [0])
+        self.assertEqual(p.queue.history, [0])
+        self.assertFalse(p.move_down_button.isEnabled())
+        self.assertFalse(p.reverse_toggle.isEnabled())
+        reopened = self.make_panel()
+        self.assertEqual(reopened.paths, list(reversed(self.local)))
+        self.assertEqual(reopened.queue.paths, p.queue.paths)
+        self.assertEqual(reopened.current_path(), self.local[0])
+        self.assertEqual(reopened.pending_seek, 42000)
+        self.assertTrue(reopened.reverse_toggle.isChecked())
+        self.assertFalse(reopened.bilibili.reverse_toggle.isChecked())
+        self.assertIsNone(reopened._player)
+
+    def test_local_move_boundaries_and_editing_another_playlist(self):
+        p = self.panel
+        self.assertFalse(p.move_up_button.isEnabled())
+        self.assertFalse(p.move_down_button.isEnabled())
+        p.play_row(0)
+        p.move_song(-1)
+        self.assertEqual(p.paths, self.local)
+        self.assertFalse(p.move_up_button.isEnabled())
+        old_queue = p.queue.paths[:]
+        old_owner = p.queue_owner
+        p.library.create('另一歌单')
+        p.library.add(self.local)
+        p.render_library()
+        p.move_song(1)
+        self.assertEqual(p.paths, list(reversed(self.local)))
+        self.assertEqual(p.queue.paths, old_queue)
+        self.assertEqual(p.queue_owner, old_owner)
+        self.assertEqual(p.current_path(), self.local[0])
+
+    def test_each_source_keeps_its_direction_in_alternation(self):
+        p = self.panel
+        song = self.root / '第三首.mp3'
+        song.write_bytes(b'fixture')
+        p.import_paths([str(song)])
+        p.reverse_toggle.setChecked(True)
+        p.set_alternating(True)
+        self.web.play_row(0)
+        self.end_web()
+        self.assertEqual(p.current_path(), str(song))
+        self.end_local()
+        self.assertEqual(self.web.current_url, self.urls[1])
+        self.end_web()
+        self.assertEqual(p.current_path(), self.local[1])
+        self.end_local()
+        self.assertEqual(self.web.current_url, self.urls[0])
+        self.end_web()
+        self.assertEqual(p.current_path(), self.local[0])
+        self.assertFalse(self.web.queue.reverse)
+
+    def test_local_reorder_during_alternation_keeps_next_song_identity(self):
+        p = self.panel
+        p.set_alternating(True)
+        p.play_row(0)
+        p.move_song(1)
+        self.end_local()
+        self.end_web()
+        self.assertEqual(p.current_path(), self.local[1])
+
+    def test_chat_default_play_respects_each_reverse_setting(self):
+        from deskpet.chat.music_actions import _play_default
+        p = self.panel
+        p.reverse_toggle.setChecked(True)
+        _play_default(p, 'local')
+        self.assertEqual(p.current_path(), self.local[1])
+        self.web.reverse_toggle.setChecked(True)
+        _play_default(p, 'web')
+        self.assertEqual(self.web.current_url, self.urls[1])
+
+    def test_local_reverse_changes_do_not_send_playback_commands(self):
+        p = self.panel
+        p.play_row(0)
+        with patch.object(p.engine, 'send') as send:
+            p.reverse_toggle.setChecked(True)
+            p.reverse_toggle.setChecked(False)
+        send.assert_not_called()
+        self.assertEqual(p.current_path(), self.local[0])
 
     def test_empty_and_missing_local_files_fall_back_to_web(self):
         p = self.panel
@@ -159,6 +308,7 @@ class AlternatingTests(unittest.TestCase):
         self.assertEqual(reopened.bilibili.process.state(), QProcess.ProcessState.NotRunning)
         reopened.toggle()
         self.assertEqual(reopened.bilibili.pending_load['url'], self.urls[0])
+        self.assertTrue(reopened.bilibili.pending_load['background'])
         reopened.step(1)
         self.assertEqual(reopened.current_path(), self.local[1])
 
@@ -238,6 +388,35 @@ class AlternatingTests(unittest.TestCase):
         self.web.list.setCurrentRow(1)
         self.web.toggle()
         self.assertEqual(self.web.current_url, self.urls[1])
+
+    def test_enabling_alternation_hides_active_window_and_pending_load(self):
+        self.web.play_row(0)
+        self.assertFalse(self.web.pending_load['background'])
+        with patch.object(self.web, 'send') as send:
+            self.panel.set_alternating(True)
+            send.assert_called_once_with({'cmd': 'hide'})
+        self.assertTrue(self.web.pending_load['background'])
+
+    def test_background_launch_is_used_for_cold_start_and_worker_restart(self):
+        self.panel.set_alternating(True)
+        self.web.play_row(0)
+        with patch.object(self.web.process, 'start'):
+            # Exercise the real launch method without starting a browser here.
+            self.web.start_process = lambda: self.start_web_process(self.web)
+            self.web.start_process()
+            self.assertIn('--start-hidden', self.web.process.arguments())
+            self.web.process_finished()
+            self.assertIn('--start-hidden', self.web.process.arguments())
+            self.assertTrue(self.web.hidden)
+
+    def test_existing_worker_receives_background_flag_when_switching_tracks(self):
+        self.panel.set_alternating(True)
+        self.web.ready = True
+        with patch.object(self.web.process, 'state', return_value=QProcess.ProcessState.Running), \
+                patch.object(self.web, 'send') as send:
+            self.web.play_row(1)
+            self.assertTrue(send.call_args.args[0]['background'])
+            self.assertEqual(send.call_args.args[0]['url'], self.urls[1])
 
 
 if __name__ == '__main__':

@@ -3,7 +3,8 @@ import time
 import sqlite3
 from PySide6.QtCore import QObject, QTimer
 from .remote import ChatClient as RemoteChatClient
-from .companion import CompanionCoordinator, CompanionState, PROACTIVE_PROMPT
+from .companion import (CompanionCoordinator, CompanionState, PROACTIVE_PROMPT,
+                        PROACTIVE_INTERVAL_KEY, proactive_interval_minutes, saved_proactive_interval)
 from .prompts import build_messages, parse_reply
 from .scope import response_refusal
 
@@ -17,7 +18,8 @@ class CompanionRuntime(QObject):
         self.enabled = bool(getattr(self.pet, 'companion_enabled', True))
         self.chat_enabled = self.settings.value('companion/proactive_chat', False, type=bool)
         self.actions_enabled = self.settings.value('companion/autonomous_actions', False, type=bool)
-        self.coordinator = CompanionCoordinator(enabled=self.enabled, cooldown=300, minimum_idle=45)
+        self.coordinator = CompanionCoordinator(enabled=self.enabled,
+            cooldown=saved_proactive_interval(self.settings) * 60, minimum_idle=45)
         self.client = RemoteChatClient(self)
         self.client.completed.connect(self._completed)
         self.client.failed.connect(lambda _: self.cancel())
@@ -55,6 +57,13 @@ class CompanionRuntime(QObject):
         self.actions_enabled = bool(enabled)
         self.settings.setValue('companion/autonomous_actions', self.actions_enabled)
 
+    def set_chat_interval(self, minutes):
+        minutes = proactive_interval_minutes(minutes)
+        self.settings.setValue(PROACTIVE_INTERVAL_KEY, minutes)
+        # Reuse the last request timestamp. Changing the interval neither
+        # restarts the countdown nor cancels a reply/voice already in flight.
+        self.coordinator.cooldown = minutes * 60
+
     def release_voice(self):
         delivery = self.voice_delivery
         if delivery is not None:
@@ -70,6 +79,13 @@ class CompanionRuntime(QObject):
         self.coordinator.cancel()
         self.ticket = None
         self.client.cancel()
+
+    def on_interaction(self):
+        """Movement/petting can coexist with speech already accepted for delivery."""
+        self.started = time.monotonic()
+        if self.voice_delivery is not None or self.voice_active:
+            return
+        self.cancel()
 
     def state(self):
         pet, window = self.pet, self.window
@@ -95,7 +111,7 @@ class CompanionRuntime(QObject):
         state = self.state()
         if not state.allows(45):
             if self.busy:
-                self.cancel()
+                self.on_interaction()
             return
         now = time.monotonic()
         if self.actions_enabled and not self.busy and now - self.last_action >= 90:
@@ -112,12 +128,18 @@ class CompanionRuntime(QObject):
                 return
             self.ticket = ticket
             self.character = self.window.character
+            catalog = getattr(self.window, 'stickers', None)
+            history = self.window.store.history(self.character, 12)
+            if catalog is not None:
+                history = catalog.history_for_api(history, self.window.name)
             messages = build_messages(self.window.persona_input.toPlainText(),
                 self.window.memory_input.toPlainText(),
-                self.window.store.history(self.character, 12), PROACTIVE_PROMPT,
+                history, PROACTIVE_PROMPT,
                 '当前为空闲陪伴时刻，可以自主开启新话题。以下最近主动发言只用于避免重复，不要求接续：'
                 + self.window.store.last_proactive(self.character), personality=self.window.personality,
-                recalled=self.window.memory_context(proactive=True))
+                recalled=self.window.memory_context(proactive=True), character=self.character)
+            if catalog is not None:
+                messages[0]['content'] += catalog.instruction(self.window.name, online=False)
             self.client.start(self.window.config, messages)
         except (ValueError, RuntimeError, sqlite3.Error):
             self.cancel()
@@ -128,11 +150,20 @@ class CompanionRuntime(QObject):
                 or not self.enabled or not self.chat_enabled or not self.state().allows(45)):
             self.cancel()
             return
-        visible, tone = parse_reply(text)
-        if not visible or response_refusal(visible):
+        from .stickers import reply_parts, text_from_parts
+        catalog = getattr(self.window, 'stickers', None)
+        parts, search, error = reply_parts(text, catalog)
+        keys = [p['id'] for p in parts if p['type'] == 'sticker']
+        sticker = catalog.get(keys[-1]) if keys else None
+        visible = text_from_parts(parts)
+        if search or error or (keys and '[动作:' in text):
+            self.cancel()
+            return
+        if (not visible and not sticker) or response_refusal(visible):
             self.cancel()
             return
         visible = visible[:240]
+        accepted_state = self.state()
         def delivery():
             if self.voice_delivery is not delivery or self.ticket != ticket:
                 return False
@@ -140,18 +171,21 @@ class CompanionRuntime(QObject):
             self.ticket = None
             if (not self.enabled or not self.chat_enabled or self.window.closed
                     or self.window.character != self.character
-                    or not self.coordinator.deliver(ticket, self.state())):
+                    or not self.coordinator.deliver(ticket, accepted_state if self.voice_active else self.state())):
                 self.coordinator.cancel()
                 return False
             try:
-                self.window.store.add_proactive(self.character, visible)
+                self.window.store.add_proactive(self.character, visible + (' [表情：' + sticker.description(self.window.name) + ']' if sticker else ''))
             except sqlite3.Error:
                 self.cancel()
                 return False
-            self.pet.bubble.say(visible, 8000)
+            if sticker:
+                self.window.show_sticker_bubble(sticker, visible)
+            else:
+                self.pet.bubble.say(visible, 8000)
             return True
         self.voice_delivery = delivery
-        if self.window.reply_voice_enabled():
+        if visible and self.window.reply_voice_enabled():
             self.voice_active = True
             if self.window.speech.speak(visible, deliver=delivery):
                 return

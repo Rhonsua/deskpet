@@ -54,6 +54,10 @@ class WorkClient(QObject):
         self._pending_session_id = None
         self._secret = ''
         self._cancelled = False
+        self.input_seq = 0
+        self.closing_turn = False
+        self._worker_started = False
+        self._early_inputs = []
 
     def start(self, config, prompt, workspace, session_id=None, auto_approve=False):
         if self.busy:
@@ -77,6 +81,10 @@ class WorkClient(QObject):
         self._secret = config.api_key
         self._pending_session_id = candidate
         self._cancelled = False
+        self.input_seq = 0
+        self.closing_turn = False
+        self._worker_started = False
+        self._early_inputs.clear()
         self.buffer = b''
         self.terminal = False
         self.busy = True
@@ -86,13 +94,24 @@ class WorkClient(QObject):
         process.setProgram(str(program))
         process.setArguments(arguments)
         process.setWorkingDirectory(str(ROOT))
-        payload = dict(prompt=prompt, workspace=str(folder), model=config.model,
+        payload = dict(prompt=prompt, interactive=True, workspace=str(folder), model=config.model,
                        api_key=config.api_key, base_url=url,
                        home=str(home), session_id=candidate, auto_approve=auto_approve is True,
                        resume=session_id is not None and (home / 'session-ready').exists())
         payload['runtime_dir'] = str(runtime_directory(session_root().parent)
                                     if getattr(sys, 'frozen', False) else runtime_directory())
-        process.started.connect(lambda: self._send(payload) if process is self.process else None)
+        def started():
+            if process is not self.process:
+                return
+            self._send(payload)
+            self._worker_started = True
+            if self._cancelled:
+                self._send({'type':'cancel'})
+            else:
+                for message in self._early_inputs:
+                    self._send(message)
+            self._early_inputs.clear()
+        process.started.connect(started)
         process.readyReadStandardOutput.connect(lambda: self._read(process))
         process.readyReadStandardError.connect(lambda: process.readAllStandardError())
         process.finished.connect(lambda *args: self._finished(process))
@@ -106,7 +125,21 @@ class WorkClient(QObject):
 
     def _send(self, payload):
         if self.process:
-            self.process.write((json.dumps(payload, ensure_ascii=False)+'\n').encode('utf-8'))
+            data = (json.dumps(payload, ensure_ascii=False)+'\n').encode('utf-8')
+            return self.process.write(data) == len(data)
+        return False
+
+    def followup(self, text):
+        if not self.busy or self.terminal or self._cancelled or self.closing_turn:
+            raise ValueError('本轮正在结束，输入已保留，请稍后发送。')
+        seq = self.input_seq + 1
+        message = dict(type='followup', seq=seq, text=text)
+        if not self._worker_started:
+            self._early_inputs.append(message)
+        elif not self._send(message):
+            raise ValueError('补充消息未能发送，输入已保留。')
+        self.input_seq = seq
+        return seq
 
     def approve(self, request_id, approved):
         self._send(dict(type='approval', id=request_id, approved=approved is True))
@@ -114,7 +147,8 @@ class WorkClient(QObject):
     def cancel(self):
         if self.process:
             self._cancelled = True
-            self._send(dict(type='cancel'))
+            if self._worker_started:
+                self._send(dict(type='cancel'))
             process = self.process
             QTimer.singleShot(2500, lambda: self._kill_tree(process))
 
@@ -170,6 +204,9 @@ class WorkClient(QObject):
                                 continue
                             self.session_id = self._pending_session_id
                         self.event.emit(event['event'])
+                elif kind == 'idle':
+                    if event.get('seq') == self.input_seq and not self._cancelled:
+                        self.closing_turn = self._send(dict(type='finish_turn', seq=self.input_seq))
                 elif kind == 'approval':
                     if isinstance(event.get('request'), dict) and isinstance(event['request'].get('id'), (str, int)):
                         self.approval.emit(event['request'])

@@ -8,6 +8,26 @@ from dataclasses import dataclass
 import time
 
 
+PROACTIVE_INTERVAL_KEY = 'companion/proactive_interval_minutes'
+DEFAULT_PROACTIVE_INTERVAL = 5
+MIN_PROACTIVE_INTERVAL = 1
+MAX_PROACTIVE_INTERVAL = 120
+
+
+def proactive_interval_minutes(value):
+    """Read old/malformed settings without enabling a tight request loop."""
+    try:
+        if isinstance(value, bool):
+            return DEFAULT_PROACTIVE_INTERVAL
+        return max(MIN_PROACTIVE_INTERVAL, min(MAX_PROACTIVE_INTERVAL, int(value)))
+    except (ValueError, TypeError, OverflowError):
+        return DEFAULT_PROACTIVE_INTERVAL
+
+
+def saved_proactive_interval(settings):
+    return proactive_interval_minutes(settings.value(PROACTIVE_INTERVAL_KEY, DEFAULT_PROACTIVE_INTERVAL))
+
+
 @dataclass(frozen=True)
 class CompanionState:
     mode: str = 'idle'

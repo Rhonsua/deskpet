@@ -32,8 +32,23 @@ datas += [(str(root / 'deskpet/music/players/bilibili_probe.js'), 'deskpet/music
           (str(root / 'characters' / 'example' / 'character-walk.json.example'), 'characters/example'),
           (str(root / 'characters' / 'example' / 'personality.json.example'), 'characters/example')]
 datas += collect_data_files('webview')
+# Work-chat equations use packaged glyphs and the TeX-to-Unicode symbol table.
+for package in ('ziamath', 'ziafont', 'latex2mathml'):
+    datas += collect_data_files(package)
+# Keep the wheel notices; latex2mathml also reads its installed version at import.
+for package in ('mistune', 'ziamath', 'ziafont', 'latex2mathml'):
+    datas += copy_metadata(package)
 datas.append((str(root / 'assets' / 'icons' / 'tianyi.ico'), 'assets/icons'))
+sticker_root = root / 'assets/stickers'
+sticker_catalog = json.loads((sticker_root / 'catalog.json').read_text(encoding='utf-8'))
+datas.append((str(sticker_root / 'catalog.json'), 'assets/stickers'))
+for sticker in sticker_catalog:
+    path = (sticker_root / sticker['file']).resolve()
+    if not path.is_relative_to(sticker_root.resolve()) or not path.is_file():
+        raise ValueError('Missing sticker asset: ' + str(path))
+    datas.append((str(path), str(path.parent.relative_to(root))))
 datas.append((str(root / 'deskpet/chat' / 'personas' / 'luotianyi.json'), 'deskpet/chat/personas'))
+datas.append((str(root / 'deskpet/chat' / 'knowledge' / 'luotianyi.json'), 'deskpet/chat/knowledge'))
 datas.append((str(root / 'deskpet/chat' / 'harness_permission_bridge.mjs'), 'deskpet/chat'))
 datas.append((str(root / 'deskpet/chat' / 'runtime_package_lock.json'), 'deskpet/chat'))
 
@@ -85,7 +100,8 @@ for pose in ('work', 'crawl'):
 datas += collect_data_files('live2d')
 binaries = collect_dynamic_libs('live2d')
 a = Analysis([str(root / 'app_entry.py')], pathex=[str(root), str(sdk_site)], datas=datas, binaries=binaries,
-             hiddenimports=['webview.platforms.edgechromium', 'webview.platforms.winforms',
+             hiddenimports=['ziamath.fonts', 'ziafont.fonts',
+                            'webview.platforms.edgechromium', 'webview.platforms.winforms',
                             'live2d._live2d', 'OpenGL.platform.win32',
                             *collect_submodules('deepseek_harness')],
              excludes=['webview.platforms.qt', 'webview.platforms.gtk', 'webview.platforms.cef',

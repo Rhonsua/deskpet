@@ -49,6 +49,9 @@ class AlternatingPlayback:
         other = 'web' if source == 'local' else 'local'
         for target in (other, source):
             keys = self._keys(target)
+            queue = self.panel.bilibili.queue if target == 'web' else self.panel.queue
+            if queue.reverse and queue.mode != 'shuffle':
+                keys.reverse()
             if not keys:
                 continue
             owner = self.panel.library.active_id if target == 'local' else ''

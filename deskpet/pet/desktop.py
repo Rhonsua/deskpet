@@ -5,7 +5,7 @@ import sqlite3
 import time
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt, QTimer, QUrl
-from PySide6.QtGui import QColor, QPainter, QPixmap, QRegion, QTransform, QPen, QDesktopServices, QCursor
+from PySide6.QtGui import QColor, QPainter, QPixmap, QRegion, QTransform, QPen, QDesktopServices, QCursor, QMovie
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
     QProgressBar, QSlider, QSystemTrayIcon, QVBoxLayout, QWidget, QCheckBox,
@@ -29,6 +29,7 @@ from deskpet.pet.characters import (builtin_sources, STATES, DEFAULT_ANCHORS, re
                              builtin_walk, validate_walk_images)
 from deskpet.animation.walk_runtime import WalkRuntime
 from deskpet.animation.teleport_runtime import TeleportRuntime
+from deskpet.animation.activity_area import ActivityAreaRuntime, roaming_bounds, roaming_allowed
 from deskpet.animation.work_visual import activity as work_activity, reconcile as reconcile_work
 
 LIVE2D_POSE_WIDTHS = {'sleep': 400, 'phone': 320}
@@ -78,16 +79,55 @@ class Bubble(QFrame):
         self.label.setWordWrap(True)
         self.label.setMaximumWidth(220)
         layout.addWidget(self.label)
+        self.sticker_label = QLabel()
+        self.sticker_label.setAlignment(Qt.AlignCenter)
+        self.sticker_label.hide()
+        layout.addWidget(self.sticker_label)
+        self.sticker_movie = None
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self.hide)
 
     def say(self, value, duration=3400):
+        self.clear_sticker()
+        self.label.setVisible(True)
         self.label.setText(value)
         self.adjustSize()
         clamp_near(self.pet, self)
         self.show()
         self.timer.start(duration)
+
+    def clear_sticker(self):
+        if self.sticker_movie:
+            self.sticker_movie.stop();self.sticker_movie.setFileName('');self.sticker_movie.deleteLater()
+            self.sticker_movie = None
+        self.sticker_label.clear()
+        self.sticker_label.hide()
+
+    def say_sticker(self, path, text='', duration=8000):
+        self.clear_sticker()
+        self.label.setText(text)
+        self.label.setVisible(bool(text))
+        image = QPixmap(str(path))
+        if max(image.width(), image.height()) > 128:
+            image = image.scaled(128, 128, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.sticker_label.setFixedSize(image.size())
+        if path.suffix.lower() == '.gif':
+            self.sticker_movie = QMovie(str(path), parent=self)
+            self.sticker_movie.setScaledSize(image.size())
+            self.sticker_label.setMovie(self.sticker_movie)
+            self.sticker_movie.start()
+        else:
+            self.sticker_label.setPixmap(image)
+        self.sticker_label.show()
+        self.adjustSize()
+        clamp_near(self.pet, self)
+        self.show()
+        self.timer.start(duration)
+
+    def hideEvent(self, event):
+        self.clear_sticker()
+        super().hideEvent(event)
 
 
 class PetToolbar(QFrame):
@@ -138,13 +178,17 @@ class PetToolbar(QFrame):
         self.content = QVBoxLayout()
         self.content.setSpacing(7)
         outer.addLayout(self.content)
+        from deskpet.chat.quick_input import QuickChatInput
+        self.quick_chat = QuickChatInput(pet, self)
+        self.quick_chat.hide()
         self.mode = 'home'
         self.close_timer = QTimer(self)
         self.close_timer.setSingleShot(True)
         self.close_timer.timeout.connect(self.auto_close)
 
     def auto_close(self):
-        if self.underMouse():
+        if self.underMouse() or (self.quick_chat.isVisible() and
+                               (self.quick_chat.input.hasFocus() or self.quick_chat.pending_text)):
             self.close_timer.start(8000)
         else:
             self.hide()
@@ -164,7 +208,9 @@ class PetToolbar(QFrame):
         self.mode = name
         while self.content.count():
             item = self.content.takeAt(0)
-            if item.widget():
+            if item.widget() is self.quick_chat:
+                self.quick_chat.hide()
+            elif item.widget():
                 item.widget().deleteLater()
         if name == 'food':
             for food, (cost, *_rest) in FOODS.items():
@@ -196,6 +242,8 @@ class PetToolbar(QFrame):
             auto_walk.setEnabled(self.pet.walk_supported())
             auto_walk.toggled.connect(self.pet.set_auto_walk)
             self.content.addWidget(auto_walk)
+            self.add_button('框选活动范围', self.pet.select_activity_area)
+            self.add_button('恢复全桌面活动', self.pet.clear_activity_area)
         elif name == 'settings':
             startup = QCheckBox('开机自启')
             try:
@@ -223,7 +271,8 @@ class PetToolbar(QFrame):
             hint = QLabel('点击打招呼 · 拖动提起 · 双击/右键菜单')
             hint.setObjectName('Muted')
             self.content.addWidget(hint)
-            self.add_button('一起加油吧', lambda: self.pet.reply())
+            self.content.addWidget(self.quick_chat)
+            self.quick_chat.show()
             self.add_button('和我聊天', self.pet.open_chat)
             self.add_button('打开歌单', lambda: self.pet.open_tools(0))
         self.refresh()
@@ -250,7 +299,7 @@ class PetToolbar(QFrame):
             self.close_timer.start(12000)
 
 
-class DesktopPet(TeleportRuntime, WalkRuntime, QWidget):
+class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
     @property
     def playing(self):
         return self.behavior.playing
@@ -330,6 +379,7 @@ class DesktopPet(TeleportRuntime, WalkRuntime, QWidget):
         self.anchors = dict(DEFAULT_ANCHORS)
         self.head_region = QRegion()
         self.panel = panel_factory(self)
+        self.init_activity_area()
         self.init_walk()
         self.init_teleport()
         self.panel.songChanged.connect(self.refresh_music_title)
@@ -362,6 +412,9 @@ class DesktopPet(TeleportRuntime, WalkRuntime, QWidget):
         menu.addAction('显示桌宠', self.restore)
         menu.addAction('互动菜单', self.toolbar.toggle)
         menu.addAction('停止自动动作', self.stop_roaming)
+        area_menu = menu.addMenu('自由活动范围')
+        area_menu.addAction('框选活动范围', self.select_activity_area)
+        self.clear_activity_area_action = area_menu.addAction('恢复全桌面活动', self.clear_activity_area)
         menu.addAction('歌单', lambda: self.open_tools(0))
         menu.addAction('网易云 / 歌词与节拍', lambda: self.open_music_companion(0))
         menu.addAction('聊天', self.open_chat)
@@ -379,6 +432,7 @@ class DesktopPet(TeleportRuntime, WalkRuntime, QWidget):
         self.tray.setToolTip('洛天依 · 右键打开菜单')
         self.tray.show()
         self.restore()
+        self.refresh_activity_area_controls()
         self.set_mouse_passthrough(self.panel.settings.value('mouse_passthrough', False, type=bool))
         QTimer.singleShot(1800, self.restore_companion)
 
@@ -871,7 +925,12 @@ class DesktopPet(TeleportRuntime, WalkRuntime, QWidget):
         travelled = distance(self.behavior.activity_elapsed, self.scale)
         delta = max(0.0, travelled - getattr(self, 'crawl_travel_previous', travelled))
         self.crawl_travel_previous = travelled
-        left = self.screen_bounds().left()
+        bounds = roaming_bounds(self)
+        if not roaming_allowed(self, bounds):
+            self.behavior.layers = [a for a in self.behavior.layers if a.name != 'crawl']
+            self.save_position()
+            return
+        left = bounds.left()
         target = max(left, getattr(self, 'crawl_travel_x', float(self.x())) - delta)
         self.crawl_travel_x = target
         self.move(round(target), self.y())
@@ -917,6 +976,7 @@ class DesktopPet(TeleportRuntime, WalkRuntime, QWidget):
 
     def open_tools(self, tab=0):
         self.stop_roaming()
+        self.refresh_activity_area_controls()
         self.reveal_dock()
         self.panel.tabs.setCurrentIndex(tab)
         clamp_near(self, self.panel)
@@ -1091,7 +1151,7 @@ class DesktopPet(TeleportRuntime, WalkRuntime, QWidget):
             self.last_user_interaction = time.monotonic()
             runtime = getattr(getattr(self, 'chat_window', None), 'companion_runtime', None)
             if runtime is not None:
-                runtime.cancel()
+                runtime.on_interaction()
         if (self.petting and event.type() == QEvent.Type.KeyPress
                 and event.key() == Qt.Key.Key_Escape):
             self.end_petting()
@@ -1135,8 +1195,7 @@ class DesktopPet(TeleportRuntime, WalkRuntime, QWidget):
         except Exception:
             self.bubble.say('扩展页面暂时无法打开，桌宠和音乐仍可正常使用。')
 
-    def open_chat(self, checked=False, settings=False):
-        self.stop_roaming()
+    def ensure_chat(self):
         if getattr(self, 'chat_window', None) is None:
             from deskpet.chat.window import ChatWindow
             try:
@@ -1144,7 +1203,13 @@ class DesktopPet(TeleportRuntime, WalkRuntime, QWidget):
             except (OSError, sqlite3.Error):
                 self.bubble.say('聊天数据无法打开，请检查磁盘空间和数据目录权限。')
                 return
-        self.chat_window.show_chat(settings=settings)
+        return self.chat_window
+
+    def open_chat(self, checked=False, settings=False):
+        self.stop_roaming()
+        window = self.ensure_chat()
+        if window is not None:
+            window.show_chat(settings=settings)
 
     def reply(self):
         self.toolbar.hide()

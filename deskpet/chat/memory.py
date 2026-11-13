@@ -146,12 +146,24 @@ class MemoryBank:
         scored = [(len(terms & keywords(row['content'])), row) for row in rows]
         facts = sorted(((score, row) for score, row in scored if row['kind'] == 'fact'),
                        key=lambda item: (item[1]['slot'] == 'name', item[0], item[1]['source_id']), reverse=True)
+        # Own-character knowledge is handled separately. Unrelated preferences
+        # should not accompany every factual question about Tianyi's repertoire.
+        broad = re.search(r'我.*(?:喜欢|偏好|爱好|喜好|口味)|记得我|了解我|关于我|你记得什么', query)
+        music = re.search(r'歌|音乐|曲|播放|听|挑', query)
+        def related_fact(score, row):
+            return (row['slot'] == 'name' or score > 0 or broad
+                    or (music and re.search(r'歌|音乐|曲|摇滚|钢琴|爵士|民谣|电音|古典|安静|舒缓', row['content'])))
+        facts = [(score, row) for score, row in facts if related_fact(score, row)]
         notes = sorted(((score, row) for score, row in scored if row['kind'] == 'note'
                         and row['source_id'] not in recent and score > 0),
                        key=lambda item: (item[0], item[1]['source_id']), reverse=True)
         # Proactive chat gets a small number of actual recent experiences, never
         # the pseudo-user proactive prompt as a search query or a memory source.
         if proactive:
+            # Allow one preference as a fresh topic seed, without loading a
+            # whole profile into every autonomous greeting.
+            facts = [(score, row) for score, row in scored if row['slot'] == 'name'] + [
+                (score, row) for score, row in scored if row['kind'] == 'fact' and row['slot'] != 'name'][:1]
             notes = [(0, row) for row in rows if row['kind'] == 'note' and row['source_id'] not in recent
                      and self.db.execute("SELECT julianday('now')-julianday(?) <= 7", (row['created'],)).fetchone()[0]][:2]
         selected = [row for _, row in facts[:6]] + [row for _, row in notes[:2]]

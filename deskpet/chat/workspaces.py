@@ -229,7 +229,6 @@ class Workspaces(QWidget):
         p.conversation_title = str(saved.get('title') or '新对话')
         p.conversation_used = bool(saved.get('used') or saved.get('session_id') or saved.get('running'))
         p.log.set_background(self.background_path)
-        p.clear_sent_prompt = True
         p.folder.setText(folder)
         p.folder.setEnabled(False)
         p.folder_row.hide()
@@ -504,7 +503,7 @@ class Workspaces(QWidget):
                 persisted_ids.add(identifier)
                 conversations.append({'id': identifier, 'title': p.conversation_title,
                     'used': p.conversation_used,
-                    'session_id': p.client.session_id, 'draft': p.prompt.toPlainText(),
+                    'session_id': p.client.session_id, 'draft': p.recoverable_draft(),
                     'continue_session': p.continue_session.isChecked(),
                     'auto_approve': p.auto_approve.isChecked(), 'log': p.log.toPlainText(),
                     'messages': p.log.messages, 'events': p.events.toPlainText(),

@@ -61,6 +61,26 @@ class MemoryTests(unittest.TestCase):
         self.assertIn('本轮用户明确更正优先', messages[0]['content'])
         self.assertIn('不能声称事情已经完成', messages[0]['content'])
 
+    def test_unrelated_preferences_do_not_crowd_character_knowledge(self):
+        self.say('叫我小林')
+        self.say('我喜欢辣椒')
+        self.say('我喜欢钢琴')
+        memory = self.bank.recall('tianyi', '你的生日是哪天')
+        self.assertIn('小林', memory)
+        self.assertNotIn('辣椒', memory)
+        self.assertNotIn('钢琴', memory)
+        self.assertIn('钢琴', self.bank.recall('tianyi', '帮我选首歌'))
+        self.assertIn('辣椒', self.bank.recall('tianyi', '还记得我喜欢什么吗'))
+        self.assertIn('辣椒', self.bank.recall('tianyi', '今天吃辣椒吗'))
+
+    def test_proactive_uses_only_one_preference_seed(self):
+        self.say('我喜欢钢琴')
+        self.say('我喜欢摇滚')
+        self.say('我喜欢辣椒')
+        rows = self.bank.recall('tianyi', '', proactive=True).splitlines()
+        self.assertEqual(len(rows), 1)
+        self.assertIn('辣椒', rows[0])
+
     def test_recent_events_not_duplicated_and_proactive_uses_only_fresh_events(self):
         self.say('我昨天和朋友一起去爬山看日出了')
         self.assertEqual(self.bank.recall('tianyi', '爬山'), '')

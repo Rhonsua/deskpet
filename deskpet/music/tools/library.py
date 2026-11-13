@@ -87,6 +87,7 @@ class MusicLibrary:
 class PlaybackQueue:
     def __init__(self, mode='order'):
         self.mode = mode if mode in MODES else 'order'
+        self.reverse = False
         self.paths = []
         self.index = -1
         self.bag = []
@@ -97,6 +98,17 @@ class PlaybackQueue:
         self.index = index if 0 <= index < len(self.paths) else -1
         self.bag = []
         self.history = []
+
+    def reorder(self, paths):
+        """Keep the playing item and shuffle history attached to song identities."""
+        old = self.paths
+        positions = {path: index for index, path in enumerate(paths)}
+        def remap(index):
+            return positions.get(old[index], -1) if 0 <= index < len(old) else -1
+        self.index = remap(self.index)
+        self.bag = [new for index in self.bag if (new := remap(index)) >= 0]
+        self.history = [new for index in self.history if (new := remap(index)) >= 0]
+        self.paths = list(paths)
 
     def advance(self, direction=1, ended=False):
         if not self.paths:
@@ -117,8 +129,9 @@ class PlaybackQueue:
             else:
                 self.index = max(0, self.index)
             return self.index
-        next_index = self.index + direction
-        if ended and self.mode == 'order' and next_index >= len(self.paths):
+        step = -direction if self.reverse else direction
+        next_index = self.index + step if self.index >= 0 else (0 if step > 0 else len(self.paths) - 1)
+        if ended and self.mode == 'order' and not 0 <= next_index < len(self.paths):
             return None
         self.index = next_index % len(self.paths)
         return self.index

@@ -9,8 +9,11 @@ from deskpet.chat.client import ChatClient as HttpTransport
 
 
 def emit(event):
-    sys.stdout.write('TIANYI_CHAT ' + json.dumps(event, ensure_ascii=False) + '\n')
-    sys.stdout.flush()
+    # Frozen Windows console helpers can ignore PYTHONIOENCODING. Write the
+    # protocol bytes directly, including when the system code page is GBK.
+    pipe = sys.stdout.buffer
+    pipe.write(b'TIANYI_CHAT ' + json.dumps(event, ensure_ascii=False).encode('utf-8') + b'\n')
+    pipe.flush()
 
 
 class Worker(QObject):
@@ -80,7 +83,8 @@ def run():
     def read_commands():
         try:
             while True:
-                line = sys.stdin.buffer.readline(256 * 1024)
+                # Bounded vision thumbnails may exceed the text-only pipe limit.
+                line = sys.stdin.buffer.readline(8 * 1024 * 1024)
                 if not line or not line.endswith(b'\n'):
                     break
                 try:

@@ -22,6 +22,23 @@ class WorkTests(unittest.TestCase):
   client.process=current; client.busy=True
   client._finished(old);client._error(old);client._read(old)
   self.assertTrue(client.busy);self.assertIs(client.process,current)
+ def test_only_latest_idle_can_close_session_and_failed_write_keeps_sequence(self):
+  client=WorkClient(); process=Mock(); client.process=process; client.busy=True
+  self.assertEqual(client.followup('during startup'),1)
+  self.assertEqual(client._early_inputs[0]['text'],'during startup')
+  client._worker_started=True
+  process.write.return_value=-1
+  with self.assertRaises(ValueError): client.followup('retry')
+  self.assertEqual(client.input_seq,1)
+  process.write.side_effect=len
+  self.assertEqual(client.followup('retry'),2)
+  process.readAllStandardOutput.return_value=b'{"type":"idle","seq":1}\n'
+  client._read(process)
+  self.assertFalse(client.closing_turn)
+  process.readAllStandardOutput.return_value=b'{"type":"idle","seq":2}\n'
+  client._read(process)
+  self.assertEqual(json.loads(process.write.call_args.args[0]),{'type':'finish_turn','seq':2})
+  self.assertTrue(client.closing_turn)
  def test_invalid_protocol_and_late_completion(self):
   client=WorkClient(); process=Mock();client.process=process;client.busy=True
   client._cancelled=True

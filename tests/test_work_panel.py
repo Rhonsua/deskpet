@@ -20,6 +20,7 @@ class FakeClient(QObject):
         self.busy = False
         self.session_id = None
         self.starts = []
+        self.followups = []
         self.answers = []
         self.closed = False
         self.ready = False
@@ -32,9 +33,14 @@ class FakeClient(QObject):
     def can_resume(self):
         return bool(self.session_id)
 
+    def followup(self, text):
+        self.followups.append(text)
+        return len(self.followups)
+
     def accept(self):
         self.session_id = 'session1'
         self.event.emit({'type':'session_ready','session_id':self.session_id})
+        self.event.emit({'type':'input_received','seq':0})
 
     def approve(self, request_id, approved):
         self.answers.append((request_id, approved))
@@ -69,13 +75,47 @@ class WorkPanelTests(unittest.TestCase):
         p.start(); p.start(); p.hide()
         self.assertEqual(len(p.client.starts), 1)
         self.assertTrue(p.is_running)
-        self.assertFalse(p.start_button.isEnabled())
-        self.assertTrue(p.prompt.isReadOnly())
+        self.assertTrue(p.start_button.isEnabled())
+        self.assertFalse(p.prompt.isReadOnly())
+        self.assertEqual(p.prompt.toPlainText(), '')
         p.client.cancel(); p.client.failed.emit('failure')
         self.assertTrue(p.start_button.isEnabled())
         self.assertEqual(p.prompt.toPlainText(), 'edit file')
         p.start()
         self.assertEqual(len(p.client.starts), 2)
+
+    def test_multiple_followups_and_late_receipt_preserve_new_draft_and_approval(self):
+        p = self.panel
+        p.start()
+        p.request_approval({'id':'1', 'arguments':{'command':'test'}})
+        for text in ('先只读', '先看文档'):
+            p.prompt.setPlainText(text)
+            p.start()
+            self.assertEqual(p.prompt.toPlainText(), '')
+        p.prompt.setPlainText('草稿')
+        p.client.accept()
+        p.client.event.emit({'type':'input_received', 'seq':1})
+        self.assertEqual(p.approval_id, '1')
+        self.assertEqual(p.client.followups, ['先只读', '先看文档'])
+        self.assertEqual(len(p.client.starts), 1)
+        p.client.failed.emit('后端退出')
+        self.assertEqual(p.prompt.toPlainText(), '草稿')
+        self.assertIn('先看文档', p.events.toPlainText())
+
+    def test_work_bubbles_render_markdown_after_restore_and_keep_user_text_literal(self):
+        p = self.panel
+        reply = '# 结果\n\n**加粗**\n\n- 事项\n\n```py\nif x:\n    pass\n```\n\n![图](file:///absent.png)'
+        p.log.append_message('user', '**原样**')
+        p.log.append_message('assistant', reply)
+        p.log.set_messages(p.log.messages)
+        doc = p.log.document()
+        self.assertIn('**原样**', doc.toPlainText())
+        self.assertEqual(doc.find('结果').blockFormat().headingLevel(), 1)
+        self.assertGreaterEqual(doc.find('加粗').charFormat().fontWeight(), 600)
+        self.assertIsNotNone(doc.find('事项').currentList())
+        self.assertIn('    pass', doc.toPlainText())
+        self.assertNotIn('<img ', doc.toHtml())
+        self.assertEqual(p.log.messages[-1]['content'], reply)
 
     def test_composer_enter_shift_enter_and_chinese_composition(self):
         from PySide6.QtCore import Qt
@@ -144,13 +184,14 @@ class WorkPanelTests(unittest.TestCase):
         self.assertEqual(p.client.answers,[])
         p.answer(False)
         self.assertEqual(p.client.answers,[('high-risk',False)])
-        p.client.cancel();p.auto_approve.setChecked(False);p.start()
+        p.client.cancel();p.auto_approve.setChecked(False)
+        p.prompt.setPlainText('next task');p.start()
         self.assertFalse(p.client.starts[-1][1]['auto_approve'])
 
     def test_startup_failure_keeps_input_and_direct_retry_creates_new_session(self):
-        p=self.panel;p.clear_sent_prompt=True
+        p=self.panel
         p.start()
-        self.assertEqual(p.prompt.toPlainText(),'edit file')
+        self.assertEqual(p.prompt.toPlainText(),'')
         self.assertFalse(p.continue_session.isChecked())
         p.client.failed.emit('initialize timed out');p.client.cancel()
         self.assertEqual(p.prompt.toPlainText(),'edit file')
@@ -184,7 +225,7 @@ class WorkPanelTests(unittest.TestCase):
 
     def test_continue_session_and_shutdown(self):
         p=self.panel;p.start();p.client.accept();p.client.cancel()
-        p.continue_session.setChecked(True);p.start()
+        p.prompt.setPlainText('continue');p.continue_session.setChecked(True);p.start()
         self.assertEqual(p.client.starts[-1][1]['session_id'],'session1')
         p.client.cancel();p.folder.setText('different');p.start()
         self.assertEqual(len(p.client.starts),2)

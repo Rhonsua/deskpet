@@ -40,7 +40,7 @@ class ChatClient(QObject):
         self.active = self.generation
         self.pending = dict(cmd='start', id=self.active, config=asdict(config),
                             messages=messages, test=test)
-        self.timer.start(90000)
+        self.timer.start(30000)  # Startup only; network timing begins when the worker is ready.
         if self.ready:
             self._send_pending()
         elif self.process.state() == QProcess.ProcessState.NotRunning:
@@ -59,12 +59,18 @@ class ChatClient(QObject):
 
     def _write(self, value):
         # Credentials travel only over the private pipe, never argv or files.
-        self.process.write((json.dumps(value, ensure_ascii=False) + '\n').encode('utf-8'))
+        data = (json.dumps(value, ensure_ascii=False) + '\n').encode('utf-8')
+        return self.process.write(data) == len(data)
 
     def _send_pending(self):
         pending, self.pending = self.pending, None
         if pending is not None:
-            self._write(pending)
+            if self._write(pending):
+                # Let the transport report its own 90s timeout and network stage.
+                self.timer.start(105000)
+            else:
+                self._broken('消息未能交给聊天后台，请重新发送。')
+                self.process.kill()
 
     def cancel(self):
         active, self.active = self.active, None
@@ -76,8 +82,12 @@ class ChatClient(QObject):
 
     def _timeout(self):
         if self.active is not None:
+            starting = not self.ready
             self.cancel()
-            self.failed.emit('请求超过 90 秒，请稍后重试或更换模型。')
+            if starting:
+                self.process.kill()
+            self.failed.emit('聊天后台启动超时，请重新打开桌宠。' if starting else
+                             '聊天后台未返回最终结果，请检查连接方式后重试。')
 
     def _read(self):
         self.buffer += bytes(self.process.readAllStandardOutput())
@@ -92,7 +102,9 @@ class ChatClient(QObject):
             try:
                 event = json.loads(line[len(b'TIANYI_CHAT '):])
             except (ValueError, UnicodeError):
-                continue
+                self._broken('聊天后台传回的数据无法解码，请检查桌宠主程序与后台是否为同一版本。')
+                self.process.kill()
+                return
             if not isinstance(event, dict):
                 continue
             if event.get('type') == 'ready':
@@ -124,6 +136,7 @@ class ChatClient(QObject):
             self.failed.emit(message)
 
     def _exited(self, *_):
+        self._read()  # A process may exit while the last line is still buffered.
         self._broken('聊天后台已退出，请重新发送；未完成的回复不会保存。')
 
     def _process_error(self, error):

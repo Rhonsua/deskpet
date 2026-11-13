@@ -22,15 +22,15 @@ class WorkerLifecycleTests(unittest.TestCase):
             client.request.side_effect = TimeoutError('initialize timed out dummy-secret')
         client.next_request.side_effect = EOFError()
         session = Mock()
-        session.return_value.run.side_effect = RuntimeError('prompt rejected before receipt')
+        session.side_effect = RuntimeError('prompt rejected before receipt')
         modules = {
             'deepseek_harness':SimpleNamespace(HarnessClient=Mock(return_value=client), HarnessConfig=lambda **kw: kw),
-            'deepseek_harness.api':SimpleNamespace(Session=session),
             'deepseek_harness.models':SimpleNamespace(InitializeResponse=object),
         }
         with patch.dict('sys.modules', modules), patch.object(harness_worker.sys, 'stdin', io.StringIO(json.dumps(payload)+'\n')), \
              patch('deskpet.chat.harness_bootstrap.ensure_runtime', return_value=root/'dsh.cmd'), \
              patch.object(harness_worker.threading, 'Thread'), \
+             patch.object(harness_worker, 'run_conversation', session), \
              patch('deskpet.chat.harness_runtime.runtime_launch_args', return_value=('node','bin.js')), \
              patch('deskpet.chat.work_permissions.write_runtime_patch', return_value=home/'privacy.patch.yml'), \
              patch.object(harness_worker, 'emit') as emit:
@@ -57,6 +57,6 @@ class WorkerLifecycleTests(unittest.TestCase):
     def test_initialize_alone_does_not_make_session_resumable(self):
         with tempfile.TemporaryDirectory() as folder:
             home, session, emit = self.run_worker(folder, prompt_failure=True)
-            session.return_value.run.assert_called_once()
+            session.assert_called_once()
             self.assertFalse((home/'session-ready').exists())
             self.assertFalse(any(c.kwargs.get('event',{}).get('type')=='session_ready' for c in emit.call_args_list))

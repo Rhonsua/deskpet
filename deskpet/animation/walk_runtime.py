@@ -5,6 +5,7 @@ import random
 from PySide6.QtCore import QPoint
 
 from deskpet.animation.walk_controller import WalkController
+from deskpet.animation.activity_area import roaming_bounds, roaming_allowed
 
 CRAWL_ROUTE_PROBABILITY = .25
 
@@ -34,6 +35,8 @@ class WalkRuntime:
         return self.walk_controller.elapsed if self.is_crawl_walk() else self.behavior.activity_elapsed
 
     def walk_busy_windows(self, *, chat_command=False):
+        if getattr(self, 'activity_area_picker', None) is not None:
+            return True
         windows = [self.panel, self.toolbar]
         if not chat_command:
             windows.extend((self.bubble, getattr(self, 'chat_window', None)))
@@ -90,6 +93,9 @@ class WalkRuntime:
             self.stop_walk()
             return
         if not self.start_walk():
+            if getattr(self, 'activity_area', None) is not None and not roaming_allowed(self, roaming_bounds(self)):
+                self.bubble.say('先把我拖回活动范围内，或重新框选大一点的范围吧。')
+                return
             self.bubble.say('当前角色还没有散步动作。' if not self.walk_supported()
                             else '先回到空闲状态，离开桌面边缘再散步吧。')
 
@@ -104,7 +110,9 @@ class WalkRuntime:
             self.bubble.hide()
             if self.walk_busy_windows(chat_command=chat_command):
                 return False
-        bounds = self.screen_bounds()
+        bounds = roaming_bounds(self)
+        if not roaming_allowed(self, bounds):
+            return False
         left, right = bounds.left(), bounds.right() + 1 - self.width()
         if self.y() < bounds.top() or self.y() + self.height() > bounds.bottom() + 1:
             return False
@@ -156,12 +164,12 @@ class WalkRuntime:
     def tick_walk(self, delta):
         controller = self.walk_controller
         if controller.active:
-            bounds = self.screen_bounds()
+            bounds = roaming_bounds(self)
             changed_bounds = bounds != self.walk_bounds
-            if not self.walk_eligible(starting=False) or changed_bounds:
+            if not self.walk_eligible(starting=False) or changed_bounds or not roaming_allowed(self, bounds):
                 self.stop_walk()
                 # A changed monitor/work area may no longer contain the pet.
-                if changed_bounds:
+                if changed_bounds and getattr(self, 'activity_area', None) is None:
                     from deskpet.animation.edge_docking import clamp_position
                     self.move(clamp_position(self.pos(), self.size(), bounds))
                 return

@@ -72,6 +72,7 @@ class MusicPanel(BackgroundSurface):
         self.library_storage = LibraryStorage(self.settings, data_dir)
         self.library = self.library_storage.load(legacy if isinstance(legacy, list) else [legacy])
         self.queue = PlaybackQueue(self.settings.value('play_mode', 'order'))
+        self.queue.reverse = self.settings.value('music/local_reverse', False, type=bool)
         from deskpet.music.tools.alternating import AlternatingPlayback
         self.alternating = AlternatingPlayback(self)
         self._local_ended = False
@@ -336,10 +337,17 @@ class MusicPanel(BackgroundSurface):
             self.store_library()
             self._local_selection_requested = True
 
-    def play_active_playlist(self):
+    def selected_or_start_row(self):
         row = self.list.currentRow()
         if row < 0 or self.list.item(row).isHidden():
-            row = next((i for i in range(len(self.paths)) if not self.list.item(i).isHidden()), -1)
+            indices = range(len(self.paths))
+            if self.queue.reverse and self.queue.mode != 'shuffle':
+                indices = reversed(indices)
+            row = next((i for i in indices if not self.list.item(i).isHidden()), -1)
+        return row
+
+    def play_active_playlist(self):
+        row = self.selected_or_start_row()
         if row < 0:
             self.status.setText('当前歌单没有可播放的歌曲，请先添加 MP3 或清除搜索条件')
             return
@@ -362,7 +370,8 @@ class MusicPanel(BackgroundSurface):
     def play_mode_label(self, source='local'):
         if self.alternating.enabled:
             return '本地 / B站轮流循环'
-        return MODES[self.bilibili.queue.mode if source == 'web' else self.queue.mode]
+        queue = self.bilibili.queue if source == 'web' else self.queue
+        return MODES[queue.mode] + (' · 倒序' if queue.reverse and queue.mode != 'shuffle' else '')
 
     def set_alternating(self, enabled):
         self.alternating.enabled = bool(enabled)
@@ -373,6 +382,10 @@ class MusicPanel(BackgroundSurface):
             widget.blockSignals(True)
             widget.setChecked(bool(enabled))
             widget.blockSignals(False)
+        if enabled and self.bilibili.active:
+            if self.bilibili.pending_load is not None:
+                self.bilibili.pending_load['background'] = True
+            self.bilibili.send({'cmd': 'hide'})
         if self.playback_source in ('local', 'web'):
             key = self.current_path() if self.playback_source == 'local' else self.bilibili.current_url
             if key:
@@ -427,14 +440,35 @@ class MusicPanel(BackgroundSurface):
     def move_song(self, direction):
         row = self.list.currentRow()
         target = row + direction
-        if 0 <= row < len(self.paths) and 0 <= target < len(self.paths):
+        if direction in (-1, 1) and 0 <= row < len(self.paths) and 0 <= target < len(self.paths):
             self.paths[row], self.paths[target] = self.paths[target], self.paths[row]
+            if self.queue_owner == self.library.active_id:
+                current = self.current_path()
+                paths = list(self.paths)
+                if current and current not in paths:
+                    paths.insert(0, current)
+                self.queue.reorder(paths)
             self.render_library(target)
-            self.store_library()
+            self.save()
+
+    def update_move_buttons(self, *_):
+        row = self.list.currentRow()
+        self.move_up_button.setEnabled(0 < row < len(self.paths))
+        self.move_down_button.setEnabled(0 <= row < len(self.paths) - 1)
+
+    def set_reverse(self, enabled):
+        self.queue.reverse = bool(enabled)
+        self.settings.setValue('music/local_reverse', self.queue.reverse)
+        self.settings.sync()
+        if self.playback_source == 'local':
+            self.song_meta.setText('本地 MP3 · ' + self.play_mode_label())
+        self.status.setText('本地歌单已开启倒序播放，从当前歌曲往前播放；未选歌曲时从末尾开始。'
+                            if enabled else '本地歌单已恢复从前往后播放。')
 
     def set_mode(self, index):
         self.queue.mode = self.mode_choice.itemData(index)
         self.queue.bag = []
+        self.reverse_toggle.setEnabled(self.queue.mode != 'shuffle')
         self.settings.setValue('play_mode', self.queue.mode)
         self.song_meta.setText('本地 MP3 · ' + self.play_mode_label())
         if self.cloud_player is not None:
@@ -698,7 +732,7 @@ class MusicPanel(BackgroundSurface):
             self.bilibili.step(direction)
             return
         if not self.queue.paths and self.paths:
-            self.play_row(0)
+            self.play_active_playlist()
             return
         for _ in range(len(self.queue.paths)):
             index = self.queue.advance(direction)
@@ -761,6 +795,7 @@ class MusicPanel(BackgroundSurface):
         if not self.persist_library():
             return
         self.settings.setValue('play_mode', self.queue.mode)
+        self.settings.setValue('music/local_reverse', self.queue.reverse)
         if self.playback_source not in ('netease', 'kugou'):
             self.settings.setValue('current_path', self.current_path())
             self.settings.setValue('current_position', self.pending_seek if self.pending_seek is not None
