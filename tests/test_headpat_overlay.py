@@ -33,17 +33,32 @@ class OverlayTests(unittest.TestCase):
         self.assertEqual(state.glove_overlay_alpha, 0)
         self.assertIsNone(state.glove_overlay_position)
 
-    def test_contact_doubles_horizontal_offsets_without_changing_height(self):
+    def test_contact_is_broad_and_solid_despite_gaps_in_hair(self):
         state = self.state()
-        original = state.head_region.intersected(state.hit_region)
+        head, hit = QRegion(state.head_region), QRegion(state.hit_region)
+        state.hit_region -= QRegion(QRect(120, 10, 20, 110))
         expanded = DesktopPet.petting_contact_region(state)
-        self.assertEqual(expanded.boundingRect(), QRect(10, 10, 240, 110))
-        self.assertEqual(state.head_region, original)
-        for point in (QPoint(15, 60), QPoint(245, 60)):
-            self.assertFalse(original.contains(point))
+        self.assertGreaterEqual(expanded.boundingRect().width(), head.boundingRect().width()*2.4)
+        self.assertGreaterEqual(expanded.boundingRect().height(), head.boundingRect().height()*1.5)
+        self.assertEqual(state.head_region, head)
+        for point in (QPoint(0, 60), QPoint(260, 60), QPoint(130, 0), QPoint(130, 130), QPoint(130, 60)):
             self.assertTrue(expanded.contains(point))
-        for point in (QPoint(9, 60), QPoint(250, 60), QPoint(130, 9), QPoint(130, 120)):
+        for point in (QPoint(-30, 60), QPoint(290, 60), QPoint(130, -30), QPoint(130, 160)):
             self.assertFalse(expanded.contains(point))
+        self.assertNotEqual(state.hit_region, hit)
+
+    def test_contact_has_larger_release_band_at_all_scales(self):
+        for scale in (.75, 1, 1.5):
+            state = self.state()
+            state.scale = scale
+            state.head_region = QRegion(QRect(0, 0, round(120*scale), round(110*scale)))
+            entry = DesktopPet.petting_contact_region(state)
+            state.petting_contact_latched = True
+            held = DesktopPet.petting_contact_region(state)
+            self.assertTrue((entry - held).isEmpty())
+            edge = QPoint(entry.boundingRect().right()+round(12*scale), round(55*scale))
+            self.assertFalse(entry.contains(edge))
+            self.assertTrue(held.contains(edge))
 
     def test_expanded_margin_receives_input_only_during_petting(self):
         state = self.state()
@@ -61,7 +76,8 @@ class OverlayTests(unittest.TestCase):
             image = canvas.toImage()
             self.assertEqual(image.pixelColor(15, 60).alpha(), 1 if enabled else 0)
             self.assertEqual(image.pixelColor(245, 60).alpha(), 1 if enabled else 0)
-            self.assertEqual(image.pixelColor(130, 120).alpha(), 0)
+            self.assertEqual(image.pixelColor(130, 130).alpha(), 1 if enabled else 0)
+            self.assertEqual(image.pixelColor(130, 180).alpha(), 0)
 
     def test_compositing_keeps_original_hit_regions_and_reuses_art(self):
         state = self.state()

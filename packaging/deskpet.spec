@@ -32,6 +32,7 @@ datas += [(str(root / 'deskpet/music/players/bilibili_probe.js'), 'deskpet/music
           (str(root / 'characters' / 'example' / 'character-walk.json.example'), 'characters/example'),
           (str(root / 'characters' / 'example' / 'personality.json.example'), 'characters/example')]
 datas += collect_data_files('webview')
+datas += copy_metadata('yt-dlp')
 # Work-chat equations use packaged glyphs and the TeX-to-Unicode symbol table.
 for package in ('ziamath', 'ziafont', 'latex2mathml'):
     datas += collect_data_files(package)
@@ -101,12 +102,16 @@ datas += collect_data_files('live2d')
 binaries = collect_dynamic_libs('live2d')
 a = Analysis([str(root / 'app_entry.py')], pathex=[str(root), str(sdk_site)], datas=datas, binaries=binaries,
              hiddenimports=['ziamath.fonts', 'ziafont.fonts',
+                            *collect_submodules('yt_dlp', filter=lambda name:
+                                not name.startswith('yt_dlp.extractor.') or name in
+                                {'yt_dlp.extractor.bilibili', 'yt_dlp.extractor.common'}),
                             'webview.platforms.edgechromium', 'webview.platforms.winforms',
                             'live2d._live2d', 'OpenGL.platform.win32',
                             *collect_submodules('deepseek_harness')],
-             excludes=['webview.platforms.qt', 'webview.platforms.gtk', 'webview.platforms.cef',
+             excludes=['imageio_ffmpeg', 'yt_dlp.extractor._extractors', 'yt_dlp.extractor.lazy_extractors',
+                       'webview.platforms.qt', 'webview.platforms.gtk', 'webview.platforms.cef',
                        'webview.platforms.cocoa', 'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets',
-                       'tkinter', 'pytest', 'deskpet.mods.goals',
+                       'tkinter', 'pytest', 'deskpet.mods.goals', 'deskpet.mods.bond',
                        'PIL.AvifImagePlugin', 'PIL._avif'], noarchive=False)
 # These optional Qt plugins drag in PDF/QML/virtual-keyboard engines. The app
 # uses native Windows widgets/IME and PNG artwork, not either plugin. Keep

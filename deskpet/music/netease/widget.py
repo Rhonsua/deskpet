@@ -266,6 +266,11 @@ class NeteaseWidget(QWidget):
         self.cancel_button.clicked.connect(self.cancel)
         bottom.addWidget(self.cancel_button)
         outer.addLayout(bottom)
+        from ..tools.snapshot_loader import SnapshotLoader
+        self._snapshot_loader = SnapshotLoader(self)
+        self._snapshot_loader.loaded.connect(self._snapshots_loaded)
+        self._snapshots_dirty = True
+        self.tabs.currentChanged.connect(self._snapshot_tab_changed)
         self._account_label()
         self._refresh_snapshots()
         self.tabs.setCurrentIndex(2)
@@ -474,19 +479,45 @@ class NeteaseWidget(QWidget):
         self.tabs.setCurrentIndex(0)
 
     def _refresh_snapshots(self):
+        self._snapshot_loader.cancel()
+        self._snapshots_dirty = True
         self.snapshot_list.clear()
+        self._snapshot_rows = {}
+        self._load_snapshots()
+
+    def _snapshot_tab_changed(self, index):
+        if index != 1 and self._snapshot_loader.active:
+            self._snapshot_loader.cancel()
+            self._snapshots_dirty = True
+        self._load_snapshots()
+
+    def _load_snapshots(self):
+        if (not self._closed and self.isVisible() and self.tabs.currentIndex() == 1
+                and self._snapshots_dirty and not self._snapshot_loader.active):
+            self._snapshots_dirty = False
+            self._snapshot_loader.start(self.cache, bool(self.session))
+
+    def _snapshots_loaded(self, entries, failed):
+        if self._closed:
+            return
+        self.snapshot_list.clear()
+        self._snapshot_rows = {}
         try:
-            entries = self.cache.snapshots(False)
-            if self.session:
-                entries += self.cache.snapshots(True)
             for raw in entries:
                 data = raw.get('data')
                 if not isinstance(data, dict) or not isinstance(data.get('tracks'), list):
                     continue
                 item = QListWidgetItem(f'{data.get("title", raw["id"])} · {data.get("count", 0)}/{data.get("total", 0)} · {raw["fetched_at"]}')
-                item.setData(Qt.ItemDataRole.UserRole, raw)
+                # Keep playlist bodies in Python instead of recursively
+                # converting every track into a QVariant for the list row.
+                key = len(self._snapshot_rows)
+                self._snapshot_rows[key] = raw
+                item.setData(Qt.ItemDataRole.UserRole, key)
                 self.snapshot_list.addItem(item)
+            if failed:
+                raise ValueError('snapshot read failed')
         except (OSError, ValueError, KeyError, TypeError):
+            self._snapshots_dirty = True
             self.status.setText('部分云歌单快照无法读取，可重新获取。')
 
     def open_snapshot(self, *_):
@@ -494,6 +525,8 @@ class NeteaseWidget(QWidget):
         if item:
             self.cancel()
             raw = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(raw, int):
+                raw = self._snapshot_rows[raw]
             try:
                 data = dict(raw['data'])
                 if raw.get('kind') == 'likes':
@@ -626,6 +659,10 @@ class NeteaseWidget(QWidget):
             self.status.setText('凭据保存／移除失败，未确认更改成功；旧加密会话可能仍在本机，请检查数据目录权限。')
 
     def _logout(self, show=True):
+        self._snapshot_loader.cancel()
+        self.snapshot_list.clear()
+        self._snapshot_rows = {}
+        self._snapshots_dirty = True
         self.cancel()
         self._restore_on_show = False
         self._session_warning = ''
@@ -674,6 +711,7 @@ class NeteaseWidget(QWidget):
         self.qr_timer.stop()
         self._clear_qr()
         self.session = session
+        self._refresh_snapshots()
         self.sessionChanged.emit()
         self._account_label()
         self.tabs.setCurrentIndex(2)
@@ -785,6 +823,7 @@ class NeteaseWidget(QWidget):
 
     def shutdown(self):
         if not self._closed:
+            self._snapshot_loader.close()
             self._closed = True
             self.cancel()
 
@@ -793,11 +832,15 @@ class NeteaseWidget(QWidget):
         super().closeEvent(event)
 
     def hideEvent(self, event):
+        if self._snapshot_loader.active:
+            self._snapshots_dirty = True
+        self._snapshot_loader.cancel()
         self.cancel()
         super().hideEvent(event)
 
     def showEvent(self, event):
         super().showEvent(event)
+        self._load_snapshots()
         if self._restore_on_show and self.session and not self._closed:
             self._restore_on_show = False
             self.fetch_collections()

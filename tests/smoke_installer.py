@@ -26,6 +26,11 @@ with tempfile.TemporaryDirectory(prefix='installer-check-', dir=preview, ignore_
     extracted.mkdir()
     flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
     subprocess.run([str(setup), '/Q', '/C', '/T:' + str(extracted)], check=True, timeout=240, creationflags=flags)
+    native_payload = (extracted / 'payload.tlz').is_file()
+    if native_payload:
+        sys.path.insert(0, str(root / 'packaging'))
+        from installer_payload import decompress
+        decompress(extracted / 'payload.tlz', extracted / 'payload.zip')
     assert (extracted / 'Setup.exe').is_file() and (extracted / 'payload.zip').is_file()
     with zipfile.ZipFile(extracted / 'payload.zip') as archive:
         names = archive.namelist()
@@ -57,6 +62,8 @@ with tempfile.TemporaryDirectory(prefix='installer-check-', dir=preview, ignore_
         assert '_internal/deskpet/chat/personas/luotianyi.json' in names
         assert '_internal/assets/icons/tianyi.ico' in names
         assert not any('deskpet/mods/goals' in name.replace('\\', '/') for name in names), names
+    if native_payload:
+        (extracted / 'payload.zip').unlink()  # Exercise the actual C# decoder next.
     subprocess.run([str(extracted / 'Setup.exe'), '--quiet', '--test', '--dir', str(installed)],
                    check=True, timeout=240, creationflags=flags)
     assert (installed / 'TianyiPet.exe').is_file() and (installed / 'installed-files.txt').is_file()

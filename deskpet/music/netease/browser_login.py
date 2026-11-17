@@ -3,7 +3,7 @@ import base64
 import json
 import weakref
 
-from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, Signal
+from PySide6.QtCore import QCoreApplication, QObject, QProcess, QProcessEnvironment, QTimer, Signal
 
 from deskpet.runtime.workers import worker_command
 from .storage import protect, session_data
@@ -62,7 +62,15 @@ class BrowserLogin(QObject):
         for signal in (process.readyReadStandardOutput, process.readyReadStandardError,
                        process.errorOccurred, process.finished):
             signal.disconnect()
-        process.deleteLater()
+        if process.state() == QProcess.ProcessState.NotRunning:
+            process.deleteLater()
+            return
+        # Deleting a running QProcess waits for it. Keep the abandoned helper
+        # alive outside the page until it exits, without holding up the GUI.
+        process.setParent(QCoreApplication.instance())
+        process.finished.connect(process.deleteLater)
+        QTimer.singleShot(800, process, lambda: process.kill()
+                          if process.state() != QProcess.ProcessState.NotRunning else None)
 
     def start(self):
         self.cancel()
@@ -148,7 +156,7 @@ class BrowserLogin(QObject):
         self.active = False
         self.buffer = b''
         if self.process.state() != QProcess.ProcessState.NotRunning:
-            self.process.write(b'{"cmd":"close"}\n')
-            if not self.process.waitForFinished(800):
-                self.process.kill()
-                self.process.waitForFinished(500)
+            previous = self.process
+            previous.write(b'{"cmd":"close"}\n')
+            self._dispose_process(previous)
+            self.process = self._new_process()

@@ -119,6 +119,9 @@ class WalkRuntime:
         spec = self.walk_spec
         if self.live2d_renderer is not None:
             factor = .5 * self.scale
+            pack = getattr(self, 'character_pack', None)
+            if pack and pack.live2d:
+                factor *= pack.live2d.scale
         else:
             frame = self.scaled_frames.get('walk-left:0')
             if frame is None or not self.walk_canvas_height:

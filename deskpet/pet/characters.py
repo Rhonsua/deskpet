@@ -1,4 +1,4 @@
-"""Data-only PNG character packs, discovered on request and decoded on selection."""
+"""Data-only PNG / optional Live2D packs, decoded on selection."""
 from dataclasses import dataclass, field
 import json
 import math
@@ -60,6 +60,7 @@ class CharacterPack:
     singing_hem: float | None = None
     walk: WalkSpec | None = None
     pose_heads: dict = field(default_factory=dict)
+    live2d: object | None = None
 
     def head_for(self, state):
         if state == 'work-wait' and state not in self.states:
@@ -249,7 +250,11 @@ def read_pack(folder):
         raise ValueError('singing_motion.hem 需要 0.35 到 0.90 的画布高度比例')
     if legs and 'sing-front' not in paths:
         raise ValueError('启用唱歌腿部动画需要声明 sing-front 图片')
-    return CharacterPack(identifier, root=root, states=paths, anchors=anchors,
+    live2d = None
+    if 'live2d' in data:
+        from deskpet.pet.live2d_pack import read_live2d_spec
+        live2d = read_live2d_spec(root, data['live2d'])
+    return CharacterPack(identifier, root=root, states=paths, anchors=anchors, live2d=live2d,
                          singing_hem=float(hem) if legs else None,
                          walk=read_walk_spec(root, data['walk']) if 'walk' in data else None,
                          pose_heads={state: tuple(pair) for state, pair in pose_heads.items()},

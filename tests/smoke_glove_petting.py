@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix='test-', dir=output) as temp:
             stroke(center + QPoint(15 if i % 2 else -15, 0), visible=False)
         assert pet.behavior.activity == 'sing', 'occluded character must not react'
         for i in range(20):
-            stroke(QPoint(0, 0))
+            stroke(QPoint(-1000, -1000))
         assert pet.behavior.activity == 'sing', 'outside the head must not react'
         resumed_time = pet.behavior.mode_elapsed
         for i in range(2):
@@ -84,6 +84,24 @@ with tempfile.TemporaryDirectory(prefix='test-', dir=output) as temp:
             stroke(center + QPoint(round(15*__import__('math').sin(i*.3)), 0))
         assert pet.active_petting.phase == 'stroking', 'slow synthetic strokes sustain feedback'
         assert pet.active_petting.strength > .6
+        assert pet.petting_surface is not None and pet.petting_surface.isVisible()
+        # Keep contact while crossing the entry edge, including beyond the
+        # original pet window. Only the outer boundary releases the gesture.
+        from deskpet.animation.headpat_contact import contact_region
+        inner = contact_region(pet.head_region.boundingRect(), pet.scale)
+        outer = contact_region(pet.head_region.boundingRect(), pet.scale, retaining=True)
+        edge = QPoint(inner.boundingRect().right() + 8, center.y())
+        assert outer.contains(edge) and not inner.contains(edge)
+        start = center.x()
+        for x in range(start, edge.x()+1, 5):
+            stroke(QPoint(x, center.y()))
+        assert pet.glove_contact and pet.petting_contact_latched
+        stroke(edge + QPoint(30, 0), visible=False)
+        assert not pet.glove_contact and not pet.petting_contact_latched
+        assert pet.active_petting.previous is None
+        # Resume a central stroke for the remaining state/reward checks.
+        for i in range(20):
+            stroke(center + QPoint(round(15*__import__('math').sin(i*.3)), 0))
         assert pet.behavior.activity == 'sing', 'continuous feedback must not overwrite the saved activity'
         assert pet.panel.store.pet()['mood'] == before + 2
         pet.reward_pat()

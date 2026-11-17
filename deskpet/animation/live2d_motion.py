@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import math
+from queue import SimpleQueue, Empty
+from threading import Event, Thread
 from deskpet.animation.singing_choreography import apply_footwork
 from deskpet.animation.mouse_interactions import apply_mouse_reaction
 from deskpet.music.tools.clock import apply_music_beat, beat_values, singing_beat_time
@@ -74,10 +76,13 @@ class Curve:
 class MotionLibrary:
     def __init__(self, root):
         self.root = Path(root)
-        self.mapping = json.loads((self.root / 'action-map.json').read_text(encoding='utf-8'))
-        model = json.loads((self.root / self.mapping['model']).read_text(encoding='utf-8'))
+        self.mapping = json.loads((self.root / 'action-map.json').read_text(encoding='utf-8-sig'))
+        self.generic = self.mapping.get('profile') == 'character'
+        model = json.loads((self.root / self.mapping['model']).read_text(encoding='utf-8-sig'))
         self.references = model['FileReferences']['Motions']
         self.cache = {}
+        self._preload_cancel = Event()
+        self._preload_results = SimpleQueue()
         self.walk_spec = None
         self.walk_error = ''
         if 'walk' in self.mapping:
@@ -104,7 +109,7 @@ class MotionLibrary:
             path = (self.root / relative).resolve()
             if not path.is_relative_to(self.root.resolve()):
                 raise ValueError('散步动作路径不能越过模型目录')
-            motion = json.loads(path.read_text(encoding='utf-8'))
+            motion = json.loads(path.read_text(encoding='utf-8-sig'))
             meta = motion['Meta']
             duration = meta['Duration']
             if (type(duration) not in (int, float) or not .2 <= duration <= 10
@@ -151,6 +156,8 @@ class MotionLibrary:
     def group_for(self, activity):
         if activity in ('walk-left', 'walk-right') and self.walk_spec is not None:
             return getattr(self.walk_spec, activity[5:])
+        if self.generic:
+            return self.mapping['activities'].get(activity, 'Idle')
         # The checked singing candidate includes head/body yaw and microphone singing.
         if activity == 'sing':
             return 'SingTurn'
@@ -160,13 +167,52 @@ class MotionLibrary:
             return 'Wave'
         return self.mapping['activities'].get(activity, 'Idle')
 
+    @staticmethod
+    def _read_motion(path):
+        data = json.loads(path.read_text(encoding='utf-8-sig'))
+        return (data['Meta'], [(curve['Target'], curve['Id'], Curve(curve['Segments']))
+                              for curve in data['Curves']])
+
+    def start_preload(self):
+        """Read independent motion files without touching the GUI-owned cache."""
+        paths = []
+        for group, entries in self.references.items():
+            if group in self.cache:
+                continue
+            try:
+                paths.append((group, self.root / entries[0]['File']))
+            except (KeyError, IndexError, TypeError):
+                continue
+        cancel, results = self._preload_cancel, self._preload_results
+        def load():
+            for group, path in paths:
+                if cancel.is_set():
+                    break
+                try:
+                    motion = MotionLibrary._read_motion(path)
+                except Exception:
+                    # Preserve the existing error behavior when this group is requested.
+                    continue
+                if not cancel.is_set():
+                    results.put((group, motion))
+        thread = Thread(target=load, name='live2d-motion-preload', daemon=True)
+        thread.start()
+        return thread
+
+    def cancel_preload(self):
+        self._preload_cancel.set()
+
     def sample(self, activity, seconds, beat=None):
         elapsed = max(0, seconds)
         group = self.group_for(activity)
+        while True:
+            try:
+                ready_group, motion = self._preload_results.get_nowait()
+            except Empty:
+                break
+            self.cache.setdefault(ready_group, motion)
         if group not in self.cache:
-            data = json.loads((self.root / self.references[group][0]['File']).read_text(encoding='utf-8'))
-            self.cache[group] = (data['Meta'], [
-                (curve['Target'], curve['Id'], Curve(curve['Segments'])) for curve in data['Curves']])
+            self.cache[group] = self._read_motion(self.root / self.references[group][0]['File'])
         meta, curves = self.cache[group]
         duration = meta['Duration']
         seconds = max(0, seconds)
@@ -180,7 +226,7 @@ class MotionLibrary:
                 parameters[key] = curve.sample(seconds)
             elif target == 'PartOpacity':
                 parts[key] = curve.sample(seconds)
-        if group == 'SingTurn':
+        if group == 'SingTurn' and not self.generic:
             # Match the PNG singing cycle's front/left/right rhythm, with smooth
             # direction holds and the model's authored head/body yaw endpoints.
             turn_time = singing_beat_time(seconds, beat) if activity == 'sing' else seconds
@@ -191,5 +237,6 @@ class MotionLibrary:
             parameters['ParamBodyAngleZ'] *= .7
             parameters = (apply_music_beat(parameters, beat) if activity == 'sing' and beat_values(beat)
                           else apply_footwork(parameters, elapsed))
-        parameters = apply_mouse_reaction(parameters, activity, elapsed)
+        if not self.generic:
+            parameters = apply_mouse_reaction(parameters, activity, elapsed)
         return parameters, parts

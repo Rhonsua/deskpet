@@ -4,8 +4,9 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from types import SimpleNamespace
+from threading import Event
 from PySide6.QtCore import Qt, QSize, QSettings, QTimer, QPoint
 from PySide6.QtGui import QImage, QColor
 from PySide6.QtTest import QTest
@@ -27,10 +28,68 @@ class BackgroundPositionTests(unittest.TestCase):
                 image.setPixelColor(x, y, color)
         image.save(str(path))
 
+    def wait_image(self, surface):
+        for _ in range(200):
+            if not surface.surface_image.isNull():
+                return
+            QTest.qWait(10)
+        self.fail('background image did not load')
+
+    def test_delayed_old_load_cannot_replace_new_image_or_closed_window(self):
+        from deskpet.ui.background import _ImageLoader
+        started, release = Event(), Event()
+        def load(loader):
+            if loader.path == 'slow':
+                started.set()
+                release.wait(5)
+            image = QImage(4, 4, QImage.Format_RGB32)
+            image.fill(QColor('red' if loader.path == 'slow' else 'blue'))
+            loader.signals.finished.emit(loader.generation, image)
+        with patch.object(_ImageLoader, 'run', load):
+            surface = BackgroundSurface()
+            try:
+                surface.set_surface('slow')
+                self.assertTrue(started.wait(5))
+                surface.set_surface('fast')
+                self.wait_image(surface)
+                release.set()
+                QTest.qWait(100)
+                self.assertEqual(surface.surface_image.toImage().pixelColor(0, 0), QColor('blue'))
+                started.clear(); release.clear()
+                surface.set_surface('slow')
+                self.assertTrue(started.wait(5))
+                surface.close()
+                release.set()
+                QTest.qWait(100)
+                self.assertTrue(surface.surface_image.isNull())
+                surface.show()
+                self.wait_image(surface)
+                self.assertEqual(surface.surface_image.toImage().pixelColor(0, 0), QColor('red'))
+            finally:
+                release.set()
+                surface.close()
+
+    def test_background_loader_limits_dimensions_before_decode(self):
+        from deskpet.ui.background import _ImageLoader
+        reader = MagicMock()
+        reader.size.return_value = QSize(8000, 4000)
+        reader.read.return_value = QImage()
+        with patch('deskpet.ui.background.QImageReader', return_value=reader):
+            _ImageLoader('large', 1).run()
+        reader.setAutoTransform.assert_called_once_with(True)
+        reader.setScaledSize.assert_called_once_with(QSize(4096, 2048))
+        reader.read.assert_called_once()
+        reader.reset_mock()
+        reader.size.return_value = QSize(10001, 10000)
+        with patch('deskpet.ui.background.QImageReader', return_value=reader):
+            _ImageLoader('too-large', 2).run()
+        reader.read.assert_not_called()
+
     def test_horizontal_alignment_changes_visible_content_and_zoom_stays_bounded(self):
         with tempfile.TemporaryDirectory() as directory:
             image = Path(directory) / 'stripes.png';self.make_image(image)
             surface = BackgroundSurface();surface.resize(200, 200);surface.set_surface(image)
+            self.wait_image(surface)
             for position, expected in ((0, 'red'), (50, 'green'), (100, 'blue')):
                 surface.set_placement({'x': position})
                 self.assertEqual(surface.surface_cover.toImage().pixelColor(100, 100), QColor(expected))
@@ -58,6 +117,7 @@ class BackgroundPositionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             image = Path(directory) / 'stripes.png';self.make_image(image)
             surface = BackgroundSurface();surface.resize(500, 400);surface.set_surface(image)
+            self.wait_image(surface)
             original = BackgroundPlacement(50, 50, 180);surface.set_placement(original)
             dialog = BackgroundPositionDialog(surface);dialog.show();self.app.processEvents()
             center = dialog.preview.image_rect().center().toPoint()
@@ -84,6 +144,7 @@ class BackgroundPositionTests(unittest.TestCase):
             (root / 'chat').mkdir()
             self.make_image(root / 'chat/background.png')
             window = ChatWindow(pet)
+            self.wait_image(window)
             window.tabs.setCurrentIndex(window.work_index)
             self.assertTrue(window.background_position_button.isEnabled())
             chosen = BackgroundPlacement(80, 25, 170)
@@ -106,6 +167,7 @@ class BackgroundPositionTests(unittest.TestCase):
             settings = QSettings(str(root / 'settings.ini'), QSettings.IniFormat)
             pet.panel.settings = settings
             window = ChatWindow(pet)
+            self.wait_image(window)
             try:
                 window.tabs.setCurrentIndex(window.work_index)
                 self.assertEqual(window.surface_placement, chosen)
@@ -116,6 +178,7 @@ class BackgroundPositionTests(unittest.TestCase):
                 source = root / 'replacement.png';self.make_image(source)
                 with patch('deskpet.ui.background_controls.QFileDialog.getOpenFileName', return_value=(str(source), '')):
                     window.choose_background()
+                self.wait_image(window)
                 self.assertEqual(window.surface_placement, BackgroundPlacement())
                 self.assertTrue(window.background_position_button.isEnabled())
                 window.clear_background()
@@ -162,6 +225,7 @@ class BackgroundPositionTests(unittest.TestCase):
             settings = QSettings(str(root / 'settings.ini'), QSettings.IniFormat)
             surface = BackgroundSurface()
             manager = PageBackgrounds(surface, settings, image, 'music/background', QPushButton(surface))
+            self.wait_image(surface)
             manager.activate('tools.netease.account', '我的歌单')
             selected = BackgroundPlacement(10, 30, 190)
             def finish():

@@ -1,5 +1,5 @@
 """Anchored sticker tray: click to compose, hover to preview, right-click for extras."""
-from PySide6.QtCore import Qt, QSize, Signal, QTimer, QEvent, QPoint
+from PySide6.QtCore import Qt, QSize, Signal, QTimer, QEvent, QPoint, QThreadPool
 from PySide6.QtGui import QIcon, QPixmap, QMovie
 from PySide6.QtWidgets import (QDialog, QFrame, QVBoxLayout, QHBoxLayout,
     QLabel, QToolButton, QTabBar, QLineEdit, QListWidget, QListWidgetItem, QFileDialog,
@@ -18,6 +18,13 @@ class StickerPicker(QDialog):
         self.movie = None
         self.anchor = None
         self.hovered = None
+        self._thumbnail_generation = 0
+        self._thumbnail_jobs = {}
+        self._thumbnail_items = {}
+        self._thumbnail_entries = []
+        self._thumbnail_timer = QTimer(self)
+        self._thumbnail_timer.setSingleShot(True)
+        self._thumbnail_timer.timeout.connect(self._start_thumbnails)
         from deskpet.ui.theme import apply_light_palette
         apply_light_palette(self)
         self.setObjectName('StickerPicker')
@@ -122,6 +129,9 @@ class StickerPicker(QDialog):
 
     def refresh(self):
         self.clear_preview()
+        self._cancel_thumbnails()
+        self._thumbnail_items = {}
+        self._thumbnail_entries = []
         self.list.clear()
         group = self.tabs.currentIndex()
         state = self.catalog.panel_state()
@@ -137,10 +147,44 @@ class StickerPicker(QDialog):
                 continue
             if query and query not in (item.title + item.character).casefold():
                 continue
-            pixmap = QPixmap(str(item.path)).scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            widget = QListWidgetItem(QIcon(pixmap), item.title + (' GIF' if item.animated else ''))
+            widget = QListWidgetItem(item.title + (' GIF' if item.animated else ''))
             widget.setData(Qt.UserRole, item.id)
             self.list.addItem(widget)
+            self._thumbnail_items[item.id] = widget
+            self._thumbnail_entries.append((item.id, str(item.path)))
+        if self.isVisible():
+            self._thumbnail_timer.start(30)
+
+    def _cancel_thumbnails(self):
+        self._thumbnail_timer.stop()
+        self._thumbnail_generation += 1
+        for job in self._thumbnail_jobs.values():
+            job.stopped.set()
+
+    def _start_thumbnails(self):
+        if not self.isVisible() or not self._thumbnail_entries:
+            return
+        from .sticker_thumbnails import ThumbnailJob
+        generation = self._thumbnail_generation
+        job = ThumbnailJob(generation, tuple(self._thumbnail_entries))
+        self._thumbnail_jobs[generation] = job
+        job.signals.ready.connect(self._thumbnail_ready)
+        job.signals.finished.connect(self._thumbnails_finished)
+        QThreadPool.globalInstance().start(job)
+
+    def _thumbnail_ready(self, generation, key, image):
+        if generation != self._thumbnail_generation or not self.isVisible():
+            return
+        widget = self._thumbnail_items.get(key)
+        if widget is not None:
+            widget.setIcon(QIcon(QPixmap.fromImage(image)))
+
+    def _thumbnails_finished(self, generation):
+        self._thumbnail_jobs.pop(generation, None)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._thumbnail_timer.start(30)
 
     def current(self):
         item = self.list.currentItem()
@@ -261,6 +305,7 @@ class StickerPicker(QDialog):
             self.accept()
 
     def hideEvent(self, event):
+        self._cancel_thumbnails()
         self.clear_preview()
         self.service.cancel()
         super().hideEvent(event)

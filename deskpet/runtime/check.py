@@ -86,23 +86,41 @@ def check_mod_package(pet, app, archive_path, result):
     assert not (pet.panel.data_dir / 'mods' / 'goals').exists()
     if getattr(sys, 'frozen', False):
         assert importlib.util.find_spec('deskpet.mods.goals') is None, 'goal code was bundled in main application'
+        assert importlib.util.find_spec('deskpet.mods.bond') is None, 'bond code was bundled in main application'
         result['goal_code_excluded'] = True
+        result['bond_code_excluded'] = True
     result['mods_empty_by_default'] = True
     if archive_path is None:
         return
     with zipfile.ZipFile(archive_path) as archive:
-        expected = {'goals/' + name for name in ('mod.json', 'entry.py', '__init__.py', 'mod.py',
-                    'store.py', 'widget.py', 'README.txt', 'LICENSE')}
+        package = 'bond' if 'bond/mod.json' in archive.namelist() else 'goals'
+        if package == 'bond':
+            expected = {'bond/' + name for name in ('mod.json', 'entry.py', '__init__.py', 'mod.py',
+                'store.py', 'widget.py', 'README.md', 'LICENSE', 'activities.py', 'album.py',
+                'chart.py', 'events.py', 'listening.py', 'playback.py', 'rhythm.py', 'stage_art.py',
+                'assets/SOURCES.md', 'assets/tianyi-background.webp', 'assets/tianyi-cover.webp',
+                'assets/tianyi-stage.webp', 'assets/tianyi-sing-front.webp',
+                'assets/tianyi-sing-left.webp', 'assets/tianyi-sing-right.webp')}
+        else:
+            expected = {'goals/' + name for name in ('mod.json', 'entry.py', '__init__.py', 'mod.py',
+                        'store.py', 'widget.py', 'README.txt', 'LICENSE')}
         assert set(archive.namelist()) == expected, archive.namelist()
-        assert archive.testzip() is None
+        assert len(archive.infolist()) == len(expected), 'duplicate archive members'
         assert sum(item.file_size for item in archive.infolist()) < 16 * 1024 * 1024
+        assert all(item.file_size <= 4 * 1024 * 1024 for item in archive.infolist())
+        assert archive.testzip() is None
         # Explicit whitelist above makes archive traversal impossible.
         archive.extractall(host.packages_dir)
     host.shutdown()
     host.deleteLater()
     pet.mod_host = host = ModHost(pet)
     manifests = host.manager.manifests()
-    assert len(manifests) == 1 and manifests[0].id == 'goals', host.discovery_warning
+    assert len(manifests) == 1 and manifests[0].id == package, host.discovery_warning
+    if package == 'bond':
+        assert manifests[0].api_version == 3
+        _check_bond_package(pet, host, app, result)
+        result['bond_version'] = manifests[0].version
+        return
     assert not host.manager.is_enabled('goals')
     assert not (pet.panel.data_dir / 'mods' / 'goals').exists(), 'discovery executed goal package'
     assert host.manager.set_enabled('goals', True), host.manager.error('goals')
@@ -137,7 +155,69 @@ def check_mod_package(pet, app, archive_path, result):
     result['external_goal_package'] = True
 
 
+def _check_bond_package(pet, host, app, result):
+    """Use only the installed external namespace, never import bundled Bond code."""
+    import sqlite3
+    import shiboken6
+    assert not host.manager.is_enabled('bond')
+    assert not (pet.panel.data_dir / 'mods' / 'bond').exists(), 'discovery executed Bond'
+    old_growth = tuple(pet.panel.store.db.execute('SELECT level,xp FROM pet').fetchone())
+    assert host.manager.set_enabled('bond', True), host.manager.error('bond')
+    editor = host.manager.create_widget('bond')
+    assert editor is not None, host.manager.error('bond')
+    mod = editor.mod
+    database = mod.store.path
+    mod.store.record('headpat', {})
+    affinity = mod.store.value['affinity']
+    assert affinity == 10
+    editor.show()
+    app.processEvents()
+    host.services.invoke('bond', 'album')
+    app.processEvents()
+    direct = mod.direct.widget
+    book = direct._book_window
+    assert book is not None and book.isVisible() and not mod.direct.isVisible()
+    assert not book.grab().isNull()
+    direct.album.back.click()
+    app.processEvents()
+    assert mod.direct.isVisible() and (not shiboken6.isValid(book) or not book.isVisible())
+    assert host.manager.set_enabled('bond', False), host.manager.error('bond')
+    app.processEvents()
+    assert (not shiboken6.isValid(editor) or not editor.isVisible()) and not mod.active
+    assert database.is_file()
+    with sqlite3.connect(str(database)) as saved:
+        assert saved.execute('SELECT affinity FROM state WHERE id=1').fetchone()[0] == affinity
+    assert tuple(pet.panel.store.db.execute('SELECT level,xp FROM pet').fetchone()) == old_growth
+    assert host.manager.set_enabled('bond', True), host.manager.error('bond')
+    restored = host.manager.create_widget('bond')
+    assert restored is not None and restored.mod.store.value['affinity'] == affinity
+    assert host.manager.set_enabled('bond', False)
+    result.update(external_bond_package=True, bond_book=True, bond_book_return=True,
+                  bond_store_preserved=True, original_growth_preserved=True)
+
+
 def run():
+    if '--bilibili-download-only' in sys.argv:
+        # Check the frozen extractor/transport without loading a pet, connecting
+        # to an account, downloading a converter or playing any audio.
+        import threading
+        import importlib.util
+        from deskpet.music.players.bilibili_download import make_downloader, target_path
+        from deskpet.music.players.bilibili_download_ui import BilibiliDownloads
+        from deskpet.music.players import audio_converter
+        report = Path(sys.argv[sys.argv.index('--report') + 1]).resolve()
+        report.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='bilibili-package-', dir=report.parent) as scratch:
+            with make_downloader(Path(scratch), '', threading.Event(), lambda _: None) as downloader:
+                assert list(downloader._ies) == ['BiliBili']
+                assert downloader.params['noplaylist']
+            assert '-P6]' in target_path(dict(title='歌曲', id='BV0000000001', part=6), scratch).name
+        converter_present = importlib.util.find_spec('imageio_ffmpeg') is not None
+        if getattr(sys, 'frozen', False):
+            assert not converter_present, 'Optional converter must not enlarge the main bundle'
+        report.write_text(json.dumps(dict(ok=True, bilibili_download=True,
+                                          converter_bundled=converter_present)), encoding='utf-8')
+        return
     native = '--native-live2d' in sys.argv
     if not native:
         os.environ['QT_QPA_PLATFORM'] = 'offscreen'
@@ -156,8 +236,20 @@ def run():
         os.environ['LOCALAPPDATA'] = scratch
         pet = None
         try:
+            settings = QSettings(str(Path(scratch) / 'test.ini'), QSettings.Format.IniFormat)
+            if '--bond-only' in sys.argv:
+                from deskpet.ui.appearance import APPEARANCE_REVISION
+                settings.setValue('character_selection', 'refined')
+                settings.setValue('appearance_revision', APPEARANCE_REVISION)
+                settings.setValue('random_walk', False)
             pet = Pet(data_dir=Path(scratch) / 'data', startup=NoStartup(),
-                      settings=QSettings(str(Path(scratch) / 'test.ini'), QSettings.Format.IniFormat))
+                      settings=settings)
+            if '--bond-only' in sys.argv:
+                assert mod_archive is not None, '--bond-only requires --mod-pack'
+                check_mod_package(pet, app, mod_archive, result)
+                assert result.get('external_bond_package'), '--bond-only requires a Bond package'
+                result['ok'] = True
+                return
             assert len(pet.frames) == 10
             pet.grab()
             if native:

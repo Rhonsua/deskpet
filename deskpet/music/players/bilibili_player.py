@@ -6,7 +6,7 @@ import time
 import uuid
 
 from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, Signal, Qt
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QAbstractItemView,
                               QLabel, QListWidget, QLineEdit, QComboBox, QCheckBox)
 from deskpet.music.players.bilibili_links import video_url, load_web_tracks, EndLatch
 from deskpet.music.tools.library import PlaybackQueue, MODES
@@ -69,10 +69,12 @@ class BilibiliPlayer(QWidget):
         row.addWidget(add)
         layout.addLayout(row)
         self.import_dialog = None
+        self.downloads = None
         import_lists = QPushButton('导入合集 / UP 主 / 我的收藏夹')
         import_lists.clicked.connect(lambda: self.open_import())
         layout.addWidget(import_lists)
         self.list = QListWidget()
+        self.list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.list.itemDoubleClicked.connect(lambda _: self.play_row(self.list.currentRow()))
         layout.addWidget(self.list, 1)
         reorder = QHBoxLayout()
@@ -88,6 +90,19 @@ class BilibiliPlayer(QWidget):
         self.reverse_toggle.toggled.connect(self.change_reverse)
         reorder.addWidget(self.reverse_toggle)
         layout.addLayout(reorder)
+        downloads = QHBoxLayout()
+        selected_download = QPushButton('下载选中为 MP3')
+        selected_download.setToolTip('Ctrl / Shift 可多选，每个选中的分 P 单独保存为 MP3。')
+        selected_download.clicked.connect(lambda: self.download_audio())
+        downloads.addWidget(selected_download)
+        parts_download = QPushButton('下载此视频全部分 P')
+        parts_download.setToolTip('自动读取当前选中视频的 P1、P2…，每 P 保存为独立 MP3；不会扩展到其他合集视频。')
+        parts_download.clicked.connect(lambda: self.download_audio(all_parts=True))
+        downloads.addWidget(parts_download)
+        all_download = QPushButton('下载整个 B站歌单')
+        all_download.clicked.connect(lambda: self.download_audio(all_tracks=True))
+        downloads.addWidget(all_download)
+        layout.addLayout(downloads)
         self.list.currentRowChanged.connect(self.update_move_buttons)
         self.update_move_buttons()
         controls = QHBoxLayout()
@@ -131,6 +146,17 @@ class BilibiliPlayer(QWidget):
             self.list.setCurrentRow(urls.index(self.current_url))
             track = self.tracks[urls.index(self.current_url)]
             self.title.setText(track['title'] or self.current_url)
+
+    def download_audio(self, *, all_tracks=False, all_parts=False):
+        if self.downloads is None:
+            from .bilibili_download_ui import BilibiliDownloads
+            self.downloads = BilibiliDownloads(self)
+        rows = sorted({self.list.row(item) for item in self.list.selectedItems()})
+        if all_parts:
+            row = self.list.currentRow()
+            rows = [row] if 0 <= row < len(self.tracks) else []
+        tracks = self.tracks if all_tracks else [self.tracks[i] for i in rows]
+        self.downloads.start(tracks, all_parts=all_parts)
 
     def render(self):
         selected = self.list.currentRow()
@@ -485,6 +511,8 @@ class BilibiliPlayer(QWidget):
             self.process.kill()
 
     def shutdown(self):
+        if self.downloads is not None:
+            self.downloads.cancel()
         if self.import_dialog is not None:
             self.import_dialog.shutdown()
         self.stop()

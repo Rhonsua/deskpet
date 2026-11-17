@@ -32,15 +32,18 @@ class ActiveHeadPetting:
             dx, dy = ((0, 0) if self.previous is None else
                       (x-self.previous[0], y-self.previous[1]))
             distance = math.hypot(dx, dy)
-            # A teleport or a very fast pass must not become a credited stroke.
-            if distance > max(30*scale, 700*scale*dt):
+            fast = distance > max(30*scale, 700*scale*dt)
+            # Keep normal quick sweeps in contact. Only a real cursor jump
+            # releases the hand; fast travel never becomes extra growth credit.
+            if distance > max(head_width*2, 120*scale, 1800*scale*dt):
                 self.leave()
                 contact = False
             else:
                 self.previous = (x, y)
                 self.age += dt
                 self.still = 0.0 if distance > .05*scale else self.still + dt
-                self.path.append((self.clock, distance))
+                visual_distance = min(distance, max(12*scale, 500*scale*dt))
+                self.path.append((self.clock, visual_distance))
                 while self.path and self.path[0][0] < self.clock-1.0:
                     self.path.popleft()
                 travel = sum(item[1] for item in self.path)
@@ -52,7 +55,7 @@ class ActiveHeadPetting:
                           .4*max(0, 1-max(0, self.still-.65)/.8))
                 if distance:
                     direction = max(-1, min(1, dx/max(dt, .001)/(80*scale)))
-                if moving:
+                if moving and not fast:
                     self.reward_distance += distance
                     if self.reward_distance >= threshold:
                         self.reward_distance = 0.0

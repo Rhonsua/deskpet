@@ -12,6 +12,38 @@ from .work_panel import WorkPanel
 from .work_style import WORK_STYLE
 
 
+class DeferredConversation(QWidget):
+    """Keep unopened history as data; widget access deliberately opens it."""
+    is_running = False
+    pending_task = None
+    approval_id = None
+    terminal_state = None
+
+    def __init__(self, owner, project_key, saved):
+        super().__init__(owner)
+        self.owner = owner
+        self.project_key = project_key
+        self.saved = dict(saved)
+        self.conversation_id = saved.get('id') or uuid.uuid4().hex
+        title = saved.get('title') or '新对话'
+        if title == '新对话':
+            first = next((m['content'] for m in saved.get('messages', [])
+                          if isinstance(m, dict) and m.get('role') == 'user'
+                          and isinstance(m.get('content'), str)), '')
+            title = owner.task_title(first) if first else ('历史对话' if saved.get('log', '').strip() else title)
+        self.conversation_title = str(title)
+        self.conversation_used = bool(saved.get('used') or saved.get('session_id') or saved.get('running'))
+
+    def __getattr__(self, name):
+        if name in ('prompt', 'log', 'events', 'client', 'folder', 'state',
+                    'continue_session', 'auto_approve'):
+            return getattr(self.owner._materialize(self.conversation_id), name)
+        raise AttributeError(name)
+
+    def shutdown(self):
+        pass
+
+
 class Workspaces(QWidget):
     def __init__(self, config_provider, data_dir, parent=None):
         super().__init__(parent)
@@ -25,6 +57,7 @@ class Workspaces(QWidget):
         self.project_items = {}
         self.conversation_items = {}
         self.last_saved = None
+        self._saved_signature = None
         self.storage_ok = True
         self.legacy_backup = None
         self.selected_id = None
@@ -172,7 +205,8 @@ class Workspaces(QWidget):
     def set_background(self, path):
         self.background_path = path
         for page in self.pages.values():
-            page.log.set_background(path)
+            if not isinstance(page, DeferredConversation):
+                page.log.set_background(path)
 
     def choose_project(self):
         folder = QFileDialog.getExistingDirectory(self, '选择项目文件夹')
@@ -203,7 +237,7 @@ class Workspaces(QWidget):
             return self.pages[previous]
         return self.new_conversation(key, saved)
 
-    def new_conversation(self, project_key=None, saved=None):
+    def new_conversation(self, project_key=None, saved=None, *, activate=True):
         current = self.pages.get(self.selected_id)
         project_key = project_key or (current.project_key if current else self.selected_project_key)
         if project_key not in self.project_records:
@@ -272,12 +306,15 @@ class Workspaces(QWidget):
         p.client.failed.connect(lambda _: self.on_terminal())
         p.allow.clicked.connect(lambda: self.refresh_status())
         p.deny.clicked.connect(lambda: self.refresh_status())
-        self.select_conversation(identifier)
+        if activate:
+            self.select_conversation(identifier)
         self.filter_tree(self.search.text())
         return p
 
     @staticmethod
     def is_unused(page):
+        if isinstance(page, DeferredConversation):
+            return False  # restore already filtered genuinely empty records.
         # Keep unsent drafts and every task that reached the backend, including
         # failed/interrupted tasks. Only untouched placeholders are disposable.
         return not (page.conversation_used or page.is_running or page.pending_task
@@ -324,6 +361,7 @@ class Workspaces(QWidget):
     def select_conversation(self, identifier):
         if identifier not in self.pages:
             return
+        self._materialize(identifier)
         self.selected_id = identifier
         p = self.pages[identifier]
         self.selected_project_key = p.project_key
@@ -334,6 +372,42 @@ class Workspaces(QWidget):
             self.project_items[p.project_key].setExpanded(True)
         self.refresh_status()
 
+    def _defer_conversation(self, project_key, saved):
+        page = DeferredConversation(self, project_key, saved)
+        identifier = page.conversation_id
+        if identifier in self.pages:
+            page.deleteLater()
+            raise ValueError('duplicate conversation')
+        self.pages[identifier] = page
+        self.stack.addWidget(page)
+        item = QTreeWidgetItem([page.conversation_title])
+        item.setData(0, Qt.UserRole, identifier)
+        item.setData(0, Qt.UserRole + 1, 'conversation')
+        self.project_items[project_key].addChild(item)
+        self.conversation_items[identifier] = item
+
+    def _materialize(self, identifier):
+        page = self.pages[identifier]
+        if not isinstance(page, DeferredConversation):
+            return page
+        order = tuple(self.pages)
+        item = self.conversation_items.pop(identifier)
+        parent = item.parent()
+        index = parent.indexOfChild(item)
+        with QSignalBlocker(self.projects):
+            parent.takeChild(index)
+        self.pages.pop(identifier)
+        self.stack.removeWidget(page)
+        saved = dict(page.saved, id=identifier, title=page.conversation_title)
+        real = self.new_conversation(page.project_key, saved, activate=False)
+        self.pages = {key: self.pages[key] for key in order}
+        with QSignalBlocker(self.projects):
+            new_item = self.conversation_items[identifier]
+            parent.takeChild(parent.indexOfChild(new_item))
+            parent.insertChild(index, new_item)
+        page.deleteLater()
+        return real
+
     def show_running(self):
         identifier = next((key for key, p in self.pages.items() if p.is_running), None)
         if identifier:
@@ -341,6 +415,8 @@ class Workspaces(QWidget):
 
     def refresh_status(self, *unused):
         for identifier, page in self.pages.items():
+            if isinstance(page, DeferredConversation):
+                continue
             if page.is_running or page.pending_task or page.client.session_id:
                 page.conversation_used = True
             if page.conversation_title == '新对话' and page.pending_task and page.is_running:
@@ -449,10 +525,13 @@ class Workspaces(QWidget):
                 self.ensure_project(record['folder'])
                 for saved in conversations:
                     if not self.unused_record(saved):
-                        self.new_conversation(key, saved)
+                        self._defer_conversation(key, saved)
                 selected = record.get('selected')
                 if selected in self.pages and self.pages[selected].project_key == key:
                     self.project_records[key]['selected'] = selected
+                else:
+                    self.project_records[key]['selected'] = next((identifier for identifier, page in
+                        reversed(self.pages.items()) if page.project_key == key), None)
             if version == 1:
                 self.legacy_backup = raw
                 selected_project = data.get('selected')
@@ -470,6 +549,8 @@ class Workspaces(QWidget):
                     self.select_project(project_key)
                 elif self.project_records and not self.pages:
                     self.select_project(next(iter(self.project_records)))
+                elif self.pages:
+                    self.select_conversation(next(reversed(self.pages)))
             self.filter_tree(self.search.text())
             self.sidebar_requested = data.get('sidebar_visible', True) is not False
             width = data.get('sidebar_width', 220)
@@ -490,8 +571,27 @@ class Workspaces(QWidget):
         if not f.commit():
             raise OSError(f.errorString())
 
+    def _save_signature(self):
+        # QTextDocument revisions are cheap even for long transcripts. Do not
+        # copy every hidden conversation to plain text once per autosave tick.
+        pages = tuple((identifier, p.project_key, p.conversation_title, id(p.saved))
+                      if isinstance(p, DeferredConversation) else
+                      (identifier, p.project_key, p.conversation_title, p.conversation_used,
+                       p.client.session_id, p.is_running, p.pending_task, p.approval_id,
+                       p.prompt.document().revision(), p.log.document().revision(),
+                       p.events.document().revision(), id(p.log.messages),
+                       tuple(p.pending_inputs.items()), p.continue_session.isChecked(),
+                       p.auto_approve.isChecked(), p.state.text())
+                      for identifier, p in self.pages.items())
+        projects = tuple((key, tuple(record.items())) for key, record in self.project_records.items())
+        return (pages, projects, self.selected_id, self.selected_project_key,
+                self.sidebar_requested, self.sidebar_width)
+
     def save(self):
         if not self.storage_ok:
+            return
+        signature = self._save_signature()
+        if signature == self._saved_signature:
             return
         projects = []
         persisted_ids = set()
@@ -501,6 +601,9 @@ class Workspaces(QWidget):
                 if p.project_key != key or self.is_unused(p):
                     continue
                 persisted_ids.add(identifier)
+                if isinstance(p, DeferredConversation):
+                    conversations.append(dict(p.saved, id=identifier, title=p.conversation_title))
+                    continue
                 conversations.append({'id': identifier, 'title': p.conversation_title,
                     'used': p.conversation_used,
                     'session_id': p.client.session_id, 'draft': p.recoverable_draft(),
@@ -520,6 +623,7 @@ class Workspaces(QWidget):
                 'projects': projects}
         raw = json.dumps(data, ensure_ascii=False).encode('utf-8')
         if raw == self.last_saved:
+            self._saved_signature = signature
             return
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -529,6 +633,7 @@ class Workspaces(QWidget):
                 self.legacy_backup = None
             self.write_record(self.path, raw)
             self.last_saved = raw
+            self._saved_signature = signature
             self.notice.hide()
         except OSError:
             self.notice.setText('项目记录保存失败，请检查磁盘空间；当前页面仍保留。')

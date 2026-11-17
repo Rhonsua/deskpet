@@ -14,6 +14,7 @@ POSE_SCALE = {'sleep': 603 / 315, 'phone': 603 / 442}
 
 class Live2DRenderer:
     def __init__(self, root=MODEL_ROOT):
+        self.root = Path(root).resolve()
         from PySide6.QtGui import QOffscreenSurface, QOpenGLContext, QSurfaceFormat
         from PySide6.QtOpenGL import QOpenGLFramebufferObject
         try:
@@ -55,7 +56,7 @@ class Live2DRenderer:
             live2d.init()
             live2d.glInit()
             self.motions = MotionLibrary(root)
-            data = json.loads((Path(root) / self.motions.mapping['model']).read_text(encoding='utf-8'))
+            data = json.loads((Path(root) / self.motions.mapping['model']).read_text(encoding='utf-8-sig'))
             # PetBehavior owns time and visibility, including interrupted/resumed actions.
             data['FileReferences'].pop('Motions', None)
             data['FileReferences'].pop('Pose', None)
@@ -65,12 +66,15 @@ class Live2DRenderer:
             self.model.SetAutoBreath(False)
             self.parts = {key: i for i, key in enumerate(self.model.GetPartIds())}
             self.parameter_ids = set(self.model.GetParamIds())
+            self._validate_generic_model(self.motions, self.parameter_ids, self.parts)
             self.motions.validate_walk_model(self.parameter_ids, self.parts)
             self.lift_reaction = LiftReactionOverlay()
             expected = {key for group in self.motions.mapping['poseGroups'] for key in group}
             if not expected <= self.parts.keys() or not self.model.GetParamIds():
                 raise RuntimeError('Live2D 模型未完整加载')
             self.model.Resize(384, 576)
+            if self.motions.generic:
+                self.model.SetScale(self.motions.mapping.get('renderScale', 1))
             self.fbo = QOpenGLFramebufferObject(384, 576)
             if not self.fbo.isValid():
                 raise RuntimeError('无法建立透明 Live2D 绘图缓冲区')
@@ -78,6 +82,85 @@ class Live2DRenderer:
             self.close()
             raise
         finally:
+            self.context.doneCurrent()
+        self.motions.start_preload()
+
+    @staticmethod
+    def _validate_generic_model(motions, parameters, parts):
+        if not motions.generic:
+            return
+        if not set(motions.mapping['integrationRules']['resetParameters']) <= set(parameters):
+            raise RuntimeError('Live2D 模型缺少复位表引用的参数')
+        for activity in motions.mapping['activities']:
+            _, used_parts = motions.sample(activity, 0)
+            if not set(used_parts) <= set(parts):
+                raise RuntimeError('Live2D 模型缺少动作引用的部件')
+
+    def replace_model(self, root):
+        """Load and verify in the existing GL context before releasing the old model."""
+        from deskpet.animation.live2d_motion import MotionLibrary
+        from deskpet.animation.crawl_visual import ROOT as CRAWL_ROOT
+        root = Path(root).resolve()
+        motions = MotionLibrary(root)
+        data = json.loads((root / motions.mapping['model']).read_text(encoding='utf-8-sig'))
+        data['FileReferences'].pop('Motions', None)
+        data['FileReferences'].pop('Pose', None)
+        if not self.context.makeCurrent(self.surface):
+            raise RuntimeError('无法激活 Live2D 渲染环境')
+        candidate = None
+        committed = False
+        try:
+            candidate = self.live2d.Model()
+            candidate.LoadFromJsonString(json.dumps(data), root_path=str(root) + '/')
+            candidate.SetAutoBlink(False)
+            candidate.SetAutoBreath(False)
+            parts = {key: i for i, key in enumerate(candidate.GetPartIds())}
+            ids = set(candidate.GetParamIds())
+            expected = {key for group in motions.mapping['poseGroups'] for key in group}
+            if not ids or not expected <= parts.keys():
+                raise RuntimeError('Live2D 模型未完整加载')
+            self._validate_generic_model(motions, ids, parts)
+            motions.validate_walk_model(ids, parts)
+            candidate.Resize(384, 576)
+            if motions.generic:
+                candidate.SetScale(motions.mapping.get('renderScale', 1))
+            values, opacity = motions.sample('idle', 0)
+            for key, value in values.items():
+                if key in ids:
+                    candidate.SetSaveParamById(key, value)
+            for key, value in opacity.items():
+                candidate.SetPartOpacity(parts[key], value)
+            self.fbo.bind()
+            try:
+                self.gl.glViewport(0, 0, 384, 576)
+                self.live2d.clearBuffer(0, 0, 0, 0)
+                candidate.Update(0)
+                candidate.Draw()
+                if self.fbo.toImage().isNull():
+                    raise RuntimeError('Live2D 没有生成有效画面')
+            finally:
+                self.fbo.release()
+            previous = self.model
+            previous_motions = self.motions
+            self.model, self.motions = candidate, motions
+            self.parts, self.parameter_ids, self.root = parts, ids, root
+            committed = True
+            previous_motions.cancel_preload()
+            motions.start_preload()
+            previous.DestroyRenderer()
+            if self.work_model is not None:
+                self.work_model.DestroyRenderer()
+                self.work_model = None
+            self.crawl_pose.close()
+            self.work_curves = None
+            self.work_available = root == MODEL_ROOT.resolve() and (self.work_root / 'tianyi-work.model3.json').is_file()
+            self.crawl_available = root == MODEL_ROOT.resolve() and (CRAWL_ROOT / 'tianyi-crawl.model3.json').is_file()
+            self.pointer = (0.0, 0.0, 0.0)
+            self.petting = (0.0, 0.0)
+            self.lift_reaction.reset()
+        finally:
+            if candidate is not None and not committed:
+                candidate.DestroyRenderer()
             self.context.doneCurrent()
 
     def frame(self, activity, seconds, beat=None):
@@ -92,9 +175,10 @@ class Live2DRenderer:
             parameters.setdefault('ParamEyeBallY', 0.0)
             parameters = apply_pointer(parameters, activity, self.pointer)
             parameters = apply_active_petting(parameters, activity, self.petting)
-            parameters = self.lift_reaction.apply(
-                activity, seconds, parameters, self.parameter_ids,
-                resume_activity=self.resume_activity)
+            if not self.motions.generic:
+                parameters = self.lift_reaction.apply(
+                    activity, seconds, parameters, self.parameter_ids,
+                    resume_activity=self.resume_activity)
             for key, value in parameters.items():
                 if key in self.parameter_ids:
                     self.model.SetSaveParamById(key, value)
@@ -174,6 +258,8 @@ class Live2DRenderer:
             self.context.doneCurrent()
 
     def close(self):
+        if hasattr(self, 'motions'):
+            self.motions.cancel_preload()
         if self.context.makeCurrent(self.surface):
             self.crawl_pose.close()
             self.crawl_fbo = None

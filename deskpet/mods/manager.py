@@ -41,10 +41,11 @@ def _unique(pairs):
 
 
 class ModManager:
-    def __init__(self, data_dir: Path, deliver, clock=datetime.now):
+    def __init__(self, data_dir: Path, deliver, clock=datetime.now, services=None):
         self.data_dir = Path(data_dir)
         self._deliver = deliver
         self._clock = clock
+        self.services = services
         self._registry = {}
         self._running = {}
         self._errors = {}
@@ -136,7 +137,7 @@ class ModManager:
                 or not isinstance(manifest.name, str) or not manifest.name.strip() or len(manifest.name) > 100
                 or not isinstance(manifest.version, str)
                 or re.fullmatch(r'[0-9]+(?:\.[0-9]+){1,2}(?:[-+][a-zA-Z0-9.-]+)?', manifest.version) is None
-                or len(manifest.version) > 50 or type(manifest.api_version) is not int or manifest.api_version != 1
+                or len(manifest.version) > 50 or type(manifest.api_version) is not int or manifest.api_version not in (1, 2, 3)
                 or not isinstance(manifest.description, str) or len(manifest.description) > 2000
                 or not callable(factory)):
             raise ValueError('invalid mod manifest or factory')
@@ -163,6 +164,9 @@ class ModManager:
             except Exception as error:
                 self._errors[mod_id] = f'停止失败：{type(error).__name__}: {str(error)[:200]}'
                 return False
+            finally:
+                if self.services is not None:
+                    self.services.release(mod_id)
         return True
 
     def _fault(self, mod_id, phase, error):
@@ -177,13 +181,16 @@ class ModManager:
             path = (self.data_dir / mod_id).resolve()
             path.relative_to(self.data_dir)
             path.mkdir(parents=True, exist_ok=True)
-            mod = self._registry[mod_id][1](ModContext(path, lambda text: self._notify(mod_id, text)))
+            mod = self._registry[mod_id][1](ModContext(path, lambda text: self._notify(mod_id, text),
+                self.services.for_mod(mod_id) if self.services is not None else None))
             self._running[mod_id] = mod
             mod.start()
             self._errors.pop(mod_id, None)
             return True
         except Exception as error:
             self._fault(mod_id, '启动', error)
+            if self.services is not None:
+                self.services.release(mod_id)
             return False
 
     def set_enabled(self, mod_id, enabled) -> bool:

@@ -296,12 +296,12 @@ class BilibiliImport:
                 tracks.append(dict(url=url, title=str(part_title or item.get('title') or identifier)[:200]))
                 if len(tracks) > MAX_ITEMS:
                     raise ValueError(f'列表超过 {MAX_ITEMS} 首，请选择较小的合集；本次没有写入。')
-        if source.kind == 'video':
+        if source.kind in ('video', 'parts'):
             identifier = urlsplit(source.url).path.strip('/').split('/')[-1]
             params = {'bvid': identifier} if identifier.startswith('BV') else {'aid': identifier[2:]}
             data = self.api('/x/web-interface/view', **params)
             season = data.get('ugc_season') or {}
-            if season.get('id'):
+            if source.kind == 'video' and season.get('id'):
                 return self.tracks(Source('season', number(season['id']), number(season.get('mid') or data['owner']['mid'])))
             pages = data.get('pages') or []
             if pages:

@@ -97,7 +97,7 @@ class ModLoaderTests(unittest.TestCase):
         self.assertFalse(self.manager.is_enabled('example'))
 
     def test_invalid_metadata_and_entry_paths(self):
-        bad = [dict(id='../outside'), dict(api_version=True), dict(api_version=2),
+        bad = [dict(id='../outside'), dict(api_version=True), dict(api_version=4),
                dict(name=3), dict(name=' '), dict(version='bad'), dict(description=[]),
                dict(entry='../other.py')]
         for index, changes in enumerate(bad):

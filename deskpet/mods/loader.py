@@ -98,13 +98,13 @@ def _manifest(directory):
     version = _text(raw['version'], 50)
     if re.fullmatch(r'[0-9]+(?:\.[0-9]+){1,2}(?:[-+][a-zA-Z0-9.-]+)?', version) is None:
         raise ValueError('Mod版本号无效')
-    if type(raw['api_version']) is not int or raw['api_version'] != 1:
+    if type(raw['api_version']) is not int or raw['api_version'] not in (1, 2, 3):
         raise ValueError('不支持的Mod接口版本')
     description = raw.get('description', '')
     if not isinstance(description, str) or len(description) > 2000:
         raise ValueError('Mod描述无效')
     description.encode('utf-8')
-    return ModManifest(mod_id, _text(raw['name'], 100), version, description, 1)
+    return ModManifest(mod_id, _text(raw['name'], 100), version, description, raw['api_version'])
 
 
 def _unload(namespace):

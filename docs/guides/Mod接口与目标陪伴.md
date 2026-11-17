@@ -65,7 +65,7 @@ Mod 可以使用包内相对导入以及主程序提供的 `deskpet.mods.api`；
 
 ```python
 ModManifest(id, name, version, description='', api_version=1)
-ModContext(data_dir, notify)
+ModContext(data_dir, notify, services=None)
 
 class Mod:
     def start(self): ...
@@ -74,13 +74,48 @@ class Mod:
     def create_widget(self, parent=None): ...
 ```
 
-工厂接收 `ModContext`，返回 Mod 实例。宿主通过 `ModManager.register(manifest, factory)` 注册扫描通过的包，启用时加载入口。`id` 为以小写字母开头的 1–64 位小写字母、数字、下划线或连字符；接口版本当前为 1。`start` 初始化资源，`tick` 接收本地无时区 `datetime`，`stop` 释放资源，`create_widget` 延迟创建界面。
+工厂接收 `ModContext`，返回 Mod 实例。宿主通过 `ModManager.register(manifest, factory)` 注册扫描通过的包，启用时加载入口。`id` 为以小写字母开头的 1–64 位小写字母、数字、下划线或连字符；2026-11-16 源码兼容接口版本 1、2，已发布 0.7.1 只支持 1。`start` 初始化资源，`tick` 接收本地无时区 `datetime`，`stop` 释放资源，`create_widget` 延迟创建界面。
 
 `context.data_dir` 是该 Mod 的独立目录。`context.notify(text)` 只接收纯文本，最长 500 字符；返回 `True` 才表示提醒实际交付。业务层只在成功时记录已提醒。全局策略、次数和最近时间由管理器持久保存，防止重启绕过配额；保存失败时暂停提醒。设置损坏时使用默认关闭状态并展示警告，本次运行暂停提醒。
 
 生命周期、更新或界面创建抛出异常时，管理器停止该 Mod 并显示错误，其他功能继续运行。这不是进程隔离或安全沙箱；Mod 在界面线程运行，应只做短时本地操作，不进行阻塞网络请求或长时间任务。
 
 ## 文件与存档
+
+### API 2：互动与成长扩展
+
+`context.services` 在桌宠宿主提供，当前 `version == 3`，包含原 API 2 能力；独立无宿主运行时可能是 `None`，扩展应检查最低版本。原 API 1/2 扩展保持兼容。
+
+| 方法 | 契约 |
+| --- | --- |
+| `subscribe(callback)` | 注册 `callback(kind, data)`。`headpat` 为有效摸头、`feed` 为成功投喂、`chat` 为陪伴回复提交成功、`listen` 为可听的有效播放增量、`action` 为成功触发的动作。每个监听收到独立数据副本。 |
+| `snapshot(music=False)` | 取得角色名、是否忙碌/播放、当前标题、本地路径、音量和活动；`music=True` 才复制当前拍点缓存，不做分析或网络调用。 |
+| `growth(callback)` | 独占成长投影。回调返回 `level/xp/xp_goal` 和可选 `stage/affinity/growth_label`，`1<=level<=100, 0<=xp<=xp_goal`。启用期间冻结原经验，保留原音符规则；停用/异常释放投影。不能覆写饱食、心情或音符。 |
+| `companion_context(callback)` | 普通陪伴调用时追加简短本地事实，每包最多 1200 字符、合计 2400；停用停止注入。不得编造共同经历或夹带工作模式指令。 |
+| `act(name)` | 支持 `wave/happy/turn/celebrate/sing`，以自动动作优先级请求；忙碌、拖拽、摸头、停靠、工作及不支持的动作返回 False。不移动窗口、不切换歌单、不发奖励。 |
+
+`listen` 的 `seconds` 为本次已确认有效的增量，最多 5 秒，包含 `source/at/title`；并不意味着歌曲自然播完。`feed` 包含 `food/at`；`action` 包含 `action`。扩展自行做去重、持久化及汇总，不能按回调次数直接发成长。聊天事件不含聊天正文、API Key 或远程账号凭据。
+
+停用、失败和宿主退出会清理注册监听、记忆提供者及成长投影。回调发生异常时只停用对应 Mod 并显示错误；包仍在界面线程内执行，应保持轻量。外部包属于可信 Python 扩展，以上接口不是权限隔离机制。
+
+互动养成包的完整规则和后续边界见 [互动养成增强 Mod 方案](../design/互动养成增强Mod方案.md)，构建命令为 `.venv\Scripts\python.exe packaging/build_bond_mod.py`。
+
+### API 3：主面板、音乐与确定性消费
+
+| 方法 | 契约 |
+| --- | --- |
+| `panel(summary, actions)` | `summary()` 返回纯文本；`actions` 是最多 12 个稳定 ID 到 `(标题, 回调)` 的映射。宿主负责摘要、固定入口和更多菜单；停用自动移除。 |
+| `present(destination)` | 2026-11-17 新增的可选入口能力；用于用户点击 Mod 按钮时打开 `control` 原控制面板、`food` 投喂选择、`chat` 陪伴聊天或 `music` 歌单。返回是否打开；停用、未知入口返回 False。仅展示入口，不投喂、不摸头、不播放、不发成长。较早 API 3 宿主需通过 `getattr` 检测，缺失时引导用户使用原面板。 |
+| `library()` | 返回已有本地歌单路径和文件名标题，不下载、不更改歌单；不存在或元数据不合适的音频由扩展跳过。 |
+| `analysis(parent)` | 返回使用本 Mod 独立缓存目录的可取消 BeatController；分析在子进程完成，扩展负责并发限制和生命周期。 |
+| `audio_claim() / audio_valid(token) / audio_release(token)` | 互斥的互动音频租约。普通播放中不能申请；扩展需持续检查普通播放、有效令牌和自身状态，失效停止自己的播放器。 |
+| `audio_route(audio, parent)` | 返回遵循宿主输出设置的 AudioRouter，关闭时停止其轮询。 |
+| `shop(catalog)` | 注册商品 ID 到整数音符价格（0～10000）的映射；只列实际可提供的商品。 |
+| `buy(item) / owned()` | 返回 `(成功, 说明)` / 已拥有 ID；扣款与购买记录在同一事务，已拥有不重复扣款；停用不能再购买。 |
+
+API 3 的 `listen` 在有效时附带 `track.source/position/duration`（秒）；`song_end` 是本地自然结束，`drag_end` 附轻晃幅度 `sway`。覆盖率与会话去重由扩展自行维护，不能把结束事件直接视为完整听完。当前歌曲完整纪念仅对本地可核验的音频启用。`snapshot` 另有 `hunger/notes`，均为只读。
+
+这些接口不构成 Python 安全隔离。扩展仍需校验异步回调、关闭分析与播放器，不能通过持续回调抢用户动作。
 
 | 文件 | 职责 |
 | --- | --- |

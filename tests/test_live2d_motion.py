@@ -1,4 +1,6 @@
 import unittest
+from threading import Event
+from unittest.mock import patch
 
 from deskpet.animation.live2d_motion import Curve, MotionLibrary
 from deskpet.animation.live2d_renderer import MODEL_ROOT, POSE_SCALE
@@ -6,6 +8,38 @@ from deskpet.pet.behavior import PetBehavior
 
 
 class Live2DMotionTests(unittest.TestCase):
+    @unittest.skipUnless((MODEL_ROOT / 'action-map.json').is_file(), 'local model assets are not distributed with source')
+    def test_preload_transfers_results_only_when_sampled(self):
+        library = MotionLibrary(MODEL_ROOT)
+        expected = MotionLibrary(MODEL_ROOT).sample('idle', .2)
+        thread = library.start_preload()
+        thread.join(5)
+        self.assertFalse(thread.is_alive())
+        group = library.group_for('idle')
+        self.assertNotIn(group, library.cache)
+        with patch.object(MotionLibrary, '_read_motion', side_effect=AssertionError('unexpected disk read')):
+            self.assertEqual(library.sample('idle', .2), expected)
+
+    @unittest.skipUnless((MODEL_ROOT / 'action-map.json').is_file(), 'local model assets are not distributed with source')
+    def test_cancelled_preload_discards_inflight_result(self):
+        library = MotionLibrary(MODEL_ROOT)
+        entered, release = Event(), Event()
+        original = MotionLibrary._read_motion
+        def read(path):
+            entered.set()
+            release.wait(5)
+            return original(path)
+        with patch.object(MotionLibrary, '_read_motion', side_effect=read):
+            thread = library.start_preload()
+            try:
+                self.assertTrue(entered.wait(5))
+                library.cancel_preload()
+            finally:
+                release.set()
+                thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertTrue(library._preload_results.empty())
+
     @unittest.skipUnless((MODEL_ROOT / 'action-map.json').is_file(), 'local model assets are not distributed with source')
     def test_upper_body_uses_playback_phase_only_during_singing(self):
         library = MotionLibrary(MODEL_ROOT)

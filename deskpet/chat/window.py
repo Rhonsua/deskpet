@@ -587,7 +587,10 @@ class ChatWindow(StickerChat, LookupChat, ChatSurface):
         self.status.setText('已套用角色默认人设，可继续编辑；Ctrl+Z 可撤销，记忆保持不变。')
 
     def memory_context(self, user='', proactive=False):
-        return self.store.memories.recall(self.character, user, proactive=proactive)
+        recalled = self.store.memories.recall(self.character, user, proactive=proactive)
+        host = getattr(self.pet, 'mod_host', None)
+        extra = host.services.memory_context() if host is not None and hasattr(host, 'services') else ''
+        return '\n'.join(part for part in (recalled, extra) if part)
 
     def manage_memories(self):
         from .memory_dialog import MemoryDialog
@@ -952,6 +955,9 @@ class ChatWindow(StickerChat, LookupChat, ChatSurface):
                 return False
             self.pending = None
             self.clear_lookup()
+            host = getattr(self.pet, 'mod_host', None)
+            if host is not None and hasattr(host, 'services'):
+                host.services.emit('chat')
             self.pending_user_stickers = []
             self.pending_action_context = None
             self.pending_actions = ()
@@ -1084,7 +1090,7 @@ class ChatWindow(StickerChat, LookupChat, ChatSurface):
             return
         self.work_panel.discard_unused()
         self.work_panel.save()
-        event.accept()
+        super().closeEvent(event)
 
     def shutdown(self):
         if not self.closed:

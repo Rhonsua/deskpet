@@ -63,16 +63,21 @@ class Setup {
     static void Install(string destination, bool desktop, bool test, Action<int> progress) {
         string root = Root(destination);
         NotRunning(root);
-        string archive = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "payload.zip");
-        if (!File.Exists(archive)) throw new IOException("缺少安装文件 payload.zip，请重新下载安装包。");
+        int preparationProgress;
+        // Verify/decompress before touching a previous installation's manifest.
+        using (ZipArchive zip = InstallerPayload.Open(AppDomain.CurrentDomain.BaseDirectory, progress, out preparationProgress)) {
+            InstallFiles(root, desktop, test, progress, zip, preparationProgress);
+        }
+    }
+    static void InstallFiles(string root, bool desktop, bool test, Action<int> progress,
+                             ZipArchive zip, int preparationProgress) {
         Directory.CreateDirectory(root);
         string manifestPath = Path.Combine(root, "installed-files.txt");
         if (File.Exists(Path.Combine(root, "TianyiPet.exe")) && !File.Exists(manifestPath))
             throw new IOException("请选择空目录，或之前安装此版本桌宠的目录。");
         var installed = new System.Collections.Generic.List<string>();
         File.WriteAllLines(manifestPath, new string[] { "installed-files.txt" });
-        using (var journal = new StreamWriter(manifestPath, true, System.Text.Encoding.UTF8))
-        using (ZipArchive zip = ZipFile.OpenRead(archive)) {
+        using (var journal = new StreamWriter(manifestPath, true, System.Text.Encoding.UTF8)) {
             long total = Math.Max(1, zip.Entries.Sum(e => e.Length)), copied = 0;
             foreach (ZipArchiveEntry entry in zip.Entries) {
                 if (String.IsNullOrEmpty(entry.Name)) continue;
@@ -85,7 +90,7 @@ class Setup {
                 entry.ExtractToFile(target, true);
                 installed.Add(entry.FullName.Replace('/', Path.DirectorySeparatorChar));
                 copied += entry.Length;
-                progress((int)(copied * 95 / total));
+                progress(preparationProgress + (int)(copied * (95 - preparationProgress) / total));
             }
         }
         File.Copy(Application.ExecutablePath, Path.Combine(root, "TianyiSetup.exe"), true);

@@ -9,6 +9,7 @@ dist/
 *.spec
 !packaging/*.spec
 .pytest_cache/
+.test-temp/
 preview/
 assets/references/
 用户提供的素材/
@@ -35,6 +36,7 @@ assets/character/*.png
 assets/ui/headpat/
 assets/stickers/**/*.png
 assets/stickers/**/*.webp
+deskpet/mods/bond/assets/*.webp
 experiments/
 character-packages/
 docs/model-issues/
@@ -50,6 +52,7 @@ characters/example/*
 *.psd
 *.psb
 local-work/
+docs/design/洛天依本地语音接入调查.md
 docs/media/
 
 # Local Cubism editing notes and user feedback stay with the model projects.

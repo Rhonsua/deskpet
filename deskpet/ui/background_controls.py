@@ -20,6 +20,7 @@ class PageBackgrounds(QObject):
         self.page = 'main'
         self.label = '当前页面'
         self.editing = False
+        self.surface.surfaceReady.connect(self._surface_ready)
         self.reload()
 
     def records(self):
@@ -41,7 +42,8 @@ class PageBackgrounds(QObject):
     def reload(self):
         self.surface.set_placement(self.position(self.page))
         self.surface.set_surface(self.path)
-        enabled = not self.surface.surface_image.isNull()
+
+    def _surface_ready(self, enabled):
         self.position_button.setEnabled(enabled)
         if self.style:
             self.style(enabled)

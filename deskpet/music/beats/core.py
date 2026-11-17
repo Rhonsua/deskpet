@@ -39,7 +39,25 @@ def estimate(energy, hop_ms=10):
             point=peak*hop_ms
             if not beats or point>beats[-1]: beats.append(point)
     if len(beats)<3: raise ValueError('可用拍点不足')
-    return {'bpm':60000/(lag*hop_ms),'beats_ms':beats,'duration_ms':len(values)*hop_ms}
+    result={'bpm':60000/(lag*hop_ms),'beats_ms':beats,'duration_ms':len(values)*hop_ms}
+    # Extra features are optional for existing beat followers, useful for charts.
+    peaks=[];strengths=[];last=-100000
+    floor=max(float(novelty.max())*.08,float(np.percentile(novelty,75)))
+    for i in range(1,len(novelty)-1):
+        if novelty[i]>=floor and novelty[i]>0 and novelty[i]>=novelty[i-1] and novelty[i]>novelty[i+1] and (i-last)*hop_ms>=120:
+            peaks.append(round(i*hop_ms,2));strengths.append(round(float(novelty[i]/novelty.max()),4));last=i
+    sustained=[];start=None
+    step=max(1,round(200/hop_ms));audible=float(values.max())*.08
+    for i in range(0,len(values),step):
+        block=values[i:i+step];mean=float(block.mean())
+        stable=mean>audible and float(block.std())<mean*.35
+        if stable and start is None:start=i
+        if start is not None and (not stable or (i-start)*hop_ms>=3000 or i+step>=len(values)):
+            end=i if not stable else min(i+step,len(values))
+            if (end-start)*hop_ms>=500:sustained.append([round(start*hop_ms,2),round(end*hop_ms,2)])
+            start=None
+    result.update(onsets_ms=peaks,onset_strength=strengths,sustain_regions_ms=sustained,features_version=2)
+    return result
 
 def clock(position_ms,bpm,beats=(),offset_ms=0,speed=1):
     position=float(position_ms)-offset_ms

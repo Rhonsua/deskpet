@@ -17,6 +17,8 @@ def note_amount(completed_blocks):
 
 class PetStore:
     def __init__(self, path):
+        self.growth_provider = None
+        self.event_listener = None
         self.db = sqlite3.connect(str(path))
         self.db.row_factory = sqlite3.Row
         self.db.executescript("""
@@ -32,6 +34,8 @@ class PetStore:
           CREATE TABLE IF NOT EXISTS ledger(id INTEGER PRIMARY KEY, at TEXT, reason TEXT,
             notes INTEGER, xp INTEGER);
           CREATE TABLE IF NOT EXISTS affection(day TEXT PRIMARY KEY, count INTEGER DEFAULT 0);
+          CREATE TABLE IF NOT EXISTS mod_purchases(owner TEXT,item TEXT,cost INTEGER,at TEXT,
+            PRIMARY KEY(owner,item));
         """)
         # The previous schema paid exactly two notes per completed block.
         # Keep the amount actually paid, including days already in progress.
@@ -46,10 +50,35 @@ class PetStore:
                     WHERE day=(SELECT MAX(day) FROM daily WHERE seconds>0)""")
 
     def pet(self):
-        return dict(self.db.execute("SELECT * FROM pet WHERE id=1").fetchone())
+        value = dict(self.db.execute("SELECT * FROM pet WHERE id=1").fetchone())
+        if self.growth_provider is not None:
+            value.update(self.growth_provider())
+        return value
+
+    def emit(self, kind, **data):
+        if self.event_listener is not None:
+            self.event_listener(kind, data)
+
+    def mod_owned(self, owner):
+        return [row[0] for row in self.db.execute('SELECT item FROM mod_purchases WHERE owner=?',(owner,))]
+
+    def mod_purchase(self, owner, item, cost):
+        if type(cost) is not int or not 0<=cost<=10000:return False,'价格无效'
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            if item in self.mod_owned(owner):return True,'已经拥有，可以直接使用'
+            if self.db.execute('SELECT notes FROM pet WHERE id=1').fetchone()[0]<cost:return False,'音符不足'
+            now=datetime.now()
+            self.db.execute('UPDATE pet SET notes=notes-? WHERE id=1',(cost,))
+            self.db.execute('INSERT INTO mod_purchases VALUES(?,?,?,?)',(owner,item,cost,now.isoformat()))
+            self.db.execute('INSERT INTO ledger(at,reason,notes,xp) VALUES(?,?,?,0)',
+                            (now.isoformat(),'装饰：'+owner+'/'+item,-cost))
+        return True,'已获得装饰，可以反复使用'
 
     def _grant(self, xp, notes, reason, now):
-        pet = self.pet()
+        pet = dict(self.db.execute("SELECT * FROM pet WHERE id=1").fetchone())
+        if self.growth_provider is not None:
+            xp = 0
         level, value = pet['level'], pet['xp'] + xp
         while level < 30 and value >= 50 + 20 * (level - 1):
             value -= 50 + 20 * (level - 1)
@@ -97,6 +126,8 @@ class PetStore:
                     self.db.execute("UPDATE daily SET bonus=1 WHERE day=?", (day,))
                     self._grant(10, 0, '每日首次听歌', stop)
                 cursor = stop
+        if reward:
+            self.emit('listen', seconds=seconds, source=str(path), at=end.isoformat())
 
     def tick_running(self, seconds):
         if not 0 < seconds <= 5:
@@ -131,7 +162,8 @@ class PetStore:
             self.db.execute("UPDATE pet SET hunger=?,mood=?,last_feed=? WHERE id=1",
                             (min(100, pet['hunger'] + hunger), min(100, pet['mood'] + mood), now.isoformat()))
             self.db.execute("UPDATE daily SET feeds=feeds+1 WHERE day=?", (day,))
-        return True, f'吃到{food}啦！经验 +{earned}'
+        self.emit('feed', food=food, at=now.isoformat())
+        return True, (f'吃到{food}啦！' if self.growth_provider else f'吃到{food}啦！经验 +{earned}')
 
     def stats(self, now=None):
         now = now or datetime.now()

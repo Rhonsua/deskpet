@@ -1,8 +1,8 @@
 # Windows 安装包
 
-## 当前版本：0.7.1
+## 当前版本：0.7.2
 
-从 [GitHub 发行页](https://github.com/Rhonsua/deskpet/releases/tag/v0.7.1) 下载 `TianyiPet-0.7.1-Setup.exe`，退出旧桌宠后安装。版本号以 `deskpet/version.py` 为准；安装包不会自动包含后续源码修改。
+发布后可从 [GitHub 发行页](https://github.com/Rhonsua/deskpet/releases/tag/v0.7.2) 下载 `TianyiPet-0.7.2-Setup.exe`，退出旧桌宠后安装。版本号以 `deskpet/version.py` 为准；安装包不会自动包含后续源码修改。
 
 安装包包含 Python、Qt、Live2D 运行依赖和当前洛天依素材，排除 Miku、自定义角色、Mod 本体、个人音乐、聊天记录、API 配置及语音模型。语音模型和 GPT-SoVITS 环境单独准备，见[语音包说明](../deskpet/speech/README.md)。B站播放需要 Microsoft Edge WebView2 Runtime，登录或验证由用户在网页完成。
 
@@ -20,14 +20,32 @@
 
 `build_installer.py` 默认读取当前版本，必须与源码版本一致；对应更新公告需在 `docs/release-notes/` 中。需要免安装包时才添加 `--portable`。打包使用 PyInstaller 目录模式，以及 Windows 的 IExpress 和 .NET Framework C# 编译器。前台和后台分别使用可执行入口，让音频、网页辅助进程保留通信管道。
 
+2026-11-15 起，安装数据改用 Windows 原生 **LZMS** 压缩。内层仍是标准 ZIP，外层按 32 MiB 分块压缩并带 SHA-256 校验；安装器先完整验证数据，再按原来的文件清单安装。模型、图片、程序依赖的内容不变，不要求用户额外安装解压软件。此方式基于 [Windows Compression API](https://learn.microsoft.com/en-us/windows/win32/cmpapi/using-the-compression-api)，满足项目 Windows 10 / 11 的系统要求。
+
+本次同一份程序的旧方式 ZIP 数据为 140,228,896 字节（133.73 MiB），新压缩数据为 105,809,460 字节（100.91 MiB）；完整新测试 EXE 为 **106,213,376 字节（101.29 MiB）**。已核对安装后的 623 个程序文件逐字节一致，临时安装约 6.74 秒，并验证卸载保留用户文件。这是本机测量，后续新增功能或素材会改变体积；已发布的 0.7.1 附件未替换。
+
+此优化缩小下载包，安装后的程序仍约 250 MiB。安装时需要另有约 250 MiB 临时空间来还原 ZIP；临时文件使用 `DeleteOnClose`，安装结束或失败时释放，卸载工具不包含这份安装数据。
+
+如需独立测量、不覆盖正式附件：
+
+```powershell
+.\.venv\Scripts\python.exe -B packaging/build_installer.py --output-dir local-work/size-optimization
+.\.venv\Scripts\python.exe -B tests/smoke_installer_payload.py local-work/size-optimization/TianyiPet-0.7.2-Setup.exe
+.\.venv\Scripts\python.exe -B -m unittest tests.test_installer_payload
+```
+
+这个轻量安装检查只在临时目录安装、校验全部文件和卸载，不打开桌宠、不调用模型 API、不改变真实注册表和快捷方式。负面检查涵盖损坏数据、超长块、截断、旧 ZIP 兼容与路径逃逸；原有 `smoke_installer.py` 也支持新格式，仍可用于完整发行检查。
+
 输出按当前版本命名：
 
-- `dist/TianyiPet-0.7.1-Setup.exe`：安装包。
+- `dist/TianyiPet-0.7.2-Setup.exe`：安装包。
 - `dist/SHA256SUMS.txt`：发行附件校验值。
 - `dist/TianyiPet/`：构建后的程序目录。
 - `build/`：可重新生成的构建中间文件。
 
 目标陪伴与工作人设 Mod 分别通过 `packaging/build_goal_mod.py`、`packaging/build_work_persona_mod.py` 构建为独立 ZIP。语音安装助手位于 `packaging/voice_setup/`，与桌宠安装包和语音模型分别分发。
+
+互动养成增强包通过 `packaging/build_bond_mod.py` 构建，当前产物为 `TianyiPet-BondCompanion-0.2.3.zip`。需要 0.7.2 主程序的 Mod API 3；先安装主程序，再将 ZIP 中 `bond` 文件夹解压到「扩展功能 / Mod → 打开 Mod 文件夹」所打开的目录，重启并启用。`deskpet.mods.bond` 仍明确排除在本体构建外，宿主只包含通用入口、事件、音频占用及消费接口。
 
 ## 检查与清理
 

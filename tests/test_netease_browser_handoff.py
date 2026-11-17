@@ -3,9 +3,11 @@ import json
 import gc
 import unittest
 import weakref
-from unittest.mock import Mock
+import sys
+from unittest.mock import Mock, patch
 
 from PySide6.QtCore import QCoreApplication, QEvent, QProcess
+from PySide6.QtTest import QSignalSpy
 from deskpet.music.netease.browser_login import BrowserLogin
 from deskpet.music.players.netease_player_worker import page_state
 
@@ -63,6 +65,22 @@ class BrowserHandoffTests(unittest.TestCase):
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.app.processEvents()
         self.assertEqual(login.process.state(), QProcess.ProcessState.NotRunning)
+
+    def test_cancel_retires_running_helper_without_waiting_or_killing_new_attempt(self):
+        login = BrowserLogin()
+        previous = login.process
+        previous.start(sys.executable, ['-c', 'import time; time.sleep(5)'])
+        self.assertTrue(previous.waitForStarted(2000))
+        with patch.object(previous, 'waitForFinished', side_effect=AssertionError('GUI wait')):
+            login.cancel()
+        current = login.process
+        self.assertIsNot(previous, current)
+        self.assertIs(previous.parent(), self.app)
+        # The old helper is allowed to finish after its page has been destroyed.
+        ended = QSignalSpy(previous.finished)
+        login.deleteLater()
+        self.assertTrue(ended.wait(2500))
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 if __name__ == '__main__':

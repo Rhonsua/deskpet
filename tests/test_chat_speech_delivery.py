@@ -32,6 +32,16 @@ class SynchronizedReplyTests(unittest.TestCase):
         window.pending = (window.character, 'hello')
         window.on_completed('reply', companion_reply=True)
 
+    def test_optional_mod_sees_only_committed_reply_once(self):
+        with self.voiced() as (window, callbacks):
+            emit = Mock()
+            window.pet.mod_host = NS(services=NS(emit=emit, memory_context=lambda:''))
+            self.complete(window)
+            emit.assert_not_called()
+            self.assertTrue(callbacks[0]())
+            self.assertFalse(callbacks[0]())
+            emit.assert_called_once_with('chat')
+
     def test_text_store_and_bubble_wait_then_publish_once(self):
         with self.voiced() as (window, callbacks):
             self.complete(window)

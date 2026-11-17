@@ -158,9 +158,12 @@ class PetToolbar(QFrame):
         title.addWidget(close)
         outer.addLayout(title)
         self.bars = {}
+        self.bar_labels = {}
         for key, caption in [('xp', '经验'), ('hunger', '饱食'), ('mood', '心情')]:
             row = QHBoxLayout()
-            row.addWidget(QLabel(caption))
+            label = QLabel(caption)
+            self.bar_labels[key] = label
+            row.addWidget(label)
             bar = QProgressBar()
             bar.setFixedHeight(6)
             bar.setTextVisible(False)
@@ -175,6 +178,9 @@ class PetToolbar(QFrame):
             button.clicked.connect(callback)
             actions.addWidget(button)
         outer.addLayout(actions)
+        from deskpet.mods.panel import ModPanel
+        self.mod_panel = ModPanel(pet,self)
+        outer.addWidget(self.mod_panel)
         self.content = QVBoxLayout()
         self.content.setSpacing(7)
         outer.addLayout(self.content)
@@ -196,8 +202,9 @@ class PetToolbar(QFrame):
     def refresh(self):
         data = self.pet.panel.store.pet()
         self.name.setText(self.pet.character_name)
-        self.stats.setText(f"Lv.{data['level']}   音符 {data['notes']}")
-        self.bars['xp'].setRange(0, 50 + 20 * (data['level'] - 1))
+        self.stats.setText(f"{data.get('stage', 'Lv.' + str(data['level']))}   音符 {data['notes']}")
+        self.bar_labels['xp'].setText(data.get('growth_label', '经验'))
+        self.bars['xp'].setRange(0, data.get('xp_goal', 50 + 20 * (data['level'] - 1)))
         self.bars['xp'].setValue(data['xp'])
         for key in ('hunger', 'mood'):
             self.bars[key].setRange(0, 100)
@@ -348,6 +355,8 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         self.active_petting = ActiveHeadPetting()
         self.petting_block_reason = 'inactive'
         self.petting = False
+        self.petting_contact_latched = False
+        self.petting_surface = None
         self.glove_cursor = None
         self.glove_overlay_alpha = 0.0
         self.glove_overlay_position = None
@@ -376,6 +385,8 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         self.live2d_renderer = None
         self.live2d_frame_key = None
         self.live2d_pixmap = None
+        self.live2d_mask_key = None
+        self.live2d_mask_region = None
         self.anchors = dict(DEFAULT_ANCHORS)
         self.head_region = QRegion()
         self.panel = panel_factory(self)
@@ -515,9 +526,11 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
                     if cache_key in self.pixmap_cache:
                         frames[state] = self.pixmap_cache[cache_key]
                 if variant == 'live2d':
-                    from deskpet.animation.live2d_renderer import Live2DRenderer
+                    from deskpet.animation.live2d_renderer import Live2DRenderer, MODEL_ROOT
                     # Load completely before replacing the last successful renderer.
                     renderer = self.live2d_renderer or Live2DRenderer()
+                    if renderer.root != MODEL_ROOT.resolve():
+                        renderer.replace_model(MODEL_ROOT)
                     first_frame = renderer.frame('idle', 0)
                     if first_frame.isNull():
                         raise RuntimeError('Live2D 没有生成有效画面')
@@ -545,6 +558,19 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
                 walk_spec = pack.walk
                 walk_frames = {key: QPixmap.fromImage(image) for key, image in images.items()
                                if key.startswith(('walk-left:', 'walk-right:'))}
+                if pack.live2d is not None:
+                    from deskpet.animation.live2d_renderer import Live2DRenderer
+                    # Reuse one OpenGL context; releasing another renderer's global
+                    # SDK state after a successful switch would invalidate this one.
+                    renderer = self.live2d_renderer
+                    if renderer is None:
+                        renderer = Live2DRenderer(pack.live2d.root)
+                    else:
+                        renderer.replace_model(pack.live2d.root)
+                    if renderer.frame('idle', 0).isNull():
+                        raise RuntimeError('Live2D 没有生成有效画面')
+                    walk_spec, walk_frames = renderer.motions.walk_spec, {}
+                    walk_error = renderer.motions.walk_error
             if 'idle' not in frames or frames['idle'].isNull():
                 raise ValueError('角色缺少可显示的 idle 素材')
         except (ValueError, OSError, RuntimeError, ImportError) as error:
@@ -653,6 +679,8 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         self.scale = max(0.75, min(1.5, scale))
         activity = self.display_activity() if self.live2d_renderer is not None else 'idle'
         base_width = LIVE2D_POSE_WIDTHS.get(activity, 260)
+        if self.live2d_renderer and self.character_pack and self.character_pack.live2d:
+            base_width = max(260, round(192*self.character_pack.live2d.scale_for(activity)+36))
         self.resize(round(base_width * self.scale), round(310 * self.scale))
         if anchor is not None:
             target = QPoint(round(anchor.x() - self.width() / 2),
@@ -678,6 +706,8 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
     def update_live2d_geometry(self, activity):
         # The same-sized person lying down needs a wider window, not a smaller head.
         base_width = LIVE2D_POSE_WIDTHS.get(activity, 260)
+        if self.character_pack and self.character_pack.live2d:
+            base_width = max(260, round(192*self.character_pack.live2d.scale_for(activity)+36))
         width, height = round(base_width * self.scale), round(310 * self.scale)
         if self.size().width() == width and self.height() == height:
             return
@@ -703,6 +733,13 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         transform.scale(sx, sy)
         transform.translate(-anchor.x(), -anchor.y())
         return transform
+
+    def live2d_mask(self, pixmap):
+        key = pixmap.cacheKey()
+        if getattr(self, 'live2d_mask_key', None) != key:
+            self.live2d_mask_region = QRegion(pixmap.mask())
+            self.live2d_mask_key = key
+        return self.live2d_mask_region
 
     def paint_live2d(self, painter, activity):
         from deskpet.animation.live2d_renderer import POSE_SCALE
@@ -746,8 +783,9 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
             QTimer.singleShot(0, lambda: self.set_variant('refined'))
             return
         transform = QTransform()
+        mask = self.live2d_mask(pixmap)
         if activity == 'crawl':
-            bounds = QRegion(pixmap.mask()).boundingRect()
+            bounds = mask.boundingRect()
             if bounds.isEmpty():
                 return
             if getattr(self, 'crawl_frame_anchor', None) is None:
@@ -761,15 +799,19 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
             painter.setTransform(transform)
             painter.drawPixmap(0, 0, pixmap)
             painter.resetTransform()
-            self.hit_region = transform.map(QRegion(pixmap.mask())).intersected(QRegion(self.rect()))
+            self.hit_region = transform.map(mask).intersected(QRegion(self.rect()))
             head = QRect(bounds.left(), bounds.top(), round(bounds.width() * .58), bounds.height())
             self.head_region = transform.map(QRegion(head, QRegion.RegionType.Ellipse))
             self.effects.capture_crawl(pixmap, transform)
             return
         transform.translate(self.width() / 2, 280 * self.scale)
-        factor = .5 * self.scale * POSE_SCALE.get(activity, 1)
+        spec = self.character_pack.live2d if self.character_pack else None
+        factor = .5 * self.scale * (spec.scale_for(activity) if spec else POSE_SCALE.get(activity, 1))
         transform.scale(factor, factor)
-        transform.translate(-192, -560)
+        if spec:
+            transform.translate(-384*spec.feet[0], -576*spec.feet[1])
+        else:
+            transform.translate(-192, -560)
         if activity not in ('sleep', 'phone'):
             transform *= self.dock_transform()
         transform *= self.interaction_transform(activity)
@@ -777,9 +819,12 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         painter.setTransform(transform)
         painter.drawPixmap(0, 0, pixmap)
         painter.resetTransform()
-        self.hit_region = transform.map(QRegion(pixmap.mask())).intersected(QRegion(self.rect()))
+        self.hit_region = transform.map(mask).intersected(QRegion(self.rect()))
         head = (QRect(42, 405, 118, 140) if activity == 'sleep' else
                 QRect(13, 384, 166, 163) if activity == 'phone' else QRect(75, 15, 230, 220))
+        if spec:
+            x, y, w, h = spec.head_for(activity)
+            head = QRect(round(384*x), round(576*y), round(384*w), round(576*h))
         self.head_region = transform.map(QRegion(head, QRegion.RegionType.Ellipse))
 
     def prepare_frames(self):
@@ -791,12 +836,19 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
                 max_height = min(max_height, 280 * self.scale / feet_y)
             if feet_y < 1:
                 max_height = min(max_height, (self.height() - 280 * self.scale) / (1 - feet_y))
-        self.scaled_frames = {
-            name: pixmap.scaled(max(1, round(max_width)), max(1, round(154 * self.scale if self.character_pack is None and name in ('sleep', 'phone') else max_height)),
-                                Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            for name, pixmap in self.frames.items()
-        }
-        self.frame_masks = {name: QRegion(pixmap.mask()) for name, pixmap in self.scaled_frames.items()}
+        # Several states can reference the same source image. Scale and build
+        # its mask once per size rather than repeating both operations on the UI thread.
+        prepared = {}
+        self.scaled_frames, self.frame_masks = {}, {}
+        for name, pixmap in self.frames.items():
+            width = max(1, round(max_width))
+            height = max(1, round(154 * self.scale if self.character_pack is None and name in ('sleep', 'phone') else max_height))
+            key = (pixmap.cacheKey(), width, height)
+            if key not in prepared:
+                scaled = pixmap.scaled(width, height, Qt.AspectRatioMode.KeepAspectRatio,
+                                       Qt.TransformationMode.SmoothTransformation)
+                prepared[key] = scaled, QRegion(scaled.mask())
+            self.scaled_frames[name], self.frame_masks[name] = prepared[key]
         singing_hem = 0.64 if self.character_pack is None else self.character_pack.singing_hem
         self.singing_rigs = {name: SingingRig(pixmap, self.frame_masks[name], singing_hem)
                              for name, pixmap in self.scaled_frames.items()
@@ -871,6 +923,15 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
 
     def character_head(self):
         if self.live2d_renderer is not None:
+            if self.character_pack and self.character_pack.live2d:
+                spec = self.character_pack.live2d
+                activity = self.display_activity()
+                x, y, w, h = spec.head_for(activity)
+                factor = .5*self.scale*spec.scale_for(activity)
+                # Use the untransformed anchor: reusing last frame's rotated hit
+                # region would feed docking back into itself and cause drift.
+                return QPointF(self.width()/2 + (x+w/2-spec.feet[0])*384*factor,
+                               280*self.scale + (y+h/2-spec.feet[1])*576*factor)
             return QPointF(self.width() / 2, 82 * self.scale)
         image = self.scaled_frames.get('idle')
         if self.character_pack and image is not None:
@@ -992,6 +1053,8 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         self.stop_roaming()
         if not self.behavior.react(action, seconds, automatic=automatic):
             return
+        if not automatic:
+            self.panel.store.emit('action', action=action)
         if self.dragging:
             return
         self.reveal_dock()
@@ -1013,6 +1076,7 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         self.react('happy', words=random.choice(['嘿嘿，好开心呀！', '有你在，今天也很开心！', '和你待在一起真好～']))
 
     def reward_pat(self):
+        self.panel.store.emit('headpat')
         now = time.monotonic()
         if now - self.last_pat >= 60:
             self.panel.store.interact()
@@ -1036,6 +1100,7 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
             self.bubble.say('摸头手掌素材暂时没有加载成功，请更新完整程序后再试。')
             return
         self.petting = True
+        self.petting_contact_latched = False
         self.active_petting.leave()
         self.click_timer.stop()
         self.hold_timer.stop()
@@ -1051,6 +1116,12 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         if not self.petting:
             return
         self.petting = False
+        self.petting_contact_latched = False
+        surface = getattr(self, 'petting_surface', None)
+        if surface is not None:
+            surface.hide()
+            surface.unsetCursor()
+            surface.cursor_pose = None
         self.active_petting.leave()
         self.press_point = None
         self.mouse_interactions.step(0, 0, 0, enabled=False)
@@ -1244,6 +1315,7 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         self.stop_roaming()
         self.end_petting()
         self.behavior.set_mode(mode)
+        self.panel.store.emit('action', action=mode)
         self.panel.settings.setValue('activity_mode', mode)
         self.update()
 
@@ -1296,6 +1368,7 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         self.drag_sample_time = time.monotonic()
         self.drag_sway.start()
         self.toolbar.hide()
+        self.mod_drag_peak=0.
         self.bubble.hide()
         self.setCursor(Qt.CursorShape.ClosedHandCursor)
 
@@ -1321,14 +1394,18 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         self.update()
 
     def petting_contact_region(self):
-        """Double horizontal reach about the head center, preserving height."""
-        box = self.head_region.boundingRect()
-        center_x = box.x() + box.width() / 2
-        transform = QTransform()
-        transform.translate(center_x, 0)
-        transform.scale(2, 1)
-        transform.translate(-center_x, 0)
-        return transform.map(self.head_region.intersected(self.hit_region))
+        """Enter near the head; use a wider release boundary after contact."""
+        from deskpet.animation.headpat_contact import contact_region
+        return contact_region(self.head_region.boundingRect(), self.scale,
+                              retaining=getattr(self, 'petting_contact_latched', False))
+
+    def sync_petting_surface(self, available):
+        surface = self.petting_surface
+        if surface is None and available and self.petting:
+            from deskpet.ui.headpat_surface import HeadpatSurface
+            surface = self.petting_surface = HeadpatSurface(self)
+        if surface is not None:
+            surface.sync(available)
 
     def paint_petting_contact_region(self, painter):
         if not self.petting:
@@ -1348,7 +1425,9 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         native window stack. Physical cursor coordinates avoid mixed-DPI errors.
         """
         widget = QApplication.widgetAt(point)
+        surface = getattr(self, 'petting_surface', None)
         own = widget is self or (widget is not None and widget.window() is self)
+        own = own or (surface is not None and surface.isVisible() and widget is surface)
         import sys
         if sys.platform != 'win32':
             return own
@@ -1370,8 +1449,9 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
             hit = user.WindowFromPoint(cursor)
             hit = user.GetAncestor(hit, 2) if hit else None  # GA_ROOT, not owner
             pet_handle = int(self.winId())
+            surface_handle = int(surface.winId()) if surface is not None and surface.isVisible() else 0
             effect_handle = int(self.effects.winId()) if self.effects.isVisible() else 0
-            if hit == pet_handle:
+            if hit == pet_handle or (surface_handle and hit == surface_handle):
                 return True
             if hit != effect_handle or not effect_handle:
                 return False
@@ -1385,7 +1465,7 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
                 if (not user.IsWindowVisible(hit) or not user.GetWindowRect(hit, ctypes.byref(rect))
                         or not (rect.left <= cursor.x < rect.right and rect.top <= cursor.y < rect.bottom)):
                     continue
-                return hit == pet_handle
+                return hit == pet_handle or bool(surface_handle and hit == surface_handle)
             return False
         except (OSError, AttributeError, ValueError):
             # A failed native check cannot authorize petting behind another app.
@@ -1437,6 +1517,12 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
                      if activity in ('sing', 'turn') else
                      tuple((self.width()/2+side*46*self.scale, 213*self.scale)
                            for side in (-1, 1)))
+            if self.character_pack and self.character_pack.live2d:
+                spec = self.character_pack.live2d
+                factor = .5*self.scale*spec.scale_for(activity)
+                hands = tuple((self.width()/2 + (x-spec.feet[0])*384*factor,
+                               280*self.scale + (y-spec.feet[1])*576*factor)
+                              for x, y in spec.hands)
             near_hand = any(math.hypot(local.x()-x, local.y()-y) < 27*self.scale
                             for x, y in hands) and not in_head
             available = (not self.mouse_passthrough and self.isVisible()
@@ -1446,6 +1532,7 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
                          and not self.behavior.layers and not self.sleeping and not self.using_phone
                          and not self.panel.isVisible() and not self.toolbar.isVisible()
                          and not self.hit_region.isEmpty())
+            self.sync_petting_surface(available)
             reaches_pet = self.pointer_reaches_pet(global_pointer) if available and (self.petting or self.panel.interactions_toggle.isChecked()) else False
             self.petting_block_reason = ('inactive' if not self.petting else 'unavailable' if not available
                                          else 'outside-head' if not in_head else 'occluded' if not reaches_pet else '')
@@ -1453,9 +1540,12 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
                 local.x(), local.y(), delta, scale=self.scale,
                 head_width=self.head_region.boundingRect().width(),
                 contact=self.petting and available and reaches_pet and in_head)
+            self.petting_contact_latched = bool(self.petting and available and reaches_pet and in_head
+                                               and self.active_petting.previous is not None)
             self.live2d_renderer.petting = (self.active_petting.strength, self.active_petting.direction)
             self.update_petting_hand(local, delta, self.petting and available and reaches_pet and in_head)
             self.update_petting_cursor(self.active_petting.strength, self.active_petting.direction)
+            self.sync_petting_surface(available)
             if credited_stroke:
                 self.reward_pat()
             reaction = self.mouse_interactions.step(
@@ -1623,6 +1713,7 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         if self.drag_sample_point is not None:
             self.drag_sway.move(point.x() - self.drag_sample_point.x(),
                                 now - self.drag_sample_time, self.scale)
+            self.mod_drag_peak=max(getattr(self,'mod_drag_peak',0.),abs(self.drag_sway.angle))
         self.drag_sample_point, self.drag_sample_time = QPoint(point), now
         desired = point - self.drag_offset
         screen = (QApplication.screenAt(point) or
@@ -1682,6 +1773,7 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
                 return
             self.behavior.end_drag()
             self.snap_to_edge()
+            self.panel.store.emit('drag_end',sway=getattr(self,'mod_drag_peak',0.))
         elif not self.dock_press:
             self.click_timer.start(220)
         self.setCursor(Qt.CursorShape.ArrowCursor)

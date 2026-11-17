@@ -47,6 +47,22 @@ class MouseInteractionTests(unittest.TestCase):
         self.assertFalse(pat.step(20, 0, .1, contact=True))
         self.assertEqual(pat.reward_distance, 0)
 
+    def test_normal_fast_sweeps_do_not_drop_contact_or_grant_extra_credit(self):
+        for scale in (.75, 1, 1.5):
+            pat = ActiveHeadPetting()
+            for frame in range(30):
+                # A 60px swing in one 33ms frame used to make the hand vanish.
+                credited = pat.step((60 if frame % 2 else 0)*scale, 0, 1/30,
+                                    contact=True, scale=scale, head_width=120*scale)
+                self.assertIsNotNone(pat.previous)
+                self.assertFalse(credited)
+            self.assertEqual(pat.phase, 'stroking')
+            self.assertGreater(pat.strength, .65)
+            self.assertEqual(pat.reward_distance, 0)
+            for _ in range(10):
+                pat.step(0, 0, .1, contact=False, scale=scale)
+            self.assertLess(pat.strength, .01)
+
     def test_active_feedback_has_no_reward_cooldown_and_follows_direction(self):
         pat = ActiveHeadPetting()
         for i in range(30):

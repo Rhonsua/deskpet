@@ -124,7 +124,7 @@ class ModManagerTests(unittest.TestCase):
         for manifest in [ModManifest('../escape', 'x', '1.0'), ModManifest('UPPER', 'x', '1.0'),
                          ModManifest('ok', '', '1.0'), ModManifest('ok', 'x', ''),
                          ModManifest('ok', 'x', 'not-version'), ModManifest('ok', 'x', '1.0', api_version=True),
-                         ModManifest('ok', 'x', '1.0', api_version=2)]:
+                         ModManifest('ok', 'x', '1.0', api_version=4)]:
             with self.subTest(manifest=manifest), self.assertRaises(ValueError):
                 self.manager.register(manifest, FakeMod)
         self.register()

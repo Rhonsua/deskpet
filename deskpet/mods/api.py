@@ -18,6 +18,7 @@ class ModManifest:
 class ModContext:
     data_dir: Path
     notify: Callable[[str], bool]
+    services: object = None
 
 
 class Mod(Protocol):

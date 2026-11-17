@@ -13,6 +13,7 @@ class GeometryPet:
     def __init__(self, activity):
         self.activity = activity
         self.scale = 1.0
+        self.character_pack = None
         self.live2d_renderer = object()
         self.dock_edge = ''
         self.dragging = False

@@ -145,12 +145,14 @@ class Cache:
         except (OSError, ValueError, TypeError, KeyError):
             return None
 
-    def snapshots(self, private=False):
+    def snapshots(self, private=False, *, cancel=None):
         directory = self.path('private' if private else 'public')
         if not directory.exists():
             return []
         found = []
         for path in sorted(directory.glob('playlist-*.json'))[:200]:
+            if cancel and cancel():
+                break
             item_id = path.stem.removeprefix('playlist-')
             try:
                 cached = self.snapshot('playlist', item_id, private)

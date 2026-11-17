@@ -202,6 +202,11 @@ class KugouWidget(QWidget):
         self.cancel_button.clicked.connect(self.cancel)
         row.addWidget(self.cancel_button)
         outer.addLayout(row)
+        from ..tools.snapshot_loader import SnapshotLoader
+        self._snapshot_loader = SnapshotLoader(self)
+        self._snapshot_loader.loaded.connect(self._snapshots_loaded)
+        self._snapshots_dirty = True
+        self.tabs.currentChanged.connect(self._snapshot_tab_changed)
         self._account_label()
         self._refresh_snapshots()
         self.tabs.setCurrentIndex(2 if self.session else 0)
@@ -364,14 +369,45 @@ class KugouWidget(QWidget):
                             + '；'.join(data.get('warnings', [])) + (f' 快照时间：{cached_at}' if cached_at else ''))
 
     def _refresh_snapshots(self):
+        self._snapshot_loader.cancel()
+        self._snapshots_dirty = True
         self.snapshot_list.clear()
+        self._snapshot_rows = {}
+        self._load_snapshots()
+
+    def _snapshot_tab_changed(self, index):
+        if index != 1 and self._snapshot_loader.active:
+            self._snapshot_loader.cancel()
+            self._snapshots_dirty = True
+        self._load_snapshots()
+
+    def _load_snapshots(self):
+        if (not self._closed and self.isVisible() and self.tabs.currentIndex() == 1
+                and self._snapshots_dirty and not self._snapshot_loader.active):
+            self._snapshots_dirty = False
+            self._snapshot_loader.start(self.cache, bool(self.session))
+
+    def _snapshots_loaded(self, entries, failed):
+        if self._closed:
+            return
+        self.snapshot_list.clear()
+        self._snapshot_rows = {}
         try:
-            for raw in self.cache.snapshots(False) + (self.cache.snapshots(True) if self.session else []):
+            for raw in entries:
                 data = raw['data']
+                if not isinstance(data, dict) or not isinstance(data.get('tracks'), list):
+                    continue
                 item = QListWidgetItem(f'{data.get("title", raw["id"])} · {len(data.get("tracks", []))}/{data.get("total", 0)} · {raw["fetched_at"]}')
-                item.setData(Qt.ItemDataRole.UserRole, raw)
+                # Keep playlist bodies in Python, avoiding a recursive Qt
+                # QVariant copy of every track just to display one list row.
+                key = len(self._snapshot_rows)
+                self._snapshot_rows[key] = raw
+                item.setData(Qt.ItemDataRole.UserRole, key)
                 self.snapshot_list.addItem(item)
+            if failed:
+                raise ValueError('snapshot read failed')
         except (OSError, ValueError, TypeError, KeyError):
+            self._snapshots_dirty = True
             self.status.setText('部分快照无法读取，请重新打开原歌单。')
 
     def open_snapshot(self, *_):
@@ -379,6 +415,8 @@ class KugouWidget(QWidget):
         if item:
             self.cancel()
             raw = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(raw, int):
+                raw = self._snapshot_rows[raw]
             self._show_playlist(raw['data'], raw['fetched_at'])
 
     def begin_qr(self):
@@ -427,6 +465,7 @@ class KugouWidget(QWidget):
     def _accept_session(self, session):
         self.cancel()
         self.session = session
+        self._refresh_snapshots()
         self._session_epoch += 1
         self.sessionChanged.emit()
         self._account_label()
@@ -439,6 +478,10 @@ class KugouWidget(QWidget):
         self.fetch_collections()
 
     def _logout(self, show=True):
+        self._snapshot_loader.cancel()
+        self.snapshot_list.clear()
+        self._snapshot_rows = {}
+        self._snapshots_dirty = True
         self.cancel()
         self._restore_on_show = False
         self.session = None
@@ -544,10 +587,14 @@ class KugouWidget(QWidget):
 
     def shutdown(self):
         if not self._closed:
+            self._snapshot_loader.close()
             self._closed = True
             self.cancel()
 
     def hideEvent(self, event):
+        if self._snapshot_loader.active:
+            self._snapshots_dirty = True
+        self._snapshot_loader.cancel()
         self.cancel()
         super().hideEvent(event)
 
@@ -557,6 +604,7 @@ class KugouWidget(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
+        self._load_snapshots()
         if self._restore_on_show and self.session and not self._closed:
             self._restore_on_show = False
             self.fetch_collections()

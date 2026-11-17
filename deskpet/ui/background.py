@@ -2,8 +2,8 @@
 from pathlib import Path
 from dataclasses import dataclass, asdict
 import math
-from PySide6.QtCore import Qt, QSaveFile, QIODevice, QSize, QRectF
-from PySide6.QtGui import QPixmap,QPainter,QColor,QImageReader
+from PySide6.QtCore import Qt, QSaveFile, QIODevice, QSize, QRectF, QObject, Signal, QRunnable, QThreadPool
+from PySide6.QtGui import QPixmap,QPainter,QColor,QImageReader,QImage
 from PySide6.QtWidgets import QWidget
 
 GLASS_STYLE='''
@@ -44,20 +44,75 @@ def save_background(source, destination):
 
 
 
+class _ImageSignals(QObject):
+    finished = Signal(int, QImage)
+
+
+class _ImageLoader(QRunnable):
+    def __init__(self, path, generation):
+        super().__init__()
+        self.path, self.generation = path, generation
+        self.signals = _ImageSignals()
+
+    def run(self):
+        reader = QImageReader(self.path)
+        reader.setAutoTransform(True)
+        size = reader.size()
+        image = QImage()
+        if size.isValid() and size.width() * size.height() <= 100_000_000:
+            if max(size.width(), size.height()) > 4096:
+                reader.setScaledSize(size.scaled(QSize(4096, 4096), Qt.KeepAspectRatio))
+            image = reader.read()
+        self.signals.finished.emit(self.generation, image)
+
+
 class BackgroundSurface(QWidget):
+    surfaceReady = Signal(bool)
     surface_color = '#EAF2F6'
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
         self.surface_image=QPixmap();self.surface_cover=QPixmap()
         self.surface_placement = BackgroundPlacement()
+        self._surface_generation = 0
+        self._surface_path = None
+        self._surface_pending = False
+        self._surface_restart = False
 
     def set_placement(self, value):
         self.surface_placement = BackgroundPlacement.read(value)
         self.scale_surface()
 
     def set_surface(self,path):
-        self.surface_image=QPixmap(str(path)) if path and Path(path).is_file() else QPixmap()
+        self._surface_generation += 1
+        self._surface_path = str(path) if path else None
+        self._surface_pending = bool(path)
+        self._surface_restart = False
+        self.surface_image = QPixmap()
         self.scale_surface()
+        self.surfaceReady.emit(False)
+        if path:
+            loader = _ImageLoader(str(path), self._surface_generation)
+            loader.signals.finished.connect(self._surface_loaded)
+            QThreadPool.globalInstance().start(loader)
+
+    def _surface_loaded(self, generation, image):
+        if generation != self._surface_generation:
+            return
+        self._surface_pending = False
+        self.surface_image = QPixmap.fromImage(image)
+        self.scale_surface()
+        self.surfaceReady.emit(not self.surface_image.isNull())
+
+    def closeEvent(self, event):
+        self._surface_generation += 1
+        self._surface_restart = self._surface_restart or self._surface_pending
+        self._surface_pending = False
+        super().closeEvent(event)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._surface_restart:
+            self.set_surface(self._surface_path)
 
     def scale_surface(self):
         self.surface_cover = QPixmap()

@@ -11,7 +11,10 @@ class ModHost(QObject):
         super().__init__(pet)
         self.pet = pet
         self.window = None
-        self.manager = ModManager(pet.panel.data_dir / 'mods', self.deliver)
+        from .services import InteractionServices
+        self.services = InteractionServices(self)
+        self.manager = ModManager(pet.panel.data_dir / 'mods', self.deliver, services=self.services)
+        pet.panel.store.event_listener = self.services.emit
         self.packages_dir = pet.panel.data_dir / 'mod-packages'
         try:
             self.packages_dir.mkdir(parents=True, exist_ok=True)

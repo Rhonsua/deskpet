@@ -102,6 +102,67 @@ characters/
 
 配置文件最多 64 KiB。配置中不能放可执行脚本，不会自动访问 `source` 链接或下载素材。角色素材应由提供者确认使用权限并保留原作者及授权说明，项目代码的 MIT 许可证不代表对外部素材的授权。
 
+## 可选外部 Live2D 角色
+
+当前源码已支持独立 Live2D 角色包，可在同一个“角色外观”下拉框切换。需要含此接口的新版主程序；此前安装包不会因为放入模型文件而自动获得 Live2D 支持。仍须提供 `idle.png` 作为封面及旧版静态兼容图，可继续提供上面的十张姿势 PNG。原有纯 PNG 包无需修改。
+
+最小目录结构：
+
+```text
+characters/我的动态角色/
+  character.json
+  idle.png
+  personality.json          # 可选
+  live2d/
+    action-map.json
+    character.model3.json
+    character.moc3
+    texture.png
+    motions/Idle.motion3.json
+```
+
+在原有 `character.json` 顶层添加：
+
+```json
+"live2d": {
+  "directory": "live2d",
+  "scale": 1.0,
+  "feet": [0.5, 0.9],
+  "head": [0.33, 0.08, 0.34, 0.25],
+  "hands": [[0.28, 0.55], [0.72, 0.55]],
+  "pose_heads": {"sleep": [0.1, 0.6, 0.3, 0.25]},
+  "pose_scale": {"sleep": 1.1}
+}
+```
+
+这些坐标相对**运行渲染后的 384×576 透明画面**，不是 PSD 源图。`head` 和 `pose_heads` 是 `[左, 上, 宽, 高]` 矩形；`feet` 是落地点；`hands` 为 1～4 个手部中心，用于停留互动。所有坐标取 0～1。`scale` 为 0.25～2；`pose_scale` 为 0.5～2，乘积不得超过 2。没有单独配置的姿势沿用默认值；外部角色不会继承洛天依的睡姿放大倍数。人物素材过高时应降低倍率，以免超出桌宠窗口。
+
+`action-map.json` 示例：
+
+```json
+{
+  "schemaVersion": 1,
+  "profile": "character",
+  "model": "character.model3.json",
+  "renderScale": 1.0,
+  "poseGroups": [],
+  "activities": {"idle": "Idle", "sing": "Sing", "sleep": "Sleep"},
+  "integrationRules": {
+    "resetParameters": {"ParamAngleX": 0, "ParamEyeLOpen": 1, "ParamEyeROpen": 1, "ParamPose": 0}
+  }
+}
+```
+
+- `.model3.json` 中的 `FileReferences.Motions` 需要 `Idle` 组，每组当前只取一条动作，示例中的 `Sing`、`Sleep` 也必须存在。模型、纹理、动作及其余资源路径统一相对 `live2d.directory`，推荐将模型描述放在该目录根部。不会运行角色包里的代码。
+- `activities` 支持 `idle`、`listen`、`sing`、`turn`、`happy`、`level_up`、`lift`、`land`、`poke`、`head_rub`、`mouse_wave`、`eat`、`sleep`、`phone`。未声明的动作回退 `Idle`。动作曲线可使用 Cubism 线性、贝塞尔、阶梯和反向阶梯插值。
+- `profile: character` 使用角色自带的唱歌、抬腿和手臂动作，不套用洛天依的专用参数。附近鼠标可驱动标准 `ParamEyeBallX/Y`、`ParamAngleX/Y`、`ParamBodyAngleX`；主动摸头可驱动标准闭眼、眉毛、头部倾斜等参数。不存在的互动参数会被跳过。
+- `resetParameters` 应列出本模型每帧需要复位的全部参数与默认值，动作引用的参数必须包含其中，且必须真实存在于 MOC3。独立睡姿等可以由一个整数参数控制整组图层显隐，也可以使用 `PartOpacity` 曲线。使用后者时，将部件 ID 登记到 `poseGroups`，每条动作必须完整指定全部姿态部件的 0～1 透明度，避免切换残留。
+- 每帧由桌宠时间轴采样动作，拖动是临时动作，松手后恢复保存的状态。`renderScale` 为模型在内部画面中的缩放，范围 0.25～1；双马尾等横向较宽的模型可调小它，再通过 `live2d.scale` 调整桌面显示大小。应先查看实际渲染，确认四周留白，再量取头部和落地点。
+- 当前外部模型的唱歌为自带循环与口型，尚不自动读取歌曲音量驱动嘴型，也不自动把自定义参数对齐歌曲 BPM。工作、蛄蛹等洛天依专用副模型不会混入外部角色；未制作的能力保持关闭。头发可用动作参数摆动，当前外部接口不运行独立物理模拟器。
+- 校验包含目录越界、缺失文件、曲线格式与资源上限：模型最多 64 MiB；1～8 张最大 4096×4096 的 PNG 纹理，合计最多 3200 万像素；1～64 个动作组，每条动作 JSON 最多 1 MiB、时长 0.01～600 秒；所有运行引用合计最多 128 MiB / 160 个文件。校验失败保留上一个成功加载的角色。请使用可信且合法取得的模型。
+
+同目录可提供人格文件，不会因使用 Live2D 而改变现有聊天、存档与投喂机制。放入角色目录后点击“刷新角色”即可选择；无需复制工程文件 `.psd`、`.cmo3` 或 `.psd2live`。模型、美术和安装包仍不随代码上传。
+
 ### 可选静态工作姿势
 
 如果睡觉、手机或工作姿势的头部位置与站姿不同，可在配置顶层添加 `"pose_heads": {"sleep": [0.25, 0.7], "work": [0.5, 0.6]}`，坐标仍相对完整画布。只允许指定已经提供的姿势，缺省继续使用 `anchors.head`；未提供等待图时也继承工作图的头部位置。这用于当前姿势的摸头／点击判定，落地点仍共用 `anchors.feet`，探头仍以待机头部为准。无需把躺姿的头强行摆回站姿位置。
@@ -157,9 +218,9 @@ characters/
 
 移动层只依赖一个循环的 `cycle_seconds` 和同坐标系的 `stride`，输出左右方向及循环经过时间；静态渲染层据此选择单张帧图，后续 Live2D 可用同一时间采样左右步行动作。显示缩放由各自渲染层提供，移动层不读取 PNG、不翻转模型，也不修改 Cubism 参数。
 
-当前 `character.json` 的 `walk` 仅声明 PNG 资源，不能把 `.motion3.json` 填进帧路径。外部 Live2D 角色加载和具体动作绑定仍需后续实现；模型未提供左右步行动作时不会凭空启用移动。内置静态洛天依使用独立的 `assets/character/walk/walk.json`（相同四字段，路径相对该文件目录），避免旧内置姿势图的历史裁切影响序列帧画布。
+当前 `character.json` 顶层的 `walk` 仅声明 PNG 资源，不能把 `.motion3.json` 填进帧路径。外部 Live2D 应在自己的 `action-map.json` 中按下述约定声明步行动作；模型未提供左右步行动作时不会凭空启用移动。内置静态洛天依使用独立的 `assets/character/walk/walk.json`（相同四字段，路径相对该文件目录），避免旧内置姿势图的历史裁切影响序列帧画布。
 
-内置 Live2D 加载器现已支持 `action-map.json` 中的可选声明：
+Live2D 加载器支持 `action-map.json` 中的可选声明：
 
 ```json
 "walk": {"left": "WalkLeft", "right": "WalkRight", "stride": 64}

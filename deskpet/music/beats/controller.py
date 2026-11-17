@@ -186,7 +186,18 @@ class BeatController(QObject):
         self._finish_signal(self._result)
     def cancel(self):
         if self.process:
-            process=self.process;self.process=None;process.blockSignals(True);process.kill();process.waitForFinished(1000);self._dispose_process(process);self.status='分析已取消';self.changed.emit();self._finish_signal(False)
+            process=self.process;self.process=None
+            # Disconnect the analysis callbacks before killing the worker: a late
+            # result must not affect a new analysis. Reap it asynchronously so
+            # cancellation never blocks the UI waiting for process exit.
+            for signal in (process.readyReadStandardOutput,process.finished,process.errorOccurred):
+                signal.disconnect()
+            process.finished.connect(process.deleteLater)
+            process.errorOccurred.connect(lambda error: process.deleteLater()
+                                          if error==QProcess.ProcessError.FailedToStart else None)
+            if process.state()==QProcess.ProcessState.NotRunning:process.deleteLater()
+            else:process.kill()
+            self.status='分析已取消';self.changed.emit();self._finish_signal(False)
     def shutdown(self):self.cancel()
     def create_widget(self,parent=None):
         from PySide6.QtCore import Qt

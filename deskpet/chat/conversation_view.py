@@ -14,9 +14,11 @@ class ConversationView(QTextBrowser):
         super().__init__(parent)
         self.assistant_markdown = assistant_markdown
         self.messages=[];self.live_start=None;self.live_end=None
+        self._live_text = ''
         self.sticker_catalog = None
         self.sticker_movies = {}
         self.sticker_frames = {}
+        self._sticker_positions = {}
         self._follow_latest = True
         self._scrolling_latest = False
         self.latest_scroll = QTimer(self)
@@ -123,9 +125,11 @@ class ConversationView(QTextBrowser):
                 if item is None:
                     body += '<br>[表情图片已不存在]'
                     continue
-                pixmap = QPixmap(str(item.path))
-                if max(pixmap.width(), pixmap.height()) > STICKER_DISPLAY_SIZE:
-                    pixmap = pixmap.scaled(STICKER_DISPLAY_SIZE, STICKER_DISPLAY_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                pixmap = self.sticker_frames.get(key)
+                if pixmap is None:
+                    pixmap = QPixmap(str(item.path))
+                    if max(pixmap.width(), pixmap.height()) > STICKER_DISPLAY_SIZE:
+                        pixmap = pixmap.scaled(STICKER_DISPLAY_SIZE, STICKER_DISPLAY_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 if pixmap.isNull():
                     body += '<br>[表情图片无法读取]'
                     continue
@@ -146,6 +150,22 @@ class ConversationView(QTextBrowser):
             gap='<td width="16%"></td>'
             blocks.append('<table width="100%" cellspacing="0" cellpadding="10"><tr>'+ (gap+bubble if user else bubble+gap) +'</tr></table><p style="margin:4px"></p>')
         self.setHtml(''.join(blocks))
+        # Image positions remain stable while the trailing live reply grows.
+        # Updating a GIF must not invalidate every older message on each frame.
+        self._sticker_positions = {}
+        block = self.document().begin()
+        while self.sticker_frames and block.isValid():
+            fragment_it = block.begin()
+            while not fragment_it.atEnd():
+                fragment = fragment_it.fragment()
+                fmt = fragment.charFormat()
+                if fmt.isImageFormat():
+                    url = QUrl(fmt.toImageFormat().name())
+                    if url.scheme() == 'sticker':
+                        self._sticker_positions.setdefault(url.path(), []).append(
+                            (fragment.position(), fragment.length()))
+                fragment_it += 1
+            block = block.next()
         # Only animate recent GIFs; old messages keep their first frame.
         gif_keys = [key for key in self.sticker_frames if self.sticker_catalog.get(key).animated][-8:]
         for key in gif_keys:
@@ -166,10 +186,12 @@ class ConversationView(QTextBrowser):
             fmt.setBackground(QBrush(QColor(207,235,249,185) if user else QColor(255,255,255,185)))
             cell.setFormat(fmt)
         self.live_start=self.live_end=None
+        self._live_text = ''
         if live:
             cursor=self.document().find(marker)
             self.live_start=cursor.selectionStart();cursor.insertText(live[1])
             self.live_end=cursor.position()
+            self._live_text = live[1]
         bar=self.verticalScrollBar();bar.setValue(bar.maximum())
         self._follow_latest = True
         if self.isVisible():
@@ -191,7 +213,8 @@ class ConversationView(QTextBrowser):
         if self.sticker_movies.get(key) is not movie:
             return
         self.document().addResource(QTextDocument.ImageResource, QUrl('sticker:' + key), movie.currentPixmap())
-        self.document().markContentsDirty(0, self.document().characterCount())
+        for position, length in self._sticker_positions.get(key, ()):
+            self.document().markContentsDirty(position, length)
         self.viewport().update()
 
     def showEvent(self, event):
@@ -211,10 +234,19 @@ class ConversationView(QTextBrowser):
 
     def update_live(self,text):
         if self.live_start is None:return
+        if text == self._live_text:return
         bar=self.verticalScrollBar();follow=bar.maximum()-bar.value()<30
-        cursor=QTextCursor(self.document());cursor.setPosition(self.live_start)
-        cursor.setPosition(self.live_end,QTextCursor.KeepAnchor);cursor.insertText(text)
+        cursor=QTextCursor(self.document())
+        if text.startswith(self._live_text):
+            # The transport sends accumulated text. Append only the new suffix,
+            # avoiding repeated removal/layout of an ever-growing reply.
+            cursor.setPosition(self.live_end)
+            cursor.insertText(text[len(self._live_text):])
+        else:
+            cursor.setPosition(self.live_start)
+            cursor.setPosition(self.live_end,QTextCursor.KeepAnchor);cursor.insertText(text)
         self.live_end=cursor.position()
+        self._live_text = text
         if follow:bar.setValue(bar.maximum())
 
     def createMimeDataFromSelection(self):

@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QObject, QSettings, QUrl, QPoint
 from PySide6.QtGui import QFont, QFontDatabase, QImage, QColor
 from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtTest import QTest
 from deskpet.app import Pet
 from deskpet.music.audio.remote import RemotePlayer
 from deskpet.ui.appearance import APPEARANCE_REVISION
@@ -97,6 +98,10 @@ with tempfile.TemporaryDirectory(prefix='music-companion-') as temporary:
         image.fill(QColor('#245599'));image.save(str(background))
         with patch('deskpet.ui.background_controls.QFileDialog.getOpenFileName', return_value=(str(background), '')):
             pet.panel.choose_background()
+        for _ in range(200):
+            if not companion.window.surface_image.isNull():
+                break
+            QTest.qWait(10)
         assert not companion.window.surface_image.isNull()
         assert companion.background_position_button.isEnabled()
         playlist_crop = BackgroundPlacement(20, 70, 130)

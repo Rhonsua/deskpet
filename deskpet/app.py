@@ -71,6 +71,11 @@ class MusicPanel(BackgroundSurface):
         from deskpet.music.tools.library_storage import LibraryStorage
         self.library_storage = LibraryStorage(self.settings, data_dir)
         self.library = self.library_storage.load(legacy if isinstance(legacy, list) else [legacy])
+        from deskpet.music.tools.file_availability import FileAvailability
+        self.file_availability = FileAvailability(self)
+        self.file_availability.ready.connect(self._files_checked)
+        self.file_status = {}
+        self.file_scan_context = None
         self.queue = PlaybackQueue(self.settings.value('play_mode', 'order'))
         self.queue.reverse = self.settings.value('music/local_reverse', False, type=bool)
         from deskpet.music.tools.alternating import AlternatingPlayback
@@ -299,8 +304,8 @@ class MusicPanel(BackgroundSurface):
         self.playlist_choice.blockSignals(False)
         self.list.clear()
         for path in self.paths:
-            exists = Path(path).is_file()
-            self.list.addItem(('' if exists else '失效 · ') + Path(path).stem)
+            exists = self.file_status.get(path)
+            self.list.addItem(('失效 · ' if exists is False else '') + Path(path).stem)
             self.list.item(self.list.count() - 1).setToolTip(path)
         self.list_stack.setCurrentIndex(1 if self.paths else 0)
         self.queue_label.setText(f'歌单 · {len(self.paths)} 首' if self.paths else '歌单')
@@ -310,6 +315,21 @@ class MusicPanel(BackgroundSurface):
         elif current in self.paths:
             self.list.setCurrentRow(self.paths.index(current))
         self.filter_songs(self.search.text())
+        paths = tuple(self.paths)
+        ticket = self.file_availability.start(paths)
+        self.file_scan_context = (ticket, self.library.active_id, paths)
+
+    def _files_checked(self, ticket, results):
+        context = self.file_scan_context
+        if (context is None or ticket != context[0] or self.library.active_id != context[1]
+                or tuple(self.paths) != context[2]):
+            return
+        self.file_status.update(results)
+        for row, path in enumerate(context[2]):
+            if path in results:
+                item = self.list.item(row)
+                if item is not None and item.toolTip() == path:
+                    item.setText(('' if results[path] else '失效 · ') + Path(path).stem)
 
     def store_library(self):
         if self.queue_owner == self.library.active_id:
@@ -541,20 +561,23 @@ class MusicPanel(BackgroundSurface):
         reward_status = ('今日听歌音符已领满，明天重新累计' if remaining is None else
                          f"再有效听歌 {clock(int(remaining * 1000 + 999))} 可获得 {stats['next_reward_notes']} 音符")
         self.growth.setText(
-            f"等级 {pet['level']} · 经验 {pet['xp']} · 音符 {pet['notes']}\n"
+            f"{pet.get('stage', '等级 ' + str(pet['level']))} · {pet.get('growth_label', '经验')} {pet.get('affinity', pet['xp'])} · 音符 {pet['notes']}\n"
             f"饱食度 {pet['hunger']}/100 · 心情 {pet['mood']}/100\n"
             f"听歌：今日 {clock(int(stats['today'] * 1000))} / "
             f"本周 {clock(int(stats['week'] * 1000))} / 累计 {clock(int(stats['total'] * 1000))}\n"
             f"今日听歌已获 {stats['reward_notes']}/{stats['reward_limit']} 音符\n{reward_status}"
         )
-        self.experience.setRange(0, 50 + 20 * (pet['level'] - 1))
+        self.experience.setRange(0, pet.get('xp_goal', 50 + 20 * (pet['level'] - 1)))
         self.experience.setValue(pet['xp'])
         if hasattr(self.pet, 'toolbar'):
             self.pet.toolbar.refresh()
         previous = getattr(self, 'previous_level', pet['level'])
-        if pet['level'] > previous and hasattr(self.pet, 'react'):
+        growth_mod = 'stage' in pet
+        if (not growth_mod and not getattr(self, 'previous_growth_mod', False)
+                and pet['level'] > previous and hasattr(self.pet, 'react')):
             self.pet.react('happy', 3, f"升级啦！现在是 {pet['level']} 级！")
         self.previous_level = pet['level']
+        self.previous_growth_mod = growth_mod
 
     def feed(self, food):
         success, message = self.store.feed(food)
@@ -782,6 +805,8 @@ class MusicPanel(BackgroundSurface):
             if not self.autoplay_requested or self._local_ended:
                 return
             self._local_ended = True
+            if self.playback_source=='local' and self.current_path():
+                self.store.emit('song_end',source='local:'+str(Path(self.current_path()).absolute()))
             if self.alternating.advance('local'):
                 return
             index = self.queue.advance(ended=True)
@@ -808,7 +833,7 @@ class MusicPanel(BackgroundSurface):
 
     def closeEvent(self, event):
         self.save()
-        event.accept()
+        super().closeEvent(event)
 
 
 class Pet(DesktopPet):
