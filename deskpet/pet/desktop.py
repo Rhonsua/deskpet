@@ -11,7 +11,8 @@ from PySide6.QtWidgets import (
     QProgressBar, QSlider, QSystemTrayIcon, QVBoxLayout, QWidget, QCheckBox,
 )
 
-from deskpet.pet.store import FOODS
+from deskpet.pet.catalog import FOOD_BY_NAME, ITEMS, QUICK_FOODS
+from deskpet.ui.shop_art import draw_accessory, draw_background
 from deskpet.ui.appearance import (sprite_bounds, update_cover, preferred_variant,
                           APPEARANCE_REVISION, BUILTIN_APPEARANCES)
 from deskpet.ui.theme import CONTROL_STYLE, apply_light_palette
@@ -220,10 +221,12 @@ class PetToolbar(QFrame):
             elif item.widget():
                 item.widget().deleteLater()
         if name == 'food':
-            for food, (cost, *_rest) in FOODS.items():
+            for food in QUICK_FOODS:
+                cost = FOOD_BY_NAME[food].price
                 button = QPushButton(f'{food}     {cost} 音符')
                 button.clicked.connect(lambda checked=False, value=food: self.pet.panel.feed(value))
                 self.content.addWidget(button)
+            self.add_button('＋  打开天依的小铺', lambda: self.pet.panel.open_shop())
         elif name == 'music':
             title = self.pet.panel.song_title.text()
             self.music_title = QLabel(title)
@@ -389,7 +392,9 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         self.live2d_mask_region = None
         self.anchors = dict(DEFAULT_ANCHORS)
         self.head_region = QRegion()
+        self.panorama_layer = None
         self.panel = panel_factory(self)
+        self.refresh_shop_appearance()
         self.init_activity_area()
         self.init_walk()
         self.init_teleport()
@@ -431,9 +436,8 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         menu.addAction('聊天', self.open_chat)
         menu.addAction('扩展功能 / Mod', self.open_mods)
         menu.addAction('设置', lambda: self.open_tools(2))
-        menu.addAction('显示 B站播放网页', lambda: self.panel.bilibili.send({'cmd': 'show'})
-                       if self.panel.bilibili.active else self.open_tools(3))
-        menu.addAction('B站网页最小化到托盘', lambda: self.panel.bilibili.send({'cmd': 'hide'}))
+        menu.addAction('显示 B站播放网页', lambda: self.panel.bilibili.show_page())
+        menu.addAction('B站网页最小化到托盘', lambda: self.panel.bilibili.hide_page())
         self.passthrough_action = menu.addAction('鼠标穿透')
         self.passthrough_action.setCheckable(True)
         self.passthrough_action.toggled.connect(self.set_mouse_passthrough)
@@ -446,6 +450,22 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         self.refresh_activity_area_controls()
         self.set_mouse_passthrough(self.panel.settings.value('mouse_passthrough', False, type=bool))
         QTimer.singleShot(1800, self.restore_companion)
+
+    def refresh_shop_appearance(self):
+        settings = self.panel.store.shop_settings()
+        background = ITEMS.get(settings['background'])
+        accessory = ITEMS.get(settings['accessory'])
+        self.shop_background = background.key if background and background.category == 'background' else ''
+        self.shop_accessory = accessory.key if accessory and accessory.category == 'accessory' else ''
+        if self.panorama_layer is not None and self.panorama_layer.key != self.shop_background:
+            self.panorama_layer.close()
+            self.panorama_layer.deleteLater()
+            self.panorama_layer = None
+        if background and background.panoramic and self.panorama_layer is None:
+            from deskpet.ui.panorama import DesktopPanorama
+            self.panorama_layer = DesktopPanorama(self, background)
+            self.panorama_layer.sync()
+        self.update()
 
     def restore_companion(self):
         """Restore opted-in companionship after the initial pet render."""
@@ -798,9 +818,10 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
             painter.setTransform(transform)
             painter.drawPixmap(0, 0, pixmap)
+            head = QRect(bounds.left(), bounds.top(), round(bounds.width() * .58), bounds.height())
+            draw_accessory(painter, self.shop_accessory, head)
             painter.resetTransform()
             self.hit_region = transform.map(mask).intersected(QRegion(self.rect()))
-            head = QRect(bounds.left(), bounds.top(), round(bounds.width() * .58), bounds.height())
             self.head_region = transform.map(QRegion(head, QRegion.RegionType.Ellipse))
             self.effects.capture_crawl(pixmap, transform)
             return
@@ -818,13 +839,14 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.setTransform(transform)
         painter.drawPixmap(0, 0, pixmap)
-        painter.resetTransform()
-        self.hit_region = transform.map(mask).intersected(QRegion(self.rect()))
         head = (QRect(42, 405, 118, 140) if activity == 'sleep' else
                 QRect(13, 384, 166, 163) if activity == 'phone' else QRect(75, 15, 230, 220))
         if spec:
             x, y, w, h = spec.head_for(activity)
             head = QRect(round(384*x), round(576*y), round(384*w), round(576*h))
+        draw_accessory(painter, self.shop_accessory, head)
+        painter.resetTransform()
+        self.hit_region = transform.map(mask).intersected(QRegion(self.rect()))
         self.head_region = transform.map(QRegion(head, QRegion.RegionType.Ellipse))
 
     def prepare_frames(self):
@@ -1076,6 +1098,7 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         self.react('happy', words=random.choice(['嘿嘿，好开心呀！', '有你在，今天也很开心！', '和你待在一起真好～']))
 
     def reward_pat(self):
+        self.panel.store.award_daily_notes('headpat')
         self.panel.store.emit('headpat')
         now = time.monotonic()
         if now - self.last_pat >= 60:
@@ -1560,6 +1583,8 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
             self.resize(round(260 * self.scale), round(310 * self.scale))
         self.update()
         self.effects.sync()
+        if self.panorama_layer is not None:
+            self.panorama_layer.sync()
 
     def paintEvent(self, event):
         # Replace the backing buffer, including pixels occupied by the previous pose.
@@ -1572,6 +1597,8 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         elapsed = self.behavior.elapsed
         activity = self.display_activity()
         painter.setOpacity(self.teleport_controller.visual.person)
+        draw_background(painter, self.shop_background, self.size(), self.scale, now,
+                        self.dock_reveal if self.dock_edge else 1.)
         if self.live2d_renderer is not None:
             self.paint_live2d(painter, activity)
             self.paint_petting_contact_region(painter)
@@ -1663,13 +1690,18 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
             painter.drawEllipse(QPointF(image.width() * 0.29, image.height() * 0.79),
                                 (1 + tap * 4) * scale, (1 + tap * 4) * scale)
             painter.restore()
-        painter.resetTransform()
-        mask = transform.map(local_mask)
         if self.character_pack:
             head_x, head_y = self.character_pack.head_for(key)
             head_box = QRect(round((head_x - .24) * image.width()), round((head_y - .2) * image.height()),
                              round(.48 * image.width()), round(.4 * image.height()))
             self.head_region = transform.map(QRegion(head_box, QRegion.RegionType.Ellipse))
+        elif resting:
+            head_box = QRect(0, round(image.height() * .12), round(image.width() * .48), round(image.height() * .77))
+        else:
+            head_box = QRect(round(image.width() * .11), 0, round(image.width() * .78), round(image.height() * .39))
+        draw_accessory(painter, self.shop_accessory, head_box)
+        painter.resetTransform()
+        mask = transform.map(local_mask)
         self.hit_region = mask.intersected(QRegion(self.rect()))
         self.paint_teleport(painter)
         painter.end()
@@ -1817,7 +1849,11 @@ class DesktopPet(ActivityAreaRuntime, TeleportRuntime, WalkRuntime, QWidget):
         if (event.type() == QEvent.Type.UngrabMouse
                 and getattr(self, 'dragging', False)):
             self.cancel_interrupted_drag()
-        return super().event(event)
+        handled = super().event(event)
+        if (getattr(self, 'panorama_layer', None) is not None
+                and event.type() in (QEvent.Move, QEvent.Resize, QEvent.Show, QEvent.Hide, QEvent.WindowStateChange)):
+            self.panorama_layer.sync()
+        return handled
 
     def showEvent(self, event):
         super().showEvent(event)

@@ -82,7 +82,7 @@ class AlternatingTests(unittest.TestCase):
             self.end_local()
             self.assertEqual(p.playback_source, 'web')
             self.assertEqual(self.web.current_url, self.urls[expected_web])
-            self.assertTrue(self.web.pending_load['background'])
+            self.assertFalse(self.web.pending_show)
             self.assertFalse(p.autoplay_requested)
             token = self.web.latch.token
             self.end_web()
@@ -308,7 +308,7 @@ class AlternatingTests(unittest.TestCase):
         self.assertEqual(reopened.bilibili.process.state(), QProcess.ProcessState.NotRunning)
         reopened.toggle()
         self.assertEqual(reopened.bilibili.pending_load['url'], self.urls[0])
-        self.assertTrue(reopened.bilibili.pending_load['background'])
+        self.assertFalse(reopened.bilibili.pending_show)
         reopened.step(1)
         self.assertEqual(reopened.current_path(), self.local[1])
 
@@ -389,34 +389,72 @@ class AlternatingTests(unittest.TestCase):
         self.web.toggle()
         self.assertEqual(self.web.current_url, self.urls[1])
 
-    def test_enabling_alternation_hides_active_window_and_pending_load(self):
+    def test_explicit_show_during_startup_follows_load_once(self):
         self.web.play_row(0)
-        self.assertFalse(self.web.pending_load['background'])
-        with patch.object(self.web, 'send') as send:
-            self.panel.set_alternating(True)
-            send.assert_called_once_with({'cmd': 'hide'})
-        self.assertTrue(self.web.pending_load['background'])
-
-    def test_background_launch_is_used_for_cold_start_and_worker_restart(self):
-        self.panel.set_alternating(True)
-        self.web.play_row(0)
-        with patch.object(self.web.process, 'start'):
-            # Exercise the real launch method without starting a browser here.
-            self.web.start_process = lambda: self.start_web_process(self.web)
-            self.web.start_process()
-            self.assertIn('--start-hidden', self.web.process.arguments())
-            self.web.process_finished()
-            self.assertIn('--start-hidden', self.web.process.arguments())
-            self.assertTrue(self.web.hidden)
-
-    def test_existing_worker_receives_background_flag_when_switching_tracks(self):
-        self.panel.set_alternating(True)
-        self.web.ready = True
-        with patch.object(self.web.process, 'state', return_value=QProcess.ProcessState.Running), \
+        with patch.object(self.web.process, 'state', return_value=QProcess.ProcessState.Starting), \
                 patch.object(self.web, 'send') as send:
+            self.web.show_page()
+            self.web.show_page()
+            send.assert_not_called()
+            self.web.handle_event({'type': 'ready'})
+            self.web.send_pending()
+        self.assertEqual([call.args[0]['cmd'] for call in send.call_args_list], ['load', 'show'])
+
+    def test_hiding_before_ready_cancels_only_the_show(self):
+        self.web.play_row(0)
+        with patch.object(self.web.process, 'state', return_value=QProcess.ProcessState.Starting), \
+                patch.object(self.web, 'send') as send:
+            self.web.show_page()
+            self.panel.set_alternating(True)
+            self.web.handle_event({'type': 'ready'})
+        self.assertEqual([call.args[0]['cmd'] for call in send.call_args_list], ['load'])
+
+    def test_stop_discards_show_and_old_ready_cannot_show_the_next_song(self):
+        self.web.play_row(0)
+        with patch.object(self.web.process, 'state', return_value=QProcess.ProcessState.Running), \
+                patch.object(self.web, 'send') as send, patch.object(self.web.process, 'start'):
+            self.web.show_page()
+            self.web.stop()
             self.web.play_row(1)
-            self.assertTrue(send.call_args.args[0]['background'])
-            self.assertEqual(send.call_args.args[0]['url'], self.urls[1])
+            self.web.handle_event({'type': 'ready'})
+            send.assert_called_once_with({'cmd': 'close'})
+            self.web.start_process = lambda: self.start_web_process(self.web)
+            self.web.process_finished()
+            self.assertTrue(self.web.hidden)
+            self.web.handle_event({'type': 'ready'})
+        self.assertEqual([call.args[0]['cmd'] for call in send.call_args_list], ['close', 'load'])
+        self.assertEqual(send.call_args.args[0]['url'], self.urls[1])
+
+    def test_explicit_show_while_idle_opens_page_without_starting_music(self):
+        self.panel.play_row(0)
+        with patch.object(self.web, 'start_process') as launch, patch.object(self.web, 'send') as send:
+            self.web.show_page()
+            launch.assert_called_once_with()
+            self.web.handle_event({'type': 'ready'})
+            send.assert_called_once_with({'cmd': 'show'})
+        self.assertFalse(self.web.active)
+        self.assertEqual(self.panel.playback_source, 'local')
+
+    def test_opening_page_after_a_failed_launch_does_not_play_a_stale_track(self):
+        self.web.play_row(0)
+        with patch.object(self.web.process, 'error', return_value=QProcess.ProcessError.FailedToStart):
+            self.web.process_error()
+        with patch.object(self.web, 'send') as send:
+            self.web.show_page()
+            self.web.handle_event({'type': 'ready'})
+            send.assert_called_once_with({'cmd': 'show'})
+
+    def test_existing_worker_changes_tracks_without_changing_visibility(self):
+        self.web.ready = True
+        for hidden in (True, False):
+            with self.subTest(hidden=hidden), \
+                    patch.object(self.web.process, 'state', return_value=QProcess.ProcessState.Running), \
+                    patch.object(self.web, 'send') as send:
+                self.web.hidden = hidden
+                self.web.play_row(1)
+                self.assertEqual(send.call_count, 1)
+                self.assertEqual(send.call_args.args[0]['cmd'], 'load')
+                self.assertEqual(self.web.hidden, hidden)
 
 
 if __name__ == '__main__':

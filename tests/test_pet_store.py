@@ -136,6 +136,100 @@ class PetStoreTests(unittest.TestCase):
         self.assertFalse(self.store.interact(self.start))
         self.assertEqual(self.store.pet()['mood'], 90)
 
+    def test_daily_interaction_notes_restart_and_independent_listening_cap(self):
+        self.listen(130 * 60)
+        for kind, amount in (('headpat', 6), ('chat', 6), ('game', 10)):
+            self.assertEqual(self.store.award_daily_notes(kind, self.start), amount)
+        self.store.close()
+        self.store = PetStore(self.path)
+        for kind in ('headpat', 'chat', 'game'):
+            self.assertEqual(self.store.award_daily_notes(kind, self.start), 0)
+        self.assertEqual(self.store.stats(self.start)['reward_notes'], 100)
+        self.assertEqual(self.store.stats(self.start)['companion_notes'], 22)
+        tomorrow = self.start + timedelta(days=1)
+        self.assertEqual(self.store.award_daily_notes('chat', tomorrow), 6)
+        self.assertEqual(self.store.stats(tomorrow)['daily_interactions'], {'chat': 6})
+
+    def test_company_notes_split_midnight_resume_and_stop_at_thirty_minutes(self):
+        midnight = datetime(2026, 10, 18)
+        for n in range(119):
+            self.store.tick_running(5, midnight - timedelta(seconds=601 - 5*n))
+        self.store.tick_running(3, midnight - timedelta(seconds=3))
+        self.store.tick_running(4, midnight + timedelta(seconds=2))
+        self.assertEqual(self.store.stats(midnight - timedelta(seconds=1))['daily_interactions'], {'company': 4})
+        self.assertEqual(self.store.stats(midnight)['companion_seconds'], 2)
+        self.store.tick_running(3600, midnight + timedelta(hours=1))
+        self.store.close()
+        self.store = PetStore(self.path)
+        for n in range(370):
+            self.store.tick_running(5, midnight + timedelta(seconds=7 + 5*n))
+        stats = self.store.stats(midnight)
+        self.assertEqual((stats['companion_seconds'], stats['companion_notes'], stats['reward_notes']), (1800, 12, 0))
+        self.assertEqual(self.store.pet()['notes'], 36)
+
+    def test_concurrent_daily_claims_share_one_wallet_credit(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        both = Barrier(2)
+        def claim():
+            wallet = PetStore(self.path)
+            try:
+                both.wait(timeout=5)
+                return wallet.award_daily_notes('chat', self.start)
+            finally:
+                wallet.close()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(claim) for _ in range(2)]
+            self.assertEqual(sorted(f.result() for f in futures), [0, 6])
+        self.assertEqual(self.store.pet()['notes'], 26)
+
+    def test_auto_meal_crosses_strict_threshold_and_never_counts_as_manual_feed(self):
+        events = []
+        self.store.event_listener = lambda kind, data: events.append(kind)
+        with self.store.db:
+            self.store.db.execute('UPDATE pet SET hunger=10, runtime=1798, notes=8')
+        self.assertIsNone(self.store.tick_running(1, self.start))
+        self.assertEqual(self.store.pet()['hunger'], 10)
+        self.assertEqual(self.store.tick_running(1, self.start).key, 'bao')
+        self.assertEqual((self.store.pet()['notes'], self.store.pet()['hunger'], self.store.pet()['xp']), (0, 20, 0))
+        self.assertEqual(events, [])
+        self.assertEqual(self.store.db.execute('SELECT COUNT(*) FROM daily').fetchone()[0], 0)
+        self.store.close()
+        self.store = PetStore(self.path)
+        self.assertIsNone(self.store.tick_running(1, self.start))
+        self.assertEqual(self.store.db.execute('SELECT COUNT(*) FROM ledger').fetchone()[0], 1)
+
+    def test_auto_meal_waits_for_notes_and_respects_switch(self):
+        with self.store.db:
+            self.store.db.execute('UPDATE pet SET hunger=0,notes=7')
+        self.assertIsNone(self.store.tick_running(1))
+        self.store.set_auto_meal(False)
+        with self.store.db:
+            self.store.db.execute('UPDATE pet SET notes=8')
+        self.assertIsNone(self.store.tick_running(1))
+        self.store.set_auto_meal(True)
+        self.assertEqual(self.store.tick_running(1).name, '小包子')
+        self.assertEqual((self.store.pet()['notes'], self.store.pet()['hunger']), (0, 15))
+
+    def test_shop_gifts_and_permanent_items_share_wallet(self):
+        self.assertFalse(self.store.buy_item('encore')[0])
+        self.assertEqual(self.store.shop_settings()['background'], 'picnic')
+        self.assertTrue(self.store.buy_item('pinwheel')[0])
+        self.assertEqual((self.store.pet()['notes'], self.store.pet()['mood']), (14, 76))
+        with self.store.db:
+            self.store.db.execute('UPDATE pet SET notes=200')
+        for key in ('bow', 'cloudsky', 'cloudsky'):
+            self.assertTrue(self.store.buy_item(key)[0])
+        self.assertEqual(self.store.pet()['notes'], 50)
+        self.assertTrue(self.store.buy_item('cloudsky', remove=True)[0])
+        self.assertEqual(self.store.shop_settings()['background'], '')
+        self.store.close()
+        self.store = PetStore(self.path)
+        self.assertEqual(self.store.shop_settings()['accessory'], 'bow')
+        self.assertIn('cloudsky', self.store.shop_owned())
+        self.assertTrue(self.store.buy_item('cloudsky')[0])
+        self.assertEqual(self.store.pet()['notes'], 50)
+
 
 if __name__ == '__main__':
     unittest.main()

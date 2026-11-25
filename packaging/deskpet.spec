@@ -40,6 +40,13 @@ for package in ('ziamath', 'ziafont', 'latex2mathml'):
 for package in ('mistune', 'ziamath', 'ziafont', 'latex2mathml'):
     datas += copy_metadata(package)
 datas.append((str(root / 'assets' / 'icons' / 'tianyi.ico'), 'assets/icons'))
+from deskpet.pet.catalog import ITEMS as shop_items
+for item in shop_items.values():
+    images = (item.image, item.panorama_image) if item.panoramic else (item.image,)
+    for path in images:
+        if not path.is_file():
+            raise ValueError('Missing desktop shop image: ' + str(path))
+        datas.append((str(path), str(path.parent.relative_to(root))))
 sticker_root = root / 'assets/stickers'
 sticker_catalog = json.loads((sticker_root / 'catalog.json').read_text(encoding='utf-8'))
 datas.append((str(sticker_root / 'catalog.json'), 'assets/stickers'))

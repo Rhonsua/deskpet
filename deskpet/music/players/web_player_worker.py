@@ -18,13 +18,26 @@ def emit(event):
     print(PREFIX + json.dumps(event, ensure_ascii=True), flush=True)
 
 
+def prepare_hidden_player(window):
+    # pywebview 6.2.1's WinForms backend calls Show, then Hide, even for
+    # hidden=True. Bootstrap only this form's WebView2 handle instead. Its
+    # "shown" event is also the readiness gate for navigation and teardown.
+    form = window.native
+
+    def initialize_handle():
+        del form.Show
+        _ = form.webview.Handle
+        window.events.shown.set()
+
+    form.Show = initialize_handle
+
+
 def run():
     import webview
     commands = queue.Queue()
     closed = threading.Event()
     script = (Path(__file__).parent / 'bilibili_probe.js').read_text(encoding='utf-8')
     self_test = '--self-test' in sys.argv
-    start_hidden = '--start-hidden' in sys.argv
     fixture = reload_fixture = ''
     if self_test:
         import base64
@@ -96,9 +109,21 @@ def run():
             if '--self-test-reload' in sys.argv:
                 fixture = fixture.replace('ignoreReset = true', 'ignoreReset = 4').replace(
                     'ignoreReset = false; return;', 'ignoreReset -= 1; return;')
-    window = webview.create_window('天依 · B站播放', html='<p>正在准备播放窗口…</p>',
+    window = webview.create_window('天依 · B站播放', html='<p>请在桌宠的 B 站歌单中选择歌曲播放。</p>',
                                    width=1024, height=720, min_size=(640, 480),
-                                   hidden=start_hidden, focus=not (self_test or start_hidden))
+                                   hidden=True, focus=not self_test)
+    window.events.before_show += prepare_hidden_player
+    if self_test:
+        def observe_visibility():
+            form = window.native
+
+            def report(*_):
+                emit({'type': 'test-native-visibility', 'visible': bool(form.Visible)})
+
+            form.VisibleChanged += report
+            report()
+
+        window.events.before_show += observe_visibility
     window.events.closed += lambda: closed.set()
     minimizing = threading.Event()
     def on_minimize():
@@ -147,7 +172,7 @@ def run():
         dropped_test_reply = False
         desired_volume = 0.6
         started, next_probe, requested_play = 0, 0, False
-        hidden, last_playing = start_hidden, False
+        hidden, last_playing = True, False
         tail, replay = TailCompletion(), ReplayRecovery()
         from deskpet.music.players.bilibili_account import AccountBridge
         account = AccountBridge(window, webview, emit)
@@ -174,10 +199,6 @@ def run():
                 except ValueError as error:
                     emit({'type': 'error', 'token': item.get('token'), 'message': str(error)})
                     continue
-                if item.get('background'):
-                    hidden = True
-                    window.hide()
-                    emit({'type': 'visibility', 'hidden': True})
                 restart = selected == current and item.get('restart') and window.events.loaded.is_set()
                 if restart and not self_test:
                     try:
@@ -207,8 +228,6 @@ def run():
                     window.load_html(fixture)
                 else:
                     window.load_url(current)
-                    if not hidden:
-                        window.show()
             elif kind in ('play', 'pause', 'seek'):
                 command = kind
                 seek_position = item.get('position') if kind == 'seek' else None
@@ -231,7 +250,7 @@ def run():
                 window.hide()
                 minimizing.clear()
                 emit({'type': 'visibility', 'hidden': True})
-            elif kind == 'minimize':
+            elif kind == 'minimize' and not hidden:
                 minimizing.set()
                 window.minimize()
                 continue

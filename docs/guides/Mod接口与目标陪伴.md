@@ -109,8 +109,11 @@ class Mod:
 | `library()` | 返回已有本地歌单路径和文件名标题，不下载、不更改歌单；不存在或元数据不合适的音频由扩展跳过。 |
 | `analysis(parent)` | 返回使用本 Mod 独立缓存目录的可取消 BeatController；分析在子进程完成，扩展负责并发限制和生命周期。 |
 | `audio_claim() / audio_valid(token) / audio_release(token)` | 互斥的互动音频租约。普通播放中不能申请；扩展需持续检查普通播放、有效令牌和自身状态，失效停止自己的播放器。 |
+| `audio_claim_mixed()` | 可选接口。允许互动与普通歌单同时播放，各互动共用一个租约，通过 `audio_valid` 检查并以 `audio_release` 释放。已发布的 0.7.2 主程序仅提供上一行的接口。 |
+| `audio_preferences()` | 可选接口。返回桌宠音量（0～1）和用户选择的输出设备 ID，空 ID 表示跟随系统。 |
 | `audio_route(audio, parent)` | 返回遵循宿主输出设置的 AudioRouter，关闭时停止其轮询。 |
 | `shop(catalog)` | 注册商品 ID 到整数音符价格（0～10000）的映射；只列实际可提供的商品。 |
+| `game_completed()` | 可选。当前启用的成长扩展在有效游戏成绩落盘后调用。宿主统一结算当日首局的 10 音符，返回本次实际发放数量。 |
 | `buy(item) / owned()` | 返回 `(成功, 说明)` / 已拥有 ID；扣款与购买记录在同一事务，已拥有不重复扣款；停用不能再购买。 |
 
 API 3 的 `listen` 在有效时附带 `track.source/position/duration`（秒）；`song_end` 是本地自然结束，`drag_end` 附轻晃幅度 `sway`。覆盖率与会话去重由扩展自行维护，不能把结束事件直接视为完整听完。当前歌曲完整纪念仅对本地可核验的音频启用。`snapshot` 另有 `hunger/notes`，均为只读。

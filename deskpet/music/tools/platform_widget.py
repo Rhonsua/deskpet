@@ -88,5 +88,8 @@ class MusicPlatformWidget(QWidget):
                 widget.shutdown()
 
     def hideEvent(self, event):
-        self.cancel()
+        # A minimized window still owns its provider's pending phone login.
+        # Each visible provider handles its own spontaneous hide event.
+        if not (event.spontaneous() and self.window().isMinimized()):
+            self.cancel()
         super().hideEvent(event)

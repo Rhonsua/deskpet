@@ -955,6 +955,9 @@ class ChatWindow(StickerChat, LookupChat, ChatSurface):
                 return False
             self.pending = None
             self.clear_lookup()
+            wallet = getattr(self.pet.panel, 'store', None)
+            if hasattr(wallet, 'award_daily_notes'):
+                wallet.award_daily_notes('chat')
             host = getattr(self.pet, 'mod_host', None)
             if host is not None and hasattr(host, 'services'):
                 host.services.emit('chat')

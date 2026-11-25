@@ -14,6 +14,28 @@
 
 ## 制作与存放
 
+`ui/shop/` 收录 2026-11-25 使用 ImageGen 为本项目绘制的 Q 版商店素材。十二件物品和四套静态布景来自两张透明图集。云端练歌台、荷塘萤夜、糖星彩排夜来自第三张全幅场景图，三个场景分别转换为 512 × 640 的 WebP。它们以糖果色、圆润的粗描边与两级色块塑造小物，软件为整幅场景叠加流云与纸飞机、萤火与水纹、追光与上升的音符。商品卡和桌面共用这些图像。商品分类与选购方式参考 [VPet 的商店布局](https://github.com/LorisYounger/VPet/blob/main/VPet-Simulator.Windows/WinDesign/winBetterBuy.xaml)。
+
+「云上八音街」由内置 ImageGen 绘制。全景原画位于 `ui/shop/panoramas/musicbox-town.webp`（1672 × 941），商店预览使用 `ui/shop/musicbox-town.webp`（640 × 360）。画面采用浅薄荷、薰衣草和杏色的水粉，左侧是留声机唱片铺，中间是运河拱桥，右侧是音乐盒亭和摩天轮。圆窗和透明边缘由桌宠实时绘制。
+
+<details>
+<summary>云上八音街的生成提示词</summary>
+
+```text
+Use case: illustration-story. Illustration for a premium Q版 chibi desktop pet shop landscape called 云上八音街.
+A continuous full-bleed extra-wide 16:9 landscape map illustration (2560x1440 if available) of a music-box canal town in the clouds, in soft late-afternoon light.
+Left: a mint-roofed little music shop with a brass gramophone horn, blue ceramic pots and a winding cobblestone footpath.
+Middle: a duck-egg-blue canal with a little cream arched footbridge and gentle reflections.
+Right: a hilltop music-box pavilion and a ferris wheel with pastel gondolas as the scene recedes.
+Lower foreground has lavender flower planters, tiny balconies and the canal bank, upper quarter has distant lavender rooftops, small clouds and blue haze.
+Each part is its own small discovery when looking through a moving circular peephole; spread distinguishable landmarks across the full width and make all four corners interesting.
+Soft gouache on lightly textured paper, rounded toy-like chibi proportions, confident fine dusky-teal linework and warm creams, muted mint greens, sky blues with apricot and lavender highlights.
+Hand-drawn game background matching cute Chinese rhythm-game merchandise. Calm legible silhouettes and deeper foreground value; airy, uncluttered, detailed enough to zoom.
+Print-ready horizontal landscape, landscape art fills every edge. Only scenery, no people, no pets, no typography, no logos, no frames, no vignette, no circular mask. The program will do the mask.
+```
+
+</details>
+
 已生成并接入 `character/tianyi-master-v1.png`，为透明 Q 版洛天依母版。详细提示词与使用记录见 `character/素材记录.md`。当前动画为整图浮动和摇摆，尚不是分层或序列帧动画。
 
 静态角色当前仅使用精致版。简单（圆润）版 `character/tianyi-simple-v3-costume.png` 已移出可选角色和打包清单，仅保留本地历史素材。旧版文件留档，服装参考和编辑提示词见 `character/V3公式服修正.md`。

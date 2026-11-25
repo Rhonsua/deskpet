@@ -21,7 +21,8 @@ def clock(ms):
     return f"{seconds // 60:02}:{seconds % 60:02}"
 
 
-from deskpet.pet.store import PetStore
+from deskpet.pet.store import DAILY_COMPANION_LIMIT, PetStore
+from deskpet.pet.catalog import ITEMS
 from deskpet.ui.compact import build, COMPACT_STYLE, COMPACT_GLASS_STYLE
 from deskpet.pet.desktop import DesktopPet
 from deskpet.music.tools.library import MusicLibrary, PlaybackQueue, MODES
@@ -56,6 +57,7 @@ class MusicPanel(BackgroundSurface):
         self.characters_dir = Path(characters_dir) if characters_dir is not None else character_directory()
         self.engine = None
         self.store = PetStore(data_dir / "pet.db")
+        self.shop = None
         self.last_tick = time.monotonic()
         self.last_position = None
         self.last_source = None
@@ -403,9 +405,7 @@ class MusicPanel(BackgroundSurface):
             widget.setChecked(bool(enabled))
             widget.blockSignals(False)
         if enabled and self.bilibili.active:
-            if self.bilibili.pending_load is not None:
-                self.bilibili.pending_load['background'] = True
-            self.bilibili.send({'cmd': 'hide'})
+            self.bilibili.hide_page()
         if self.playback_source in ('local', 'web'):
             key = self.current_path() if self.playback_source == 'local' else self.bilibili.current_url
             if key:
@@ -565,12 +565,16 @@ class MusicPanel(BackgroundSurface):
             f"饱食度 {pet['hunger']}/100 · 心情 {pet['mood']}/100\n"
             f"听歌：今日 {clock(int(stats['today'] * 1000))} / "
             f"本周 {clock(int(stats['week'] * 1000))} / 累计 {clock(int(stats['total'] * 1000))}\n"
-            f"今日听歌已获 {stats['reward_notes']}/{stats['reward_limit']} 音符\n{reward_status}"
+            f"今日听歌已获 {stats['reward_notes']}/{stats['reward_limit']} 音符\n{reward_status}\n"
+            f"今日陪伴与互动已获 {stats['companion_notes']}/{DAILY_COMPANION_LIMIT} 音符"
         )
         self.experience.setRange(0, pet.get('xp_goal', 50 + 20 * (pet['level'] - 1)))
         self.experience.setValue(pet['xp'])
         if hasattr(self.pet, 'toolbar'):
             self.pet.toolbar.refresh()
+        shop = getattr(self, 'shop', None)
+        if shop is not None and shop.isVisible():
+            shop.refresh(pet, stats)
         previous = getattr(self, 'previous_level', pet['level'])
         growth_mod = 'stage' in pet
         if (not growth_mod and not getattr(self, 'previous_growth_mod', False)
@@ -585,6 +589,31 @@ class MusicPanel(BackgroundSurface):
         if hasattr(self.pet, 'feed_reaction'):
             self.pet.feed_reaction(success, message)
         self.refresh_growth()
+        return success, message
+
+    def open_shop(self):
+        from deskpet.ui.shop import PetShop
+        if self.shop is None:
+            self.shop = PetShop(self)
+        if hasattr(self.pet, 'toolbar'):
+            self.pet.toolbar.hide()
+        self.shop.showNormal()
+        self.shop.raise_()
+        self.shop.activateWindow()
+
+    def buy_shop_item(self, key, *, remove=False):
+        item = ITEMS[key]
+        if item.category == 'food':
+            return self.feed(item.name)
+        success, message = self.store.buy_item(key, remove=remove)
+        if success:
+            if item.category == 'gift':
+                self.pet.react('happy', 2.4, f'谢谢你送我的{item.name}！')
+            else:
+                self.pet.refresh_shop_appearance()
+        self.status.setText(message)
+        self.refresh_growth()
+        return success, message
 
     def sample(self):
         now = time.monotonic()
@@ -610,7 +639,13 @@ class MusicPanel(BackgroundSurface):
             self.position_changed(position)
             self.time.setText(f'{clock(position)} / {clock(duration)}')
         if 0 < elapsed <= 3:
-            self.store.tick_running(elapsed)
+            meal = self.store.tick_running(elapsed)
+            if meal:
+                message = f'花了 {meal.price} 个音符，给自己买了个{meal.name}。吃饱了一点！'
+                self.status.setText(message)
+                if (hasattr(self.pet, 'bubble') and not self.pet.bubble.isVisible()
+                        and self.pet.press_point is None and self.pet.display_activity() in ('idle', 'listen')):
+                    self.pet.react('eat', 2.8, message, automatic=True)
             if (playing and source and source == self.last_source and self.last_position is not None
                     and not self.seek.isSliderDown()):
                 advance = (position - self.last_position) / 1000

@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 from PySide6.QtCore import QObject, QTimer, Signal, Qt
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QTabWidget, QWidget
 
 from deskpet.music.tools.platform_widget import MusicPlatformWidget
 from deskpet.music.kugou.widget import KugouWidget
@@ -70,6 +70,32 @@ class PlatformTests(unittest.TestCase):
         self.assertEqual(panel.current_provider, 'netease')
         with self.assertRaises(ValueError):
             panel.set_provider('other')
+
+    def test_phone_login_survives_minimize_through_the_music_window(self):
+        from deskpet.music.netease.browser_login import BrowserLogin
+        with tempfile.TemporaryDirectory() as directory, patch.object(BrowserLogin, 'start', autospec=True) as start:
+            window = QTabWidget()
+            self.addCleanup(window.deleteLater)
+            panel = MusicPlatformWidget(Path(directory)/'netease', factories={'kugou': Page})
+            window.addTab(panel, '在线音乐')
+            window.show()
+            self.app.processEvents()
+            page = panel.current_widget
+            start.side_effect = lambda login: setattr(login, 'active', True)
+            page.begin_browser_login()
+            window.showMinimized()
+            self.app.processEvents()
+            self.assertTrue(page._browser_current() and page.browser_login.active)
+            window.showNormal()
+            self.app.processEvents()
+            with patch.object(BrowserLogin, 'request_check') as check:
+                page.begin_browser_login()
+                check.assert_called_once()
+            start.assert_called_once()
+            panel.set_provider('kugou')
+            self.assertFalse(page._browser_current() or page.browser_login.active)
+            window.close()
+            panel.shutdown()
 
 
 class KugouTests(unittest.TestCase):

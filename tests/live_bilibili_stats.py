@@ -131,7 +131,6 @@ def main():
                 data_dir=Path(scratch) / 'data',
                 settings=QSettings(str(Path(scratch) / 'test.ini'), QSettings.Format.IniFormat))
             web = panel.bilibili
-            web.worker_args = ['--start-hidden']
             panel.volume.setValue(0)
             current = None
             original_handler, original_send = web.handle_event, web.send
@@ -156,7 +155,7 @@ def main():
 
             def send(value):
                 if value.get('cmd') == 'load':
-                    value = dict(value, volume=0, background=True)
+                    value = dict(value, volume=0)
                 original_send(value)
             web.handle_event, web.send = receive, send
 

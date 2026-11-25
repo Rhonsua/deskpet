@@ -61,8 +61,11 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-loops-', ignore_cleanup_erro
         if '--background' in sys.argv:
             panel.set_alternating(True)
         opening_positions = []
+        native_visibility = []
         original_handler = web.handle_event
         def capture_opening(value):
+            if value.get('type') == 'test-native-visibility':
+                native_visibility.append(value['visible'])
             if value.get('type') == 'state' and value.get('has_video'):
                 opening_positions.append(value.get('position', 0))
             original_handler(value)
@@ -72,10 +75,16 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-loops-', ignore_cleanup_erro
         if '--slow-start' in sys.argv or '--lost-reply' in sys.argv:
             assert web.metrics['position'] > 3, 'late readiness / lost reply must preserve the intro already played'
             assert all(b >= a - .1 for a, b in zip(opening_positions, opening_positions[1:])), opening_positions
+        assert web.hidden
+        if '--live' not in sys.argv:
+            assert native_visibility == [False], native_visibility
         if '--background' in sys.argv:
-            assert web.hidden and '--start-hidden' in web.process.arguments()
             panel.set_alternating(False)
         pid = web.process.processId()
+        web.show_page()
+        wait(lambda: not web.hidden)
+        if '--live' not in sys.argv:
+            assert native_visibility == [False, True], native_visibility
         web.send({'cmd': 'minimize'})
         wait(lambda: web.hidden)
         if '--history' in sys.argv:
@@ -118,7 +127,7 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-loops-', ignore_cleanup_erro
             wait(lambda: web.latch.token != token and web.playing)
             assert web.queue.index == 0 and web.hidden and web.process.processId() == pid
             assert web.metrics['position'] < 2, 'single loop must restart from zero'
-        web.send({'cmd': 'show'})
+        web.show_page()
         wait(lambda: not web.hidden)
         if '--background' in sys.argv:
             # Reuse the already visible worker when a new alternating turn begins.
@@ -127,7 +136,7 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-loops-', ignore_cleanup_erro
             wait(lambda: web.hidden and web.playing)
             assert web.process.processId() == pid
             panel.set_alternating(False)
-        web.send({'cmd': 'hide'})
+        web.hide_page()
         wait(lambda: web.hidden)
         web.mode.setCurrentIndex(web.mode.findData('loop'))
         web.step(1)

@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QProgressBar, QCheckBox, QScrollArea, QFrame,
 )
 from deskpet.music.tools.library import MODES
-from deskpet.pet.store import FOODS
+from deskpet.pet.catalog import FOOD_BY_NAME, QUICK_FOODS
 from deskpet.ui.theme import CONTROL_STYLE, style_combo, apply_light_palette
 from deskpet.music.players.bilibili_player import BilibiliPlayer
 from deskpet.ui.appearance import BUILTIN_APPEARANCES, preferred_variant
@@ -214,12 +214,14 @@ def build(panel):
     panel.experience.setFixedHeight(6)
     panel.experience.setTextVisible(False)
     growth.addWidget(panel.experience)
-    reward_help = text('每天前 60 分钟有效听歌，每满 5 分钟得 6 音符，之后每 5 分钟得 2 音符。每日最多 100 音符。\n'
-                       '暂停、拖动进度和播放器静音时不累计奖励进度。', True)
+    reward_help = text('听歌每日最多 100 音符。摸头、聊天、累计陪伴和养成小游戏另有奖励。\n'
+                       '在小铺点「赚音符」可查看每项奖励和今天的进度。', True)
     reward_help.setWordWrap(True)
     growth.addWidget(reward_help)
-    for name, (cost, *_rest) in FOODS.items():
+    for name in QUICK_FOODS:
+        cost = FOOD_BY_NAME[name].price
         growth.addWidget(action(f'投喂{name} · {cost} 音符', lambda checked=False, food=name: panel.feed(food)))
+    growth.addWidget(action('＋  打开天依的小铺', panel.open_shop))
     growth.addStretch()
 
     settings_page = QScrollArea()

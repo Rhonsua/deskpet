@@ -34,13 +34,19 @@ class SynchronizedReplyTests(unittest.TestCase):
 
     def test_optional_mod_sees_only_committed_reply_once(self):
         with self.voiced() as (window, callbacks):
+            from deskpet.pet.store import PetStore
+            wallet = PetStore(':memory:')
+            self.addCleanup(wallet.close)
+            window.pet.panel.store = wallet
             emit = Mock()
             window.pet.mod_host = NS(services=NS(emit=emit, memory_context=lambda:''))
             self.complete(window)
+            self.assertEqual(wallet.pet()['notes'], 20)
             emit.assert_not_called()
             self.assertTrue(callbacks[0]())
             self.assertFalse(callbacks[0]())
             emit.assert_called_once_with('chat')
+            self.assertEqual(wallet.pet()['notes'], 26)
 
     def test_text_store_and_bubble_wait_then_publish_once(self):
         with self.voiced() as (window, callbacks):

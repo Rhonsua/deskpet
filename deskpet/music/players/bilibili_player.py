@@ -31,7 +31,8 @@ class BilibiliPlayer(QWidget):
         self.current_url = saved_url if saved_url in urls else ''
         if self.current_url:
             self.queue.reset(urls, urls.index(self.current_url))
-        self.hidden = False
+        self.hidden = True
+        self.pending_show = False
         self.active = self.playing = self.ready = self.closing = False
         self.requested_play = False
         self.play_intent_pending = False
@@ -121,7 +122,7 @@ class BilibiliPlayer(QWidget):
         self.mode.currentIndexChanged.connect(self.change_mode)
         self.reverse_toggle.setEnabled(self.queue.mode != 'shuffle')
         tools.addWidget(self.mode)
-        for name, callback in [('移除', self.remove), ('显示网页', lambda: self.send({'cmd': 'show'})),
+        for name, callback in [('移除', self.remove), ('显示网页', self.show_page),
                                 ('停止', self.stop)]:
             button = QPushButton(name)
             button.clicked.connect(callback)
@@ -129,16 +130,16 @@ class BilibiliPlayer(QWidget):
         layout.addLayout(tools)
         windows = QHBoxLayout()
         minimize = QPushButton('最小化到托盘')
-        minimize.clicked.connect(lambda: self.send({'cmd': 'hide'}))
+        minimize.clicked.connect(self.hide_page)
         windows.addWidget(minimize)
         layout.addLayout(windows)
-        self.note = QLabel('网页声音使用 Windows 默认输出；登录或验证请在播放网页完成。')
+        self.note = QLabel('B站歌曲默认在后台播放。点击“显示网页”可查看播放页或完成登录。')
         self.note.setWordWrap(True)
         self.note.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.note)
         self.render()
         self.alternate_toggle = QCheckBox('本地 / B站轮流循环')
-        self.alternate_toggle.setToolTip('与音乐页当前本地歌单轮流播放，每边一首；切到 B站时默认收起网页，音乐继续。')
+        self.alternate_toggle.setToolTip('与当前本地歌单轮流播放，每边一首。切到 B站时会直接在后台播放。')
         self.alternate_toggle.setChecked(self.settings.value('music/alternate_sources', False, type=bool))
         self.alternate_toggle.toggled.connect(lambda enabled: self.owner.set_alternating(enabled))
         layout.insertWidget(1, self.alternate_toggle)
@@ -316,12 +317,11 @@ class BilibiliPlayer(QWidget):
         self.playbackChanged.emit(False)
         alternating = getattr(self.owner, 'alternating', None)
         self.pending_load = {'cmd': 'load', 'url': self.current_url, 'token': self.latch.token,
-                             'volume': self.owner.volume.value() / 100, 'restart': restart, 'autoplay': True,
-                             'background': bool(alternating and alternating.enabled)}
+                             'volume': self.owner.volume.value() / 100, 'restart': restart, 'autoplay': True}
         if alternating is not None:
             alternating.remember('web', self.current_url)
         self.save()
-        self.note.setText('正在打开 B站网页；如果未自动播放，请在网页点一次播放。')
+        self.note.setText('正在载入 B站歌曲…')
         if self.process.state() == QProcess.ProcessState.NotRunning:
             self.start_process()
         elif self.ready and not self.closing:
@@ -329,7 +329,7 @@ class BilibiliPlayer(QWidget):
 
     def start_process(self):
         self.ready = self.closing = False
-        self.hidden = bool(self.pending_load and self.pending_load.get('background')) or bool(self.pending_account and not self.pending_load)
+        self.hidden = True
         self.buffer = ''
         environment = QProcessEnvironment.systemEnvironment()
         environment.insert('PYTHONIOENCODING', 'utf-8')
@@ -337,8 +337,20 @@ class BilibiliPlayer(QWidget):
         self.process.setProcessEnvironment(environment)
         program, arguments = worker_command('web')
         self.process.setProgram(program)
-        self.process.setArguments(arguments + self.worker_args + (['--start-hidden'] if self.hidden else []))
+        self.process.setArguments(arguments + self.worker_args)
         self.process.start()
+
+    def show_page(self):
+        self.pending_show = True
+        if self.process.state() == QProcess.ProcessState.NotRunning:
+            self.start_process()
+        elif self.ready and not self.closing:
+            self.send_pending()
+
+    def hide_page(self):
+        self.pending_show = False
+        if self.ready and not self.closing:
+            self.send({'cmd': 'hide'})
 
     def send(self, value):
         if self.process.state() != QProcess.ProcessState.NotRunning:
@@ -348,6 +360,9 @@ class BilibiliPlayer(QWidget):
         if self.pending_load:
             self.send(self.pending_load)
             self.pending_load = None
+        if self.pending_show:
+            self.send({'cmd': 'show'})
+            self.pending_show = False
         if self.pending_account:
             self.send(self.pending_account)
             self.pending_account = None
@@ -430,14 +445,15 @@ class BilibiliPlayer(QWidget):
         if kind == 'visibility':
             self.hidden = bool(value.get('hidden'))
             if self.hidden:
-                self.note.setText('播放网页已收起到桌宠托盘，音乐继续；点击“显示网页”可恢复。')
+                self.note.setText('播放网页在后台运行。点击“显示网页”可查看。')
             return
         if kind == 'diagnostic':
             self.diagnostic = value
             return
         if kind == 'ready':
             self.ready = True
-            self.send_pending()
+            if not self.closing:
+                self.send_pending()
             return
         if kind == 'fatal':
             self.account_error()
@@ -499,6 +515,7 @@ class BilibiliPlayer(QWidget):
         self.requested_play = False
         self.play_intent_pending = False
         self.pending_load = None
+        self.pending_show = False
         self.metrics = {}
         self.playbackChanged.emit(False)
         self.note.setText('网页播放已停止')
@@ -522,18 +539,22 @@ class BilibiliPlayer(QWidget):
 
     def process_finished(self, *_):
         self.ready = False
-        if (self.active and self.pending_load) or (self.pending_account and self.closing):
+        self.hidden = True
+        if (self.active and self.pending_load) or (self.closing and (self.pending_account or self.pending_show)):
             self.start_process()
-        elif self.active:
+            return
+        self.pending_show = False
+        if self.active:
             self.active = self.playing = False
             self.playbackChanged.emit(False)
             self.note.setText('播放网页已关闭，自动播放已停止')
-            self.account_error()
-        else:
-            self.account_error()
+        self.account_error()
 
     def process_error(self, *_):
         if self.process.error() == QProcess.ProcessError.FailedToStart:
+            self.pending_load = None
+            self.pending_show = False
+            self.requested_play = self.play_intent_pending = False
             self.account_error()
             self.active = self.playing = False
             self.playbackChanged.emit(False)

@@ -27,9 +27,13 @@ def _arm_wave(seconds, phase_offset=0.0):
     within = seconds % (burst + PAUSE_SECONDS)
     if within >= burst:
         return 0.5
-    # A small offset keeps the hands alive without turning the pose into a wave.
+    # Enter and leave the pause at rest. The third flap is smaller as the
+    # character catches her balance, while the hands reverse at different times.
+    attack = _smoothstep(within / .11)
+    release = _smoothstep((burst - within) / .16)
+    amplitude = .42 * attack * release * (1 - .22 * _smoothstep(within / burst))
     edge_taper = math.sin(math.pi * within / burst) ** 2
-    return 0.5 + 0.42 * math.sin(math.tau * FLAPS_PER_SECOND * within + phase_offset * edge_taper)
+    return 0.5 + amplitude * math.sin(math.tau * FLAPS_PER_SECOND * within + phase_offset * edge_taper)
 
 
 def sample_lift_reaction(seconds):
@@ -148,9 +152,13 @@ class LiftReactionOverlay:
             self.last_lift_seconds = None
         else:
             # Docking and interrupted actions can exit lift without a landing.
-            for key in LIFT_ARM_IDS + (LIFT_FEAR_ID,):
+            # Standing gestures can use these same shoulder joints. Each frame
+            # starts from its own motion, so a previous lift never leaks into it.
+            for key in LIFT_ARM_IDS:
                 if key in supported:
-                    output[key] = 0.0
+                    output.setdefault(key, 0.0)
+            if LIFT_FEAR_ID in supported:
+                output[LIFT_FEAR_ID] = 0.0
             self.release_values = {}
             # Retain the last lift clock through edge-dock's temporary idle
             # frames so a pull-back can be distinguished from a fresh drag.

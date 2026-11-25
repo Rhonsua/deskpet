@@ -21,11 +21,14 @@ class InteractionServices:
             panel=lambda summary, actions: self.register_panel(owner, summary, actions),
             library=self.library, analysis=lambda parent: self.analysis(owner, parent),
             audio_claim=lambda: self.audio_claim(owner),
+            audio_claim_mixed=lambda: self.audio_claim(owner, mixed=True),
+            audio_preferences=self.audio_preferences,
             audio_valid=lambda token: self.audio_owner == (owner, token),
             audio_release=lambda token: self.audio_release(owner, token),
             audio_route=self.audio_route,
             shop=lambda catalog: self.shops.update({owner:dict(catalog)}),
             buy=lambda item: self.buy(owner,item), owned=lambda: self.owned(owner),
+            game_completed=lambda: self.game_completed(owner),
             present=lambda destination: self.present(owner,destination),
             act=lambda action: self.act(owner, action))
 
@@ -100,10 +103,15 @@ class InteractionServices:
         from deskpet.music.beats.controller import BeatController
         return BeatController(self.host.manager.data_dir/owner/'analysis',parent)
 
-    def audio_claim(self, owner):
+    def audio_claim(self, owner, *, mixed=False):
         from uuid import uuid4
-        if not self.host.manager.is_enabled(owner) or self.snapshot()['playing'] or self.audio_owner:return None
+        if not self.host.manager.is_enabled(owner) or self.audio_owner:return None
+        if not mixed and self.snapshot()['playing']:return None
         token=uuid4().hex;self.audio_owner=(owner,token);return token
+
+    def audio_preferences(self):
+        panel = self.host.pet.panel
+        return panel.volume.value() / 100, panel.settings.value('audio_output_id', '')
 
     def audio_release(self, owner, token):
         if self.audio_owner == (owner,token):self.audio_owner=None
@@ -121,6 +129,11 @@ class InteractionServices:
 
     def owned(self, owner):
         return self.host.pet.panel.store.mod_owned(owner)
+
+    def game_completed(self, owner):
+        if self.growth_owner != owner or not self.host.manager.is_enabled(owner):
+            return 0
+        return self.host.pet.panel.store.award_daily_notes('game')
 
     def emit(self, kind, data=None):
         data = dict(data or {})

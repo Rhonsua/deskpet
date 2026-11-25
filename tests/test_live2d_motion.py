@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from threading import Event
 from unittest.mock import patch
@@ -84,6 +87,38 @@ class Live2DMotionTests(unittest.TestCase):
         self.assertEqual(curve.sample(2), 3)
         with self.assertRaises(ValueError):
             Curve([0, 0, 1, .8, 0, .1, 1, 1, 1])
+
+    def test_cubic_returns_exact_key_and_samples_restricted_time_handles(self):
+        curve = Curve([0, 0, 1, .1, 10, .2, 20, .3, 30,
+                      1, .31, 40, .45, 40, .6, 50])
+        self.assertEqual(curve.sample(0), 0)
+        self.assertEqual(curve.sample(.3), 30)
+        self.assertAlmostEqual(curve.sample(.12), 12)
+
+    def test_singing_phrase_uses_playback_clock_and_keeps_external_authored_motion(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            mapping = {'model': 'model.json', 'activities': {'sing': 'SingPhrase', 'turn': 'TurnWithMic'},
+                       'integrationRules': {'resetParameters': {}}}
+            model = {'FileReferences': {'Motions': {group: [{'File': 'clip.json'}]
+                                                   for group in ('SingPhrase', 'TurnWithMic', 'SingTurn')}}}
+            clip = {'Meta': {'Duration': 4.8, 'Loop': True}, 'Curves': [
+                {'Target': 'Parameter', 'Id': 'ParamLiftArmR', 'Segments': [0, 0, 0, 2.4, 1, 0, 4.8, 0]}]}
+            for name, data in [('action-map.json', mapping), ('model.json', model), ('clip.json', clip)]:
+                (root/name).write_text(json.dumps(data), encoding='utf-8')
+            lib = MotionLibrary(root)
+            self.assertEqual(lib.group_for('turn'), 'TurnWithMic')
+            for beat in (2, 10, 18, 26, 34):
+                sample = {'available': True, 'beat_index': beat, 'phase': .25}
+                synced, _ = lib.sample('sing', 91.77, sample)
+                free, _ = lib.sample('sing', (beat % 32 + .25) * .6)
+                self.assertEqual(synced, free)
+                self.assertIn('ParamLegLSwing', synced)
+            mapping['profile'] = 'character'
+            (root/'action-map.json').write_text(json.dumps(mapping), encoding='utf-8')
+            external = MotionLibrary(root)
+            self.assertEqual(external.sample('sing', .2, sample), external.sample('sing', .2))
+            self.assertNotIn('ParamLegLSwing', external.sample('sing', .2)[0])
 
     @unittest.skipUnless((MODEL_ROOT / 'action-map.json').is_file(), 'local model assets are not distributed with source')
     def test_every_activity_resets_other_pose_groups(self):

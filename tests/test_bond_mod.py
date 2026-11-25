@@ -225,6 +225,17 @@ class BondIntegrationTests(unittest.TestCase):
         MusicPanel.refresh_growth(panel)
         self.pet.react.assert_called_once()
 
+    def test_music_games_share_one_daily_wallet_reward(self):
+        mod = self.enable()
+        judge = SimpleNamespace(score=500000, best=5, perfect=5, good=0, misses=5, holds=0)
+        mod.store.complete_round('rhythm-first', 'chart-a', '练习', judge)
+        mod.store.complete_round('quiz-next', 'chart-b', '猜歌', judge, kind='quiz')
+        mod.store.complete_round('quiz-next', 'chart-b', '猜歌', judge, kind='quiz')
+        self.assertEqual(self.pet_store.stats()['daily_interactions'], {'game': 10})
+        self.assertEqual(self.pet_store.pet()['notes'], 30)
+        self.manager.set_enabled('bond', False)
+        self.assertEqual(self.services.for_mod('bond').game_completed(), 0)
+
     def test_actual_combo_and_persona_facts(self):
         mod = self.enable()
         self.pet_store.emit('headpat');self.pet_store.feed('小包子')
@@ -303,6 +314,19 @@ class BondIntegrationTests(unittest.TestCase):
         self.assertIsNone(self.services.audio_claim('bond'))
         self.manager.set_enabled('bond',False);self.app.processEvents()
         self.assertEqual(self.services.panel_items(),[]);self.assertIsNone(self.services.audio_owner)
+
+    def test_mixed_lease_coexists_with_regular_music_and_respects_other_activities(self):
+        api=self.enable().services
+        self.pet.playing=True
+        self.assertIsNone(api.audio_claim())
+        token=api.audio_claim_mixed();self.assertTrue(token)
+        self.assertIsNone(api.audio_claim_mixed())
+        self.pet.playing=False
+        self.assertTrue(api.audio_valid(token));self.assertIsNone(api.audio_claim())
+        self.pet.panel.settings.setValue('audio_output_id','test-device')
+        self.assertEqual(api.audio_preferences(),(.5,'test-device'))
+        self.manager.set_enabled('bond',False)
+        self.assertFalse(api.audio_valid(token));self.assertIsNone(api.audio_claim_mixed())
 
     def test_need_quiet_real_response_and_daily_quota(self):
         mod=self.enable()

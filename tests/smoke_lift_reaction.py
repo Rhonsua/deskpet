@@ -1,4 +1,5 @@
-"""Candidate Live2D + Qt integration; synthetic events, not real-input acceptance."""
+"""Exercise drag and release with Qt. Use --installed to check the active desktop model."""
+import argparse
 import os
 from pathlib import Path
 import sys
@@ -6,9 +7,12 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-STAGE = ROOT/'experiments/live2d-tianyi/lift-model'
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--installed', action='store_true')
+installed = parser.parse_args().installed
+STAGE = ROOT / ('assets/live2d/tianyi' if installed else 'experiments/live2d-tianyi/lift-model')
 if not (STAGE/'action-map.json').exists():
-    raise SystemExit('Candidate Cubism export is required for this local integration check.')
+    raise SystemExit('A local Cubism export is required for this integration check.')
 
 from PySide6.QtCore import QEvent, QPoint, QSettings, Qt
 from PySide6.QtWidgets import QApplication
@@ -99,7 +103,10 @@ with tempfile.TemporaryDirectory(prefix='integration-', dir=output) as temp:
             pet.behavior.tick(.4)
             restored = draw()
             assert pet.behavior.mode == mode and pet.behavior.activity == mode
-            assert restored['ParamLiftArmL'] == restored['ParamLiftArmR'] == 0
+            pose, _ = pet.live2d_renderer.motions.sample(mode, pet.behavior.activity_elapsed,
+                                                        pet.current_music_beat(mode))
+            for arm in ('ParamLiftArmL', 'ParamLiftArmR'):
+                assert abs(restored[arm] - pose.get(arm, 0)) < 1e-5, (mode, arm)
 
         pet.set_mode('idle')
         grab()
@@ -115,7 +122,7 @@ with tempfile.TemporaryDirectory(prefix='integration-', dir=output) as temp:
         assert pet.set_variant('refined')
         assert not pet.dragging and pet.behavior.mode == 'idle'
         pet.grab()
-        print('PASS: candidate native renderer + synthetic Qt pickup/release; four saved modes, '
+        print('PASS: native renderer + synthetic Qt pickup/release; four saved modes, '
               'stationary arm animation, hidden/lost-grab/character-switch cleanup. '
               'Real desktop input is checked separately.')
     finally:

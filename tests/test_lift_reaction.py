@@ -81,6 +81,25 @@ class LiftReactionTests(unittest.TestCase):
         self.assertEqual(later['ParamEyeLOpen'], 0)
         self.assertAlmostEqual(later['ParamMouthOpenY'], .6)
 
+    def test_greeting_uses_its_own_shoulders_after_an_interrupted_lift(self):
+        overlay = LiftReactionOverlay()
+        overlay.apply('lift', .5, NEUTRAL, PARAMETER_IDS)
+        wave = dict(NEUTRAL, ParamLiftArmR=.72, ParamLiftArmL=.05)
+        response = overlay.apply('mouse_wave', .8, wave, PARAMETER_IDS)
+        self.assertEqual(response['ParamLiftArmR'], .72)
+        self.assertEqual(response['ParamLiftArmL'], .05)
+        self.assertEqual(response['ParamLiftFear'], 0)
+        self.assertEqual(overlay.apply('idle', 0, NEUTRAL, PARAMETER_IDS)['ParamLiftArmR'], 0)
+
+    def test_flaps_enter_and_leave_the_pause_at_rest(self):
+        burst = FLAPS_PER_BURST / FLAPS_PER_SECOND
+        for t in (LIFT_START_SECONDS, LIFT_START_SECONDS + burst,
+                  LIFT_START_SECONDS + burst + PAUSE_SECONDS):
+            for arm in ARM_IDS:
+                current = sample_lift_reaction(t)[arm]
+                for delta in (-.0001, .0001):
+                    self.assertLess(abs((sample_lift_reaction(t + delta)[arm] - current) / delta), .02)
+
     def test_landing_releases_last_sample_by_025_then_clears(self):
         overlay = LiftReactionOverlay()
         overlay.apply('idle', 1, NEUTRAL, PARAMETER_IDS)

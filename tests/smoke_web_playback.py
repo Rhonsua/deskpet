@@ -38,6 +38,15 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-test-') as scratch:
     web = panel.bilibili
     panel.pet.panel = panel
     web.worker_args = ['--self-test']
+    native_visibility = []
+    handle_event = web.handle_event
+
+    def observe_window(event):
+        if event.get('type') == 'test-native-visibility':
+            native_visibility.append(event['visible'])
+        handle_event(event)
+
+    web.handle_event = observe_window
     panel.volume.setValue(0)
     try:
         web.input.setText('https://example.com/video/BV1xx411c7mu')
@@ -65,6 +74,7 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-test-') as scratch:
         wait_for(lambda: not web.active)
         wait_for(lambda: web.process.state() == QProcess.ProcessState.NotRunning)
         assert '播完' in web.note.text()
+        assert native_visibility == [False], ('window appeared during chat playback', native_visibility)
         assert not panel.pet.playing
         assert panel.store.stats()['total'] > 0, 'playback time is still recorded while muted'
         assert panel.store.stats()['reward_notes'] == 0, 'silent playback must not earn notes'
@@ -82,6 +92,7 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-test-') as scratch:
                 '-i', 'anullsrc=r=44100:cl=mono', '-t', '2', '-codec:a', 'libmp3lame', str(song)],
                 check=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         panel.import_paths([str(song) for song in songs])
+        native_visibility.clear()
         panel.set_alternating(True)
         panel.play_row(0)
         wait_for(lambda: panel.playback_source == 'local' and panel.player.position() > 200)
@@ -94,7 +105,8 @@ with tempfile.TemporaryDirectory(prefix='tianyi-web-test-') as scratch:
         panel.autoplay_requested = False
         panel.player.pause()
         panel.set_alternating(False)
-        print('PASS: real silent MP3 -> WebView2 -> next MP3 -> WebView2 -> local wrap')
+        assert native_visibility == [False, False], ('window appeared during source changes', native_visibility)
+        print('PASS: real silent MP3 -> WebView2 -> next MP3 -> WebView2 -> local wrap, zero native window shows')
     finally:
         web.watchdog.stop()
         web.shutdown()

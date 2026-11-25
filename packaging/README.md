@@ -1,8 +1,8 @@
 # Windows 安装包
 
-## 当前版本：0.7.2
+## 当前版本 0.7.3
 
-发布后可从 [GitHub 发行页](https://github.com/Rhonsua/deskpet/releases/tag/v0.7.2) 下载 `TianyiPet-0.7.2-Setup.exe`，退出旧桌宠后安装。版本号以 `deskpet/version.py` 为准；安装包不会自动包含后续源码修改。
+退出旧桌宠后，运行 `TianyiPet-0.7.3-Setup.exe` 安装。构建版本号以 `deskpet/version.py` 为准。[GitHub 发行页](https://github.com/Rhonsua/deskpet/releases/tag/v0.7.3)
 
 安装包包含 Python、Qt、Live2D 运行依赖和当前洛天依素材，排除 Miku、自定义角色、Mod 本体、个人音乐、聊天记录、API 配置及语音模型。语音模型和 GPT-SoVITS 环境单独准备，见[语音包说明](../deskpet/speech/README.md)。B站播放需要 Microsoft Edge WebView2 Runtime，登录或验证由用户在网页完成。
 
@@ -30,7 +30,7 @@
 
 ```powershell
 .\.venv\Scripts\python.exe -B packaging/build_installer.py --output-dir local-work/size-optimization
-.\.venv\Scripts\python.exe -B tests/smoke_installer_payload.py local-work/size-optimization/TianyiPet-0.7.2-Setup.exe
+.\.venv\Scripts\python.exe -B tests/smoke_installer_payload.py local-work/size-optimization/TianyiPet-0.7.3-Setup.exe
 .\.venv\Scripts\python.exe -B -m unittest tests.test_installer_payload
 ```
 
@@ -38,14 +38,14 @@
 
 输出按当前版本命名：
 
-- `dist/TianyiPet-0.7.2-Setup.exe`：安装包。
+- `dist/TianyiPet-0.7.3-Setup.exe` 为本版安装包。
 - `dist/SHA256SUMS.txt`：发行附件校验值。
 - `dist/TianyiPet/`：构建后的程序目录。
 - `build/`：可重新生成的构建中间文件。
 
 目标陪伴与工作人设 Mod 分别通过 `packaging/build_goal_mod.py`、`packaging/build_work_persona_mod.py` 构建为独立 ZIP。语音安装助手位于 `packaging/voice_setup/`，与桌宠安装包和语音模型分别分发。
 
-互动养成增强包通过 `packaging/build_bond_mod.py` 构建，当前产物为 `TianyiPet-BondCompanion-0.3.2.zip`。需要 0.7.2 主程序的 Mod API 3。将 ZIP 中的 `bond` 文件夹解压到「扩展功能 / Mod → 打开 Mod 文件夹」所打开的目录，重启并启用。小游戏音符奖励需要带「赚音符」的新版桌宠本体。
+互动养成增强包通过 `packaging/build_bond_mod.py` 构建，当前产物为 `TianyiPet-BondCompanion-0.3.2.zip`。它使用 0.7.2 起提供的 Mod API 3，小游戏的每日音符奖励需要 0.7.3 主程序。将 ZIP 中的 `bond` 文件夹解压到「扩展功能 / Mod → 打开 Mod 文件夹」所打开的目录，重启并启用。
 
 ## 检查与清理
 

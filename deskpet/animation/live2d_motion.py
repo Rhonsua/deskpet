@@ -24,14 +24,20 @@ class Curve:
     def __init__(self, segments):
         self.times, self.values, self.kinds = [segments[0]], [segments[1]], []
         self.controls = []
+        self._linear_time_segments = set()
         index = 2
         while index < len(segments):
             kind = segments[index]
             controls = None
             if kind == 1:
                 _, x1, y1, x2, y2, end, value = segments[index:index + 7]
-                if not self.times[-1] <= x1 <= x2 <= end:
+                start = self.times[-1]
+                if not start <= x1 <= x2 <= end:
                     raise ValueError('Live2D 曲线控制点时间必须递增')
+                third = (end - start) / 3
+                tolerance = min(1e-8, third * 1e-5)
+                if abs(x1 - start - third) <= tolerance and abs(end - x2 - third) <= tolerance:
+                    self._linear_time_segments.add(len(self.kinds))
                 controls = (x1, y1, x2, y2)
                 index += 7
             elif kind in (0, 2, 3):
@@ -57,10 +63,16 @@ class Curve:
         if self.kinds[i] == 3:
             return self.values[i + 1]
         if self.kinds[i] == 1:
+            if seconds == self.times[i]:
+                return self.values[i]
             x1, y1, x2, y2 = self.controls[i]
             def cubic(a, b, c, d, t):
                 s = 1 - t
                 return s*s*s*a + 3*s*s*t*b + 3*s*t*t*c + t*t*t*d
+            if i in self._linear_time_segments:
+                # Restricted Cubism handles make time affine along the curve.
+                t = (seconds - self.times[i]) / (self.times[i + 1] - self.times[i])
+                return cubic(self.values[i], y1, y2, self.values[i + 1], t)
             low, high = 0.0, 1.0
             for _ in range(24):
                 t = (low + high) / 2
@@ -158,8 +170,9 @@ class MotionLibrary:
             return getattr(self.walk_spec, activity[5:])
         if self.generic:
             return self.mapping['activities'].get(activity, 'Idle')
-        # The checked singing candidate includes head/body yaw and microphone singing.
-        if activity == 'sing':
+        # Older Tianyi maps still name the pre-turn singing clip.
+        if (activity == 'sing' and 'SingTurn' in self.references
+                and self.mapping['activities'].get('sing') in ('Sing', 'SingEnhanced', None)):
             return 'SingTurn'
         if activity == 'head_rub':
             return 'Idle'
@@ -215,7 +228,13 @@ class MotionLibrary:
             self.cache[group] = self._read_motion(self.root / self.references[group][0]['File'])
         meta, curves = self.cache[group]
         duration = meta['Duration']
-        seconds = max(0, seconds)
+        singing_phrase = not self.generic and activity == 'sing' and group == 'SingPhrase'
+        beat_position = beat_values(beat) if singing_phrase else None
+        # The upper-body clip loops every eight beats. Keep the full 32-beat
+        # clock for the feet, including when seeking or resuming playback.
+        choreography_time = ((beat_position[0] % 32 + beat_position[1]) * .6
+                             if beat_position else elapsed)
+        seconds = choreography_time
         if activity == 'mouse_wave':
             seconds = min(duration, elapsed*duration/2.4)
         seconds = seconds % duration if meta.get('Loop') and duration else min(seconds, duration)
@@ -226,7 +245,9 @@ class MotionLibrary:
                 parameters[key] = curve.sample(seconds)
             elif target == 'PartOpacity':
                 parts[key] = curve.sample(seconds)
-        if group == 'SingTurn' and not self.generic:
+        if singing_phrase:
+            parameters = apply_footwork(parameters, choreography_time)
+        elif group == 'SingTurn' and not self.generic:
             # Match the PNG singing cycle's front/left/right rhythm, with smooth
             # direction holds and the model's authored head/body yaw endpoints.
             turn_time = singing_beat_time(seconds, beat) if activity == 'sing' else seconds
