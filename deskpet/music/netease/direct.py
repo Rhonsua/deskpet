@@ -37,7 +37,7 @@ def validate_url(url):
     return url
 
 
-def _valid_value(value):
+def valid_cookie_value(value):
     return (isinstance(value, str) and len(value) <= 16384
             and all(0x21 <= ord(char) <= 0x7e and char not in '\\",;' for char in value))
 
@@ -49,7 +49,7 @@ def cookie_values(cookie):
     for segment in cookie.split(';'):
         name, separator, value = segment.strip().partition('=')
         if separator and name in COOKIE_NAMES:
-            if not _valid_value(value):
+            if not valid_cookie_value(value):
                 raise ValueError('直连会话凭据格式无效。')
             if value:
                 result[name] = value
@@ -123,7 +123,7 @@ def response_cookie(previous, headers):
                 domain = morsel['domain'].lower().lstrip('.')
                 if domain not in ('', 'music.163.com', '163.com') or morsel['path'] not in ('', '/'):
                     continue
-                if not _valid_value(morsel.value):
+                if not valid_cookie_value(morsel.value):
                     continue
                 if not morsel.value or morsel['max-age'] == '0':
                     values.pop(name, None)

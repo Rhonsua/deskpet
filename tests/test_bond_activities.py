@@ -8,7 +8,8 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock,patch
-from PySide6.QtCore import Qt,QEvent,QThread,Signal
+from PySide6.QtCore import Qt,QEvent,QThread,Signal,QUrl,QSettings
+from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import QApplication
 from deskpet.mods.bond.store import BondStore
 from deskpet.mods.bond.activities import GuessGame,WeeklyShow
@@ -57,13 +58,90 @@ class ActivityTests(unittest.TestCase):
         d.error('测试中断');d.player.finished.emit()
         self.assertFalse(d.complete);self.assertEqual(self.store.db.execute('SELECT COUNT(*) FROM shows').fetchone()[0],0)
 
-    def test_player_pause_keeps_clock_and_manual_music_wins(self):
-        p=ClipPlayer(self.mod,None);self.addCleanup(p.stop)
-        p.live=True;p.loaded=True;p.token='token';p.offset=0;p.duration=30;p.last_position=-1;p.last_advance=0
-        with patch.object(p.player,'pause'),patch.object(p.player,'play'):
-            p.toggle_pause();self.assertTrue(p.paused);p.tick();self.assertTrue(p.live)
-            self.mod.services.snapshot.return_value['playing']=True;p.tick();self.assertFalse(p.live)
+    def test_music_switch_and_pause_do_not_revoke_an_activity(self):
+        player=ClipPlayer(self.mod,None);self.addCleanup(player.stop)
+        native=Mock()
+        native.position.return_value=3500
+        native.playbackState.return_value=QMediaPlayer.PlayingState
+        native.source.return_value=QUrl()
+        player.engine=Mock(player=native)
+        self.assertTrue(player.claim())
+        player.live=player.loaded=player.seek_sent=True
+        player.offset=0;player.duration=8;player.last_position=-1
+        player.next_preferences=player.last_advance=time.monotonic()+1
+        self.mod.services.snapshot.return_value['playing']=True
+        player.toggle_pause();player.tick()
+        self.assertTrue(player.paused);self.assertTrue(player.live)
+        player.toggle_pause();player.tick()
+        self.assertEqual(player.elapsed,3.5)
+        player.stop()
         self.mod.services.audio_release.assert_called_once_with('token')
+
+    def test_released_host_can_mix_but_another_game_must_wait(self):
+        self.mod.services.audio_claim.return_value=None
+        self.mod.services.snapshot.return_value['playing']=True
+        quiz,show=ClipPlayer(self.mod,None),ClipPlayer(self.mod,None)
+        self.assertTrue(quiz.claim());self.assertFalse(show.claim())
+        self.mod.services.snapshot.return_value['playing']=False
+        self.assertTrue(quiz.valid())
+        quiz.stop()
+        self.assertFalse(show.claim())  # An exclusive lease is held by another Mod.
+        self.mod.services.audio_claim.return_value='new lease'
+        self.assertTrue(show.claim());show.stop()
+
+    def test_window_open_and_close_without_playing_never_open_an_audio_device(self):
+        for kind in (GuessGame,WeeklyShow):
+            window=self.dialog(kind)
+            window.show();self.app.processEvents()
+            self.assertIsNone(window.player.engine)
+            window.reject()
+            self.assertTrue(window.closed);self.assertIsNone(window.player.engine)
+
+    def test_first_clip_sets_real_output_volume_even_at_proxy_default(self):
+        self.mod.context=SimpleNamespace(data_dir=Path(self.temp.name))
+        self.mod.services.snapshot.return_value['volume']=.6
+        clip=ClipPlayer(self.mod,None);self.addCleanup(clip.close)
+        clip.legacy_settings=QSettings(str(Path(self.temp.name)/'test.ini'),QSettings.IniFormat)
+        with patch('deskpet.music.audio.remote.AudioEngine.start'):
+            clip.play('demo.mp3',2,8)
+            self.assertIn({'cmd':'volume','value':.6},clip.engine.pending)
+
+    def test_complete_file_waits_for_decoder_end_after_its_reported_length(self):
+        self.mod.context = SimpleNamespace(data_dir=Path(self.temp.name))
+        clip = ClipPlayer(self.mod, None)
+        self.addCleanup(clip.close)
+        clip.legacy_settings = QSettings(str(Path(self.temp.name)/'test.ini'), QSettings.IniFormat)
+        finished, progress, failed, length = Mock(), Mock(), Mock(), Mock()
+        clip.finished.connect(finished)
+        clip.progress.connect(progress)
+        clip.failed.connect(failed)
+        clip.source_duration.connect(length)
+        with patch('deskpet.music.audio.remote.AudioEngine.start'):
+            clip.play('show.mp3')
+            native = clip.engine.player
+            native.values.update(status=QMediaPlayer.LoadedMedia.value, duration=4000)
+            clip.tick()
+            self.assertFalse(any(cmd['cmd']=='seek' for cmd in clip.engine.pending))
+            native.values.update(state=QMediaPlayer.PlayingState.value, position=41000)
+            clip.tick()
+            progress.assert_called_once_with(41.)
+            self.assertTrue(clip.live)
+            finished.assert_not_called()
+            # The Windows player sometimes snaps forward to its MP3 length estimate on EOF.
+            native.values.update(position=49000, duration=49000)
+            native.mediaStatusChanged.emit(QMediaPlayer.EndOfMedia)
+            finished.assert_called_once()
+            failed.assert_not_called()
+            self.assertAlmostEqual(length.call_args.args[0], 41., delta=.25)
+
+            # A decoder error carried by the same final report is a failure.
+            clip.play('broken.mp3')
+            native.values.update(status=QMediaPlayer.LoadedMedia.value, duration=9000)
+            clip.tick()
+            native.values.update(error=QMediaPlayer.FormatError.value, error_text='损坏的文件')
+            native.mediaStatusChanged.emit(QMediaPlayer.EndOfMedia)
+            failed.assert_called_once()
+            finished.assert_called_once()
 
     def test_closed_dialog_cannot_start_deferred_scan(self):
         d=self.dialog(GuessGame);d.close()

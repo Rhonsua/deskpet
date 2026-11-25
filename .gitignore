@@ -37,6 +37,9 @@ assets/ui/headpat/
 assets/stickers/**/*.png
 assets/stickers/**/*.webp
 deskpet/mods/bond/assets/*.webp
+!deskpet/mods/bond/assets/album-stationery.webp
+!deskpet/mods/bond/assets/album-tianyi-days.webp
+!deskpet/mods/bond/assets/stage-scenery.webp
 experiments/
 character-packages/
 docs/model-issues/

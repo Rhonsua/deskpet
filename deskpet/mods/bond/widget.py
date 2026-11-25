@@ -1,12 +1,14 @@
 """Small offline companion dashboard with an explicit performance entrance."""
 from datetime import datetime
 from pathlib import Path
-from PySide6.QtCore import Qt, QTimer, QRectF
-from PySide6.QtGui import QPainter, QColor, QFont, QImage, QPen
+from PySide6.QtCore import Qt, QTimer, QSaveFile, QIODevice
+from PySide6.QtGui import QPainter, QColor, QPalette
 from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QProgressBar,QPushButton,
-    QApplication,QTabWidget,QTextBrowser,QLineEdit,QSpinBox,QFileDialog,QMessageBox,QInputDialog,QDialog,QComboBox,QCheckBox,QScrollArea,QFrame,QGridLayout)
+    QTabWidget,QLineEdit,QSpinBox,QFileDialog,QMessageBox,QInputDialog,QDialog,QComboBox,QCheckBox,QScrollArea,QFrame,QGridLayout)
 from .store import STAGES,CATEGORIES
-from .album import MemoryBook
+from .studio import activity_style, dark_theme, ArtStamp, IllustratedHeader, set_role
+from .album import MemoryBook, render_memory_card
+from .scrapbook import ScrapbookArt, keepsake, record_body
 from deskpet.ui.background import BackgroundSurface
 
 
@@ -15,14 +17,17 @@ def label(text):
     return item
 
 
-class ThemeBanner(QFrame):
-    def paintEvent(self,event):
-        super().paintEvent(event)
-        painter=QPainter(self);painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QPen(QColor(104,190,215,45),1))
-        for size in (120,160,200):
-            painter.drawEllipse(QRectF(self.width()-size/2-60,self.height()/2-size/2,size,size))
-        painter.end()
+def panel(layout, title):
+    frame = QFrame()
+    frame.setObjectName('card')
+    content = QVBoxLayout(frame)
+    content.setContentsMargins(15, 12, 15, 12)
+    content.setSpacing(8)
+    heading = label(title)
+    heading.setObjectName('sectionTitle')
+    content.addWidget(heading)
+    layout.addWidget(frame)
+    return content
 
 
 class BookWindow(QDialog):
@@ -33,6 +38,17 @@ class BookWindow(QDialog):
         self.setStyleSheet('QDialog#bookWindow {background:transparent;}')
         self.setWindowTitle('天依 · 成长纪念集')
         self.content=QVBoxLayout(self);self.content.setContentsMargins(0,0,0,0)
+        self.book_refresh = QTimer(self)
+        self.book_refresh.setInterval(5000)
+        self.book_refresh.timeout.connect(owner.album.reload)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.book_refresh.start()
+
+    def hideEvent(self, event):
+        self.book_refresh.stop()
+        super().hideEvent(event)
 
     def closeEvent(self,event):
         self.owner._finish_book(self.return_to_dashboard)
@@ -43,8 +59,7 @@ class BookWindow(QDialog):
 class BondWidget(BackgroundSurface):
     def __init__(self,mod,parent=None):
         super().__init__(parent)
-        from PySide6.QtGui import QPalette
-        self.dark = QApplication.palette().color(QPalette.Window).lightness() < 128
+        self.dark = dark_theme()
         self.surface_color='#152633' if self.dark else '#eaf5fa'
         self.surfaceReady.connect(self._surface_ready)
         self.set_surface(Path(__file__).parent/'assets'/'tianyi-background.webp')
@@ -55,52 +70,14 @@ class BondWidget(BackgroundSurface):
         self.mod=mod;self.source='';self.shown_stage=mod.store.stage
         self.analyzer=None;self.preparing=False;self.quiet_started=None
         self.setMinimumSize(560,500)
-        style='''QWidget {background:#f5f9fc;color:#243b50;font:10pt "Microsoft YaHei UI";}
-            QTabWidget::pane {border:1px solid #cfdfeb;background:#f5f9fc;border-radius:8px;}
-            QFrame#hero {border:1px solid #d0e8ef;border-radius:12px;}
-            QLabel {background:transparent;} QWidget#advancedContent {background:transparent;} QFrame#card {background:#fffdf9;border:1px solid #d8e9ef;border-radius:12px;} QFrame#activityCard {background:#f4fafc;border:1px solid #e1edf1;border-radius:8px;} QFrame#activityCard QPushButton {padding:4px 8px;} QScrollArea {border:0;background:#f5f9fc;} QWidget#homeContent {background:#f5f9fc;} QTabBar::tab {background:#e4f0f6;color:#365c6e;padding:7px 12px;border-radius:5px;} QTabBar::tab:selected {background:#c7e5ee;color:#174b63;}
-            QLineEdit,QTextBrowser,QSpinBox,QComboBox {background:#fff;color:#243b50;border:1px solid #c3d7e5;border-radius:6px;padding:7px;}
-            QPushButton {background:#e5f1fa;color:#1f536b;border:1px solid #c1dce9;border-radius:8px;padding:9px;}
-            QComboBox QAbstractItemView {background:#fffdf9;color:#243b50;selection-background-color:#c7e5ee;selection-color:#174b63;}
-            QCheckBox {background:transparent;color:#243b50;spacing:6px;}
-            QCheckBox::indicator {width:15px;height:15px;background:#fff;border:1px solid #9dbdce;border-radius:3px;}
-            QCheckBox::indicator:checked {background:#67b5ce;}
-            QWidget:disabled {color:#788d99;} QLabel:disabled {color:#788d99;}
-            QScrollArea > QWidget > QWidget {background:#f5f9fc;}
-            QPushButton#primary {background:#287b99;color:white;font-weight:bold;padding:10px 22px;} QPushButton#primary:hover {background:#438fae;} QPushButton:hover {background:#d2eaf6;} QPushButton:disabled {color:#8295a2;}
-            QProgressBar {background:#dce8ee;border:0;border-radius:3px;height:6px;}
-            QProgressBar::chunk {background:#78b9bf;border-radius:3px;}'''
-        if self.dark:
-            colors={'#ddf4fb':'#284a59','#cce9f3':'#1f3f51','#eff8f9':'#183240','#c4e3ed':'#446573','#edf8fc':'#203a48','#d5edf5':'#294d5c','#d0e8ef':'#43636e','#f5f9fc':'#152633','#243b50':'#e4f0f4','#cfdfeb':'#36505c','#fffdf9':'#203744',
-                '#d8e9ef':'#395561','#f4fafc':'#29414d','#e1edf1':'#3b5661','#e4f0f6':'#263e4b',
-                '#365c6e':'#d2e4e9','#c7e5ee':'#3d6472','#174b63':'#f2fbfd','#c3d7e5':'#58717c',
-                '#e5f1fa':'#29424e','#1f536b':'#e0eff2','#c1dce9':'#496570','#9dbdce':'#7f9ea9',
-                '#67b5ce':'#75c5dc','#788d99':'#a4b7bd','#8295a2':'#a4b7bd','#287b99':'#83cbe0',
-                '#438fae':'#a2d9e8','#d2eaf6':'#385766','#dce8ee':'#35505c','#78b9bf':'#83cbe0',
-                '#fff':'#1a303c','color:white':'color:#102c39'}
-            for old in sorted(colors,key=len,reverse=True):style=style.replace(old,colors[old])
-        # The window owns one continuous picture. Scroll viewports and page
-        # containers must stay transparent; only reading/interaction surfaces tint it.
-        card='rgba(18,39,53,220)' if self.dark else 'rgba(255,253,249,213)'
-        hero='rgba(19,43,58,220)' if self.dark else 'rgba(244,252,255,220)'
-        inner='rgba(34,63,77,180)' if self.dark else 'rgba(239,250,255,170)'
-        style += f'''
-            QWidget {{background:transparent;}}
-            QTabWidget::pane {{border:0;background:transparent;}}
-            QScrollArea,QStackedWidget,QScrollArea > QWidget > QWidget,QWidget#homeContent {{background:transparent;border:0;}}
-            QFrame#hero {{background:{hero};}}
-            QFrame#card {{background:{card};}}
-            QFrame#activityCard {{background:{inner};}}
-            QLabel#footer {{background:{hero};padding:6px 10px;border-radius:6px;}}
-        '''
-        self.setStyleSheet(style)
+        self.setStyleSheet(activity_style(self.dark))
         palette=self.palette()
         palette.setColor(QPalette.PlaceholderText,QColor('#a6bac2' if self.dark else '#667d89'))
         self.setPalette(palette)
         layout=QVBoxLayout(self);self.outer_layout=layout;layout.setContentsMargins(16,14,16,12);layout.setSpacing(8)
-        hero=ThemeBanner();self.hero=hero;hero.setObjectName('hero');hero_row=QHBoxLayout(hero);hero_row.setContentsMargins(16,10,12,10);hero_row.setSpacing(12)
+        hero=QFrame();self.hero=hero;hero.setObjectName('hero');hero_row=QHBoxLayout(hero);hero_row.setContentsMargins(16,10,12,10);hero_row.setSpacing(12)
         hero_text=QVBoxLayout();hero_text.setSpacing(5);hero_row.addLayout(hero_text,1)
-        self.heading=label('');self.heading.setStyleSheet('font-size:16pt;font-weight:bold;color:'+('#b3e1ef' if self.dark else '#24586c')+';');hero_text.addWidget(self.heading)
+        self.heading=label('');self.heading.setObjectName('heading');hero_text.addWidget(self.heading)
         self.detail=label('');hero_text.addWidget(self.detail)
         self.progress=QProgressBar();self.progress.setTextVisible(False);self.progress.setFixedHeight(6);hero_text.addWidget(self.progress)
         adjust=QPushButton('调整背景');self.adjust_button=adjust;adjust.clicked.connect(self.adjust_background)
@@ -112,49 +89,90 @@ class BondWidget(BackgroundSurface):
         home=QScrollArea();home.setWidgetResizable(True);home.setFrameShape(QFrame.NoFrame);self.tabs.addTab(home,'今天的陪伴')
         home_content=QWidget();home_content.setObjectName('homeContent');home.setWidget(home_content);box=QVBoxLayout(home_content)
         box.setContentsMargins(12,12,12,12);box.setSpacing(10)
-        intro=QFrame();intro.setObjectName('card');intro_box=QVBoxLayout(intro)
-        title=label('今天，和天依一起');title.setStyleSheet('font-size:15pt;font-weight:bold;color:'+('#b3e1ef' if self.dark else '#286985')+';');intro_box.addWidget(title)
-        intro_box.addWidget(label('每类互动每天记录一次 · 最多 +50 亲密度，忙碌或离线也不会扣分'))
-        self.recommendation=label('');intro_box.addWidget(self.recommendation)
-        self.need=label('');intro_box.addWidget(self.need)
-        need_actions=QHBoxLayout();self.defer_need=QPushButton('稍后');self.quiet_needs=QPushButton('今天先安静')
-        self.defer_need.setToolTip('暂停小心愿提醒 30 分钟，今天不重复刚才的心愿');self.quiet_needs.setToolTip('今天不再主动提小心愿，不影响聊天或其他通知')
-        self.defer_need.clicked.connect(lambda:self.defer_wish(False));self.quiet_needs.clicked.connect(lambda:self.defer_wish(True))
-        need_actions.addWidget(self.defer_need);need_actions.addWidget(self.quiet_needs);need_actions.addStretch();intro_box.addLayout(need_actions);box.addWidget(intro)
-        daily=QFrame();daily.setObjectName('card');daily_box=QVBoxLayout(daily)
-        self.daily_title=label('今日互动');self.daily_title.setStyleSheet('font-weight:bold;font-size:12pt;');daily_box.addWidget(self.daily_title)
-        self.checklist=label('');self.checklist.hide();daily_box.addWidget(self.checklist)
-        grid=QGridLayout();grid.setSpacing(8);daily_box.addLayout(grid)
-        self.category_status={}
-        specs=[('headpat','摸摸头','打开控制',lambda:self.present_host('control')),
-               ('feed','照料 / 投喂','选择点心',lambda:self.present_host('food')),
-               ('chat','说说话','打开聊天',lambda:self.present_host('chat')),
-               ('listen','听歌 / 安静陪伴','打开歌单',lambda:self.present_host('music')),
-               ('game','演出 / 猜歌','去演出',lambda:self.tabs.setCurrentIndex(1))]
-        for index,(key,title,caption,action) in enumerate(specs):
-            card=QFrame();card.setObjectName('activityCard');card_box=QVBoxLayout(card);card_box.setContentsMargins(10,8,10,8);card_box.setSpacing(4)
-            self.category_status[key]=label('');card_box.addWidget(self.category_status[key])
-            button=QPushButton(caption);button.clicked.connect(action);card_box.addWidget(button)
-            if key=='feed':
-                care=QPushButton('吃饱后歇歇');care.clicked.connect(self.care);card_box.addWidget(care)
-            if key=='chat':
-                self.diary=QPushButton('写一句话');self.diary.clicked.connect(self.write_diary);card_box.addWidget(self.diary)
-            if key=='listen':
-                self.quiet=QPushButton('开启 10 分钟安静陪伴');self.quiet.clicked.connect(self.quiet_time);card_box.addWidget(self.quiet)
-            grid.addWidget(card,index//2,index%2)
-        box.addWidget(daily);box.addStretch()
-        play=QWidget();playbox=QVBoxLayout(play);playbox.setContentsMargins(12,12,12,12);playbox.setSpacing(12);self.tabs.addTab(play,'节奏演出')
-        def section(title):
-            frame=QFrame();frame.setObjectName('card');layout=QVBoxLayout(frame);layout.setContentsMargins(14,12,14,12);layout.setSpacing(8)
-            heading=label(title);heading.setStyleSheet('font-size:12pt;font-weight:bold;color:'+('#b3e1ef' if self.dark else '#286985')+';');layout.addWidget(heading);playbox.addWidget(frame)
-            return layout
-        songbox=section('歌曲');self.song=label('当前：无音乐节拍练习');songbox.addWidget(self.song)
-        actions=QHBoxLayout()
-        choose=QPushButton('选择本地 MP3');choose.clicked.connect(self.choose);actions.addWidget(choose)
-        current=QPushButton('使用当前歌曲');current.clicked.connect(self.current);actions.addWidget(current)
-        practice=QPushButton('节拍练习');practice.clicked.connect(lambda:self.select(''));actions.addWidget(practice)
-        actions.addStretch();songbox.addLayout(actions)
-        options=section('演出设置');grid=QGridLayout();grid.setSpacing(8);options.addLayout(grid)
+        self.art = ScrapbookArt()
+        home_cover = IllustratedHeader('今天，和天依一起', '', 'shy', self.art)
+        self.daily_illustration = home_cover.stamp
+        self.recommendation = home_cover.detail
+        box.addWidget(home_cover)
+        self.wish_panel = QFrame()
+        self.wish_panel.setObjectName('card')
+        wish_row = QHBoxLayout(self.wish_panel)
+        self.need = label('')
+        wish_row.addWidget(self.need, 1)
+        self.defer_need = QPushButton('稍后')
+        self.quiet_needs = QPushButton('今天先安静')
+        self.defer_need.setToolTip('暂停小心愿提醒 30 分钟')
+        self.quiet_needs.setToolTip('今天不再主动提小心愿')
+        self.defer_need.clicked.connect(lambda: self.defer_wish(False))
+        self.quiet_needs.clicked.connect(lambda: self.defer_wish(True))
+        wish_row.addWidget(self.defer_need)
+        wish_row.addWidget(self.quiet_needs)
+        box.addWidget(self.wish_panel)
+
+        daily = panel(box, '今日互动')
+        self.daily_title = daily.itemAt(0).widget()
+        daily.setSpacing(3)
+        self.category_status = {}
+        entries = (
+            ('headpat', '摸摸头', 'shy', '打开控制', lambda: self.present_host('control')),
+            ('feed', '照料与投喂', 'bao', '选择点心', lambda: self.present_host('food')),
+            ('chat', '说说话', 'letter', '打开聊天', lambda: self.present_host('chat')),
+            ('listen', '一起听歌', 'cassette', '打开歌单', lambda: self.present_host('music')),
+            ('game', '演出与猜歌', 'ticket', '去演出', lambda: self.tabs.setCurrentIndex(1)),
+        )
+        for index, (key, title, stamp, caption, action) in enumerate(entries):
+            if index:
+                rule = QFrame()
+                rule.setObjectName('entryLine')
+                rule.setFixedHeight(1)
+                daily.addWidget(rule)
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 4, 0, 4)
+            row.setSpacing(6)
+            row.addWidget(ArtStamp(self.art, stamp, 42))
+            words = QVBoxLayout()
+            words.setSpacing(0)
+            name = label(title)
+            name.setObjectName('entryTitle')
+            words.addWidget(name)
+            state = label('')
+            state.setObjectName('entryState')
+            self.category_status[key] = state
+            words.addWidget(state)
+            row.addLayout(words, 1)
+            second = None
+            if key == 'feed':
+                second = QPushButton('歇一会儿')
+                second.clicked.connect(self.care)
+            elif key == 'chat':
+                self.diary = second = QPushButton('写一句话')
+                second.clicked.connect(self.write_diary)
+            elif key == 'listen':
+                self.quiet = second = QPushButton('安静陪伴')
+                second.setToolTip('一起安静陪伴 10 分钟')
+                second.clicked.connect(self.quiet_time)
+            elif key == 'game':
+                second = QPushButton('猜歌挑战')
+                second.clicked.connect(mod.guess)
+            if second is not None:
+                row.addWidget(second)
+            button = QPushButton(caption)
+            button.clicked.connect(action)
+            row.addWidget(button)
+            daily.addLayout(row)
+        box.addStretch()
+        play=QWidget();playbox=QVBoxLayout(play);playbox.setContentsMargins(12,12,12,12);playbox.setSpacing(10);self.tabs.addTab(play,'节奏演出')
+        song_cover = IllustratedHeader('无音乐节拍练习','单点轻按，长条按住至尾部。','cassette', self.art)
+        self.song = song_cover.title
+        playbox.addWidget(song_cover)
+        actions = QHBoxLayout()
+        for caption, action in (('选择本地 MP3', self.choose), ('使用当前歌曲', self.current), ('节拍练习', lambda: self.select(''))):
+            button = QPushButton(caption)
+            button.clicked.connect(action)
+            actions.addWidget(button)
+        actions.addStretch()
+        playbox.addLayout(actions)
+        options=panel(playbox,'演出设置');grid=QGridLayout();grid.setSpacing(8);options.addLayout(grid)
         self.difficulty=QComboBox()
         for caption,key in [('入门','easy'),('标准','normal'),('进阶','hard')]:self.difficulty.addItem(caption,key)
         self.chart_mode=QComboBox();self.chart_mode.addItems(['花样演出','标准挑战'])
@@ -172,26 +190,23 @@ class BondWidget(BackgroundSurface):
         advanced_content.hide();advanced.toggled.connect(advanced_content.setVisible);options.addWidget(advanced_content)
         startrow=QHBoxLayout();self.start=QPushButton('准备并进入演出');self.start.setObjectName('primary');self.start.clicked.connect(self.play);startrow.addWidget(self.start)
         self.cancel=QPushButton('取消分析');self.cancel.setEnabled(False);self.cancel.hide();self.cancel.clicked.connect(self.cancel_analysis);startrow.addWidget(self.cancel);startrow.addStretch();playbox.addLayout(startrow)
-        savedbox=section('收藏谱');savedrow=QHBoxLayout();self.saved=QComboBox();savedrow.addWidget(self.saved,1)
-        replay=QPushButton('重玩选中的收藏谱');replay.clicked.connect(self.replay);savedrow.addWidget(replay);savedbox.addLayout(savedrow)
-        self.best=label('');savedbox.addWidget(self.best);playbox.addStretch()
+        savedbox=panel(playbox,'收藏谱');savedrow=QHBoxLayout();self.saved=QComboBox();savedrow.addWidget(self.saved,1)
+        self.replay_button=QPushButton('重玩');self.replay_button.clicked.connect(self.replay);savedrow.addWidget(self.replay_button);savedbox.addLayout(savedrow)
+        self.best=label('');self.best.setObjectName('muted');savedbox.addWidget(self.best);playbox.addStretch()
         album=QWidget();al=QVBoxLayout(album);al.setContentsMargins(0,0,0,0);self.tabs.addTab(album,'成长纪念集')
         self.album_page=album;self.album_layout=al;self._book_window=None;self._book_origin=None
-        self.album=MemoryBook(mod.store, defer=True);al.addWidget(self.album,1)
+        self.album=MemoryBook(mod.store, defer=True, art=self.art);al.addWidget(self.album,1)
         self.album.back_requested.connect(self._return_from_book)
         self.album.close_requested.connect(self._close_book)
         self.album.export_requested.connect(self.export_card)
         settings=QWidget();sl=QVBoxLayout(settings);sl.setContentsMargins(12,12,12,12);sl.setSpacing(10);self.tabs.addTab(settings,'舞台与纪念')
-        def settings_section(title):
-            frame=QFrame();frame.setObjectName('card');box=QVBoxLayout(frame);box.setContentsMargins(14,12,14,12)
-            heading=label(title);heading.setStyleSheet('font-size:12pt;font-weight:bold;color:'+('#b3e1ef' if self.dark else '#286985')+';');box.addWidget(heading);sl.addWidget(frame);return box
-        identity=settings_section('我们的称呼')
+        stagebox=panel(sl,'演出舞台')
+        identity=panel(sl,'我们的称呼')
         row=QHBoxLayout();self.nickname=QLineEdit();self.nickname.setPlaceholderText('熟悉后可设定专属称呼（最多 20 字）');self.nickname.setMaxLength(20)
         self.nickname.setText(mod.store.value['nickname']);row.addWidget(self.nickname)
         self.save_name=QPushButton('记住称呼');self.save_name.clicked.connect(self.rename);row.addWidget(self.save_name);identity.addLayout(row)
         self.ceremony=QPushButton('看看我们的阶段纪念');self.ceremony.clicked.connect(self.show_stage);identity.addWidget(self.ceremony,0,Qt.AlignLeft)
-        stagebox=settings_section('演出舞台')
-        stagebox.addWidget(label('用于「节奏演出」与「三曲小演出」。先看场景预览，再选择启用。'))
+        stagebox.setSpacing(8)
         row=QHBoxLayout();self.theme=QComboBox()
         for title,key in [('阶段默认舞台 · 免费',''),('海底回响 · 60 音符','ocean'),('花间小调 · 100 音符','sakura'),('星光剧院 · 150 音符','gold')]:self.theme.addItem(title,key)
         self.theme.setCurrentIndex(max(0,self.theme.findData(mod.store.preference('theme',''))))
@@ -200,8 +215,8 @@ class BondWidget(BackgroundSurface):
         self.stage_preview=StagePreview();self.stage_preview.setMinimumHeight(145);stagebox.addWidget(self.stage_preview)
         self.stage_description=label('');stagebox.addWidget(self.stage_description)
         self.theme.currentIndexChanged.connect(self.preview_theme);self.preview_theme()
-        stagebox.addWidget(label('只在点击「获得并使用」时购买；已拥有的舞台不会重复扣费。'))
-        preferences=settings_section('陪伴偏好');row=QHBoxLayout();row.addWidget(label('每日小心愿上限'))
+        self.open_show=QPushButton('打开三曲小演出');self.open_show.clicked.connect(mod.weekly_show);stagebox.addWidget(self.open_show,0,Qt.AlignLeft)
+        preferences=panel(sl,'陪伴偏好');row=QHBoxLayout();row.addWidget(label('每日小心愿上限'))
         self.needs=QSpinBox();self.needs.setRange(0,5);self.needs.setValue(mod.store.preference('needs_per_day',3));row.addWidget(self.needs);row.addStretch();preferences.addLayout(row)
         self.needs.valueChanged.connect(lambda value:mod.store.configure('needs_per_day',value))
         row=QHBoxLayout();self.birthday=QLineEdit(mod.store.preference('birthday',''));self.birthday.setPlaceholderText('可选生日，例如 06-15；留空不记录');row.addWidget(self.birthday)
@@ -214,7 +229,7 @@ class BondWidget(BackgroundSurface):
             caption=self.tabs.tabText(index);self.tabs.removeTab(index)
             scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setFrameShape(QFrame.NoFrame);scroll.setWidget(content)
             self.tabs.insertTab(index,scroll,caption)
-        self.note=label('所有记录保存在本机。停用扩展保留纪念册，并恢复原成长显示。');self.note.setObjectName('footer');layout.addWidget(self.note)
+        self.note=label('每类互动每天计入亲密度一次。记录保存在本机。');self.note.setObjectName('footer');layout.addWidget(self.note)
         self.refresh_timer=QTimer(self);self.refresh_timer.setInterval(1000)
         self.refresh_timer.timeout.connect(lambda:self.refresh() if self.isVisible() and self.tabs.currentIndex()==0 else None)
         self._charts_revision=None
@@ -310,22 +325,34 @@ class BondWidget(BackgroundSurface):
         self.heading.setText(f'{STAGES[stage][0]} · {store.value["nickname"] or "和天依的一点一滴"}')
         self.progress.setRange(0,projection['xp_goal']);self.progress.setValue(projection['xp'])
         self.detail.setText(f'亲密度 {store.value["affinity"]} · '+(f'距「{STAGES[stage+1][0]}」还差 {STAGES[stage+1][1]-store.value["affinity"]}' if stage<5 else '已经相伴，新的回忆仍会继续。')+(f'\n下一阶段解锁：{STAGES[stage+1][2]}' if stage<5 else ''))
-        done=store.daily();self.daily_title.setText(f'今日互动  ·  {len(done)} / {len(CATEGORIES)}');self.checklist.setText('\n'.join(('✓ ' if k in done else '○ ')+v+(' · 已记录' if k in done else '') for k,v in CATEGORIES.items()))
-        for key,title in CATEGORIES.items():
-            self.category_status[key].setText(('✓ ' if key in done else '○ ')+title+(' · 已记录' if key in done else ''))
-        if 'headpat' not in done:self.recommendation.setText('今天可以先摸摸头，打个招呼。')
-        elif 'chat' not in done:self.recommendation.setText('想说话时，可以聊聊天或写下一句话。')
-        elif len(done)<len(CATEGORIES):self.recommendation.setText('挑一件喜欢的事，慢慢陪伴就好。')
-        else:self.recommendation.setText('今天的陪伴都已记录，安心休息吧。')
-        if 'listen' not in done:
-            elapsed=min(600,int(store.listen_seconds()))
-            self.checklist.setText(self.checklist.text()+f'\n听歌进度 {elapsed//60}:{elapsed%60:02d} / 10:00')
-            self.category_status['listen'].setText(f'○ 听歌 / 安静陪伴 · {elapsed//60}:{elapsed%60:02d} / 10:00')
+        done = store.daily()
+        self.daily_title.setText(f'今日互动  ·  {len(done)} / {len(CATEGORIES)}')
+        for key, state in self.category_status.items():
+            recorded = key in done
+            set_role(state, 'recorded', recorded)
+            if recorded:
+                text = '已记录'
+            elif key == 'listen':
+                elapsed = min(600, int(store.listen_seconds()))
+                text = f'{elapsed//60}:{elapsed%60:02d} / 10:00'
+            else:
+                text = '今日待互动'
+            state.setText(text)
+        prompts=(('headpat','shy','今天可以先摸摸头，打个招呼。'),
+                 ('chat','letter','想说话时，可以聊聊天或写下一句话。'),
+                 ('feed','bao','要不要选个点心，一起歇一会儿？'),
+                 ('listen','cassette','挑首喜欢的歌，或者一起安静坐一会儿。'),
+                 ('game','wings','想听点热闹的，可以去小舞台打拍子。'))
+        art_name, suggestion=next(((art_name, text) for key, art_name, text in prompts if key not in done),
+                                  ('jasmine','今天的陪伴都已记录，安心休息吧。'))
+        self.recommendation.setText(suggestion)
+        self.daily_illustration.set_name(art_name)
         self.nickname.setEnabled(stage>=1);self.save_name.setEnabled(stage>=1)
         if self.isVisible() and self.tabs.currentIndex()==2:self.album.reload()
-        self.best.setText('每份谱面独立保存成绩；新谱结算显示同谱最佳。')
-        self.need.setText(self.mod.events.summary())
+        summary = self.mod.events.summary()
+        self.need.setText(summary)
         wish_active=bool(getattr(self.mod.events,'active',None))
+        self.wish_panel.setVisible(bool(summary) or wish_active)
         self.defer_need.setVisible(wish_active);self.quiet_needs.setVisible(wish_active)
         if self.tabs.currentIndex()==1:
             revision=store.revision('charts')
@@ -335,10 +362,14 @@ class BondWidget(BackgroundSurface):
                 index=self.saved.findData(current)
                 if index>=0:self.saved.setCurrentIndex(index)
                 self.saved.blockSignals(False);self._charts_revision=revision
+                has_charts = self.saved.count() > 0
+                self.saved.setVisible(has_charts);self.replay_button.setVisible(has_charts)
+                self.best.setText('演出时点「收藏这份谱」，即可在这里重玩。')
+                self.best.setVisible(not has_charts)
         if self.quiet_started is not None:
             import time
             remaining=max(0,600-int(time.monotonic()-self.quiet_started))
-            self.quiet.setText(f'安静陪伴剩余 {remaining//60}:{remaining%60:02d} · 点击取消' if remaining else '安静陪伴完成，点击收下今天的记录')
+            self.quiet.setText(f'取消 {remaining//60}:{remaining%60:02d}' if remaining else '收下记录')
         if stage>self.shown_stage:
             self.shown_stage=stage
             self.note.setText(f'新的关系阶段：{STAGES[stage][0]}！点击“阶段纪念”一起庆祝。')
@@ -371,7 +402,7 @@ class BondWidget(BackgroundSurface):
 
     def select(self,path):
         if self.preparing:self.cancel_analysis()
-        self.source=path;self.song.setText('当前：'+(Path(path).stem if path else '无音乐节拍练习'))
+        self.source=path;self.song.setText(Path(path).stem if path else '无音乐节拍练习')
 
     def choose(self):
         path,_=QFileDialog.getOpenFileName(self,'选择演出歌曲','','MP3 音乐 (*.mp3)')
@@ -485,25 +516,30 @@ class BondWidget(BackgroundSurface):
         import time
         if self.quiet_started is None:self.quiet_started=time.monotonic()
         elif time.monotonic()-self.quiet_started>=600:
-            before=self.mod.store.stage;self.mod.store.award('listen');self.mod.after_growth(before);self.quiet_started=None;self.quiet.setText('开启 10 分钟安静陪伴')
-        else:self.quiet_started=None;self.quiet.setText('开启 10 分钟安静陪伴')
+            before=self.mod.store.stage;self.mod.store.award('listen');self.mod.after_growth(before);self.quiet_started=None;self.quiet.setText('安静陪伴')
+        else:self.quiet_started=None;self.quiet.setText('安静陪伴')
         self.refresh()
 
     def buy_theme(self):
         key=self.theme.currentData()
         if not key:success,message=True,'使用阶段默认舞台'
         else:success,message=self.mod.services.buy(key)
-        if success:self.mod.store.configure('theme',key)
+        if success:
+            self.mod.store.configure('theme',key)
+            self.preview_theme()
         self.note.setText(message)
 
     def preview_theme(self):
         key=self.theme.currentData() or ''
+        active = key == (self.mod.store.preference('theme','') or '')
+        self.buy_stage.setEnabled(not active)
+        self.buy_stage.setText('正在使用' if active else '获得并使用' if key else '使用此舞台')
         self.stage_preview.set_scene(key,self.mod.store.stage)
         self.stage_description.setText({
-            '':'随关系阶段变化的基础灯光舞台，无需花费音符。',
-            'ocean':'海底回响：流动水波、上升气泡和水下光束。',
-            'sakura':'花间小调：花枝、飘落花瓣和柔和的粉紫灯光。',
-            'gold':'星光剧院：两侧帷幕、交错聚光灯和金色星光。',
+            '':'舞台随亲密阶段变化，从月牙和星灯下的观星台开始。',
+            'ocean':'海草和珊瑚围住舞台，水面落下的光束里飘着气泡。',
+            'sakura':'花枝伸出亭檐，天依在傍晚的湖边登场。',
+            'gold':'酒红丝绒幕拉开，金色星光照亮木质舞台。',
         }[key])
 
     def save_birthday(self):
@@ -530,12 +566,20 @@ class BondWidget(BackgroundSurface):
 
     def show_stage(self):
         stage=self.mod.store.stage
-        dialog=QDialog(self);dialog.setWindowTitle('我们的阶段纪念');dialog.setAttribute(Qt.WA_DeleteOnClose)
-        box=QVBoxLayout(dialog)
-        title=label('✦ '+STAGES[stage][0]+' ✦');title.setStyleSheet('font-size:24pt;font-weight:bold;color:#24586c;');box.addWidget(title)
-        box.addWidget(label(['这份相遇，我会好好珍惜。','已经慢慢熟悉你在身边的感觉了。','你留下的小事，我会认真收好。','和你相处，越来越有默契了。','那些普通的日子，也会闪闪发光呢。','以后也一起慢慢走，好不好？'][stage]))
-        box.addWidget(label('本阶段开放：'+STAGES[stage][2]))
-        close=QPushButton('把这一刻收好');close.clicked.connect(dialog.accept);box.addWidget(close)
+        dialog = QDialog(self)
+        dialog.setWindowTitle('我们的阶段纪念')
+        dialog.setAttribute(Qt.WA_DeleteOnClose)
+        dialog.setStyleSheet(activity_style(self.dark))
+        box = QVBoxLayout(dialog)
+        box.setContentsMargins(16, 16, 16, 16)
+        greeting = ('这份相遇，我会好好珍惜。','已经慢慢熟悉你在身边的感觉了。','你留下的小事，我会认真收好。','和你相处，越来越有默契了。','那些普通的日子，也会闪闪发光呢。','以后也一起慢慢走，好不好？')[stage]
+        box.addWidget(IllustratedHeader(STAGES[stage][0], greeting, ('hello','shy','letter','wings','jasmine','cheer')[stage], self.art))
+        unlocks = panel(box, '这一阶段解锁')
+        unlocks.addWidget(label(STAGES[stage][2]))
+        close = QPushButton('把这一刻收好')
+        close.setObjectName('primary')
+        close.clicked.connect(dialog.accept)
+        box.addWidget(close,0,Qt.AlignRight)
         self.mod.services.act('wave')
         for delay,action in [(2400,'turn'),(4800,'celebrate')]:
             QTimer.singleShot(delay,dialog,lambda a=action: self.mod.services.act(a) if self.mod.active and dialog.isVisible() else None)
@@ -547,25 +591,50 @@ class BondWidget(BackgroundSurface):
 
     def export_card(self):
         import json
-        store=self.mod.store;options=['阶段纪念']
-        if store.stage>=2:options.insert(0,'本周回忆')
-        show=store.db.execute('SELECT body,at FROM shows ORDER BY at DESC LIMIT 1').fetchone()
-        if show:options.insert(0,'最近的三曲演出')
-        choice,ok=QInputDialog.getItem(self,'导出纪念卡','选择内容：',options,0,False)
+        store = self.mod.store
+        parent = self._book_window or self
+        options = []
+        visible_records = {}
+        if self._book_window:
+            book = self.album
+            seen = set()
+            for offset, page in enumerate(book.current_pages[book.index:book.index+book.step], book.index+1):
+                if page.kind not in ('sticker','record','memory','stage') or page.locked or page.key in seen:
+                    continue
+                seen.add(page.key)
+                row = store.db.execute('SELECT title,detail,at FROM collection WHERE id=?',(page.key,)).fetchone()
+                if row is not None:
+                    option = f'第 {offset} 页 · {row["title"]}'
+                    visible_records[option] = (row, page.key)
+                    options.append(option)
+        show = store.db.execute('SELECT body,at FROM shows ORDER BY at DESC LIMIT 1').fetchone()
+        if show:options.append('最近的三曲演出')
+        if store.stage>=2:options.append('本周回忆')
+        options.append('阶段纪念')
+        choice,ok=QInputDialog.getItem(parent,'导出纪念卡','选择内容：',options,0,False)
         if not ok:return
         title=choice+' · '+STAGES[store.stage][0]
-        if choice=='本周回忆':body=store.weekly()
-        elif choice=='最近的三曲演出':body=show['at'][:10]+'\n\n'+'\n\n'.join(f'{i+1}. {item["title"]}' for i,item in enumerate(json.loads(show['body'])))
-        else:body='从 '+store.value['created'][:10]+' 开始相伴\n\n当前亲密度：'+str(store.value['affinity'])+'\n\n'+STAGES[store.stage][2]
-        path,_=QFileDialog.getSaveFileName(self,'保存纪念卡','天依的'+choice+'.png','PNG (*.png)')
+        illustration = 'letter'
+        stamp = '整理于 '+datetime.now().date().isoformat()
+        if choice in visible_records:
+            row, key = visible_records[choice]
+            title, body, stamp = row['title'], record_body(key,row['detail']), '收录于 '+row['at'][:10]
+            illustration = keepsake(key)
+        elif choice=='本周回忆':
+            body=store.weekly()
+        elif choice=='最近的三曲演出':
+            stamp='演出于 '+show['at'][:10];illustration='ticket'
+            body='\n\n'.join(f'{i+1}. {item["title"]}' for i,item in enumerate(json.loads(show['body'])))
+        else:
+            body='从 '+store.value['created'][:10]+' 开始相伴\n\n当前亲密度：'+str(store.value['affinity'])+'\n\n'+STAGES[store.stage][2]
+        path,_=QFileDialog.getSaveFileName(parent,'保存纪念卡','天依的纪念卡.png','PNG (*.png)')
         if not path:return
-        image=QImage(960,720,QImage.Format_ARGB32);image.fill(QColor('#e9f2f5'))
-        painter=QPainter(image);painter.setPen(QColor('#294b61'));painter.setFont(QFont('Microsoft YaHei UI',22,QFont.Bold))
-        painter.drawText(48,68,title);painter.setFont(QFont('Microsoft YaHei UI',15))
-        painter.drawText(48,110,864,550,Qt.TextWordWrap,body);painter.end()
-        message='纪念卡已保存在本机。' if image.save(path,'PNG') else '纪念卡保存失败，请检查位置。'
+        image=render_memory_card(title,body,stamp,self.album.canvas.art,illustration)
+        output=QSaveFile(path)
+        saved=output.open(QIODevice.WriteOnly) and image.save(output,'PNG') and output.commit()
+        message='纪念卡已保存在本机。' if saved else '纪念卡保存失败，请检查位置。'
         self.note.setText(message)
-        if self.tabs.currentIndex()==2:QMessageBox.information(self,'导出纪念卡',message)
+        if self._book_window:QMessageBox.information(parent,'导出纪念卡',message)
 
     def closeEvent(self,event):
         self.refresh_timer.stop()

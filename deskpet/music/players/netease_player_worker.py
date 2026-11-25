@@ -9,9 +9,9 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from deskpet.music.netease.direct import COOKIE_NAMES, cookie_header
+from deskpet.music.netease.direct import COOKIE_NAMES, cookie_header, cookie_values, valid_cookie_value
 from deskpet.music.netease.storage import protect, session_data
-from deskpet.music.netease.account_probe import AccountProbe
+from deskpet.music.netease.login_progress import STATUS, WebScanProgress, qr_stage, record_login_progress
 
 ORIGIN = 'https://music.163.com'
 PREFIX = 'TIANYI_NETEASE_LOGIN '
@@ -20,11 +20,17 @@ PREFIX = 'TIANYI_NETEASE_LOGIN '
 # frames. The real page contains hidden success/expired templates at startup.
 PAGE_PROBE = r'''(() => {
     if (location.origin !== 'https://music.163.com') return null;
+    const visible = el => {
+        const rect = el.getBoundingClientRect();
+        const style = el.ownerDocument.defaultView.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility === 'visible' && style.display !== 'none';
+    };
     const documents = [document];
     for (const f of document.querySelectorAll('iframe')) {
-        try { if (f.contentWindow.location.origin === location.origin) documents.push(f.contentDocument); } catch (_) {}
+        try { if (visible(f) && f.contentDocument && f.contentWindow.location.origin === location.origin) documents.push(f.contentDocument); } catch (_) {}
     }
     let stage = null, renderedProfile = null;
+    let dialogOpen = false, qrVisible = false, openRequested = false;
     for (const doc of documents) {
         try {
             const p = doc.defaultView.GUser;
@@ -32,66 +38,88 @@ PAGE_PROBE = r'''(() => {
                 renderedProfile = {userId:String(p.userId), nickname:typeof p.nickname === 'string' ? p.nickname.slice(0,200) : ''};
             }
         } catch (_) {}
+        for (const dialog of doc.querySelectorAll('.m-layer,.m-layer-w2,.m-login,[role="dialog"]')) {
+            if (!visible(dialog) || !/登录|扫码|验证/.test(dialog.innerText)) continue;
+            dialogOpen = true;
+            if (!/扫码|二维码/.test(dialog.innerText)) continue;
+            for (const image of dialog.querySelectorAll('canvas,img,svg')) {
+                const rect = image.getBoundingClientRect();
+                if (visible(image) && rect.width >= 96 && Math.abs(rect.width - rect.height) < 5 &&
+                    (image.tagName !== 'IMG' || (image.complete && image.naturalWidth > 0))) qrVisible = true;
+            }
+        }
         for (const el of doc.querySelectorAll('.suc-txt,.confirm,.tip p')) {
-            const s = doc.defaultView.getComputedStyle(el);
-            if (!el.getClientRects().length || s.display === 'none' || s.visibility === 'hidden') continue;
+            if (!visible(el)) continue;
             const text = el.innerText.trim();
-            if (text === '请在手机上确认登录' || text === '扫描成功') stage = 'scanned';
-            else if (text === '二维码已失效' && stage !== 'scanned') stage = 'expired';
+            if (['登录成功', '授权成功', '已确认登录'].includes(text)) stage = 'confirmed';
+            else if (stage !== 'confirmed' && (text === '请在手机上确认登录' || text === '扫描成功')) stage = 'scanned';
+            else if (!stage && text === '二维码已失效') stage = 'expired';
         }
     }
-    return JSON.stringify({stage, renderedProfile, profile:window.__tianyiLoginProbe || null});
+    if (__OPEN_LOGIN__ && !dialogOpen && !stage && !renderedProfile) {
+        for (const doc of documents) {
+            if (doc.readyState === 'loading') continue;
+            const trigger = Array.from(doc.querySelectorAll('[data-action="login"]')).find(visible);
+            if (trigger) { trigger.click(); openRequested = true; break; }
+        }
+    }
+    return JSON.stringify({stage, dialogOpen, qrVisible, openRequested, renderedProfile,
+        documentId:String(performance.timeOrigin), profile:window.__tianyiLoginProbe || null});
 })()'''
 
 PROFILE_PROBE = r'''(() => {
     if (location.origin !== 'https://music.163.com') return;
-    const nonce = __NONCE__;
-    const state = {nonce, pending:true, profile:null};
+    const state = {nonce:__NONCE__, profile:null, stage:'credential'};
     window.__tianyiLoginProbe = state;
-    const csrf = (document.cookie.match(/(?:^|;\s*)__csrf=([^;]*)/) || [,''])[1];
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
-    const b64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)));
-    const hex = bytes => Array.from(bytes, n => n.toString(16).padStart(2,'0')).join('');
-    const encode = text => new TextEncoder().encode(text);
-    async function aes(text, secret) {
-        const key = await crypto.subtle.importKey('raw', encode(secret), 'AES-CBC', false, ['encrypt']);
-        return b64(await crypto.subtle.encrypt({name:'AES-CBC', iv:encode('0102030405060708')}, key, encode(text)));
-    }
-    async function body() {
-        const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-        const fixedSecret = __FIXTURE_SECRET__;
-        const secret = fixedSecret || Array.from(crypto.getRandomValues(new Uint8Array(16)), n => chars[n % chars.length]).join('');
-        const first = await aes(JSON.stringify({csrf_token:csrf, e_r:false}), '0CoJUm6Qyw8W8jud');
-        const params = await aes(first, secret);
-        const spki = 'MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDgtQn2JZ34ZC28NWYpAUd98iZ37BUrX/aKzmFbt7clFSs6sXqHauqKWqdtLkF2KexO40H1YTX8z2lSgBBOAxLsvaklV8k4cBFK9snQXE9/DDaFt6Rr7iVZMldczhC0JNgTz+SHXT6CBHuX3e9SdB1Ua44oncaTWz7OBGLbCiK45wIDAQAB';
-        const rsa = await crypto.subtle.importKey('spki', Uint8Array.from(atob(spki), c => c.charCodeAt(0)), {name:'RSA-OAEP',hash:'SHA-256'}, true, ['encrypt']);
-        const jwk = await crypto.subtle.exportKey('jwk', rsa);
-        const n64 = jwk.n.replace(/-/g,'+').replace(/_/g,'/');
-        const n = BigInt('0x' + hex(Uint8Array.from(atob(n64.padEnd(Math.ceil(n64.length/4)*4,'=')), c => c.charCodeAt(0))));
-        let a = BigInt('0x' + hex(encode(secret.split('').reverse().join('')))), e = 65537n, out = 1n;
-        while (e > 0n) { if (e & 1n) out = out * a % n; a = a * a % n; e >>= 1n; }
-        return new URLSearchParams({params, encSecKey:out.toString(16).padStart(256,'0')}).toString();
-    }
-    body().then(payload => fetch('/weapi/w/nuser/account/get?csrf_token=' + encodeURIComponent(csrf), {
-        method:'POST', credentials:'same-origin', redirect:'error',
-        headers:{'Content-Type':'application/x-www-form-urlencoded'},
-        body:payload, signal:controller.signal
-    })).then(r => r.ok ? r.json() : null).then(d => {
-        if (!d) return;
-        const data = d.data && typeof d.data === 'object' ? d.data : d;
-        const code = d.code === undefined ? data.code : d.code;
-        const p = data.profile;
-        if (code === 200 && p && /^[1-9][0-9]{0,18}$/.test(String(p.userId))) {
-            state.profile = {userId:String(p.userId), nickname:typeof p.nickname === 'string' ? p.nickname.slice(0,200) : ''};
+    // Read the website's current-user declaration from a fresh copy of My Music.
+    // A template keeps scripts, images and frames inert. Never execute returned HTML.
+    function currentUser(html) {
+        const template = document.createElement('template');
+        template.innerHTML = html;
+        for (const script of template.content.querySelectorAll('script:not([src])')) {
+            const declaration = /(?:^|[;\n])\s*(?:var\s+GUser|window\.GUser)\s*=\s*\{/m.exec(script.textContent);
+            if (!declaration) continue;
+            const contents = script.textContent.slice(declaration.index + declaration[0].length);
+            // The official page emits a JS object literal. Consume complete fields
+            // so a nickname or another nested user's ID cannot be taken as the owner.
+            const field = /\s*(?:"(\w+)"|'(\w+)'|(\w+))\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|true|false|null|-?\d+(?:\.\d+)?)\s*([,}])/y;
+            let match, id = '', nickname = '';
+            while ((match = field.exec(contents)) !== null) {
+                const key = match[1] || match[2] || match[3];
+                if (key === 'userId') id = match[4].replace(/^(['"])(.*)\1$/, '$2');
+                if (key === 'nickname' && match[4].startsWith('"')) {
+                    try { nickname = JSON.parse(match[4]).slice(0, 200); } catch (_) {}
+                }
+                if (match[5] === '}') break;
+            }
+            if (/^[1-9][0-9]{0,18}$/.test(id)) return {userId:id, nickname};
         }
-    }).catch(() => {}).finally(() => {clearTimeout(timer); state.pending = false;});
+        return null;
+    }
+    fetch('/my/', {credentials:'same-origin', cache:'no-store', redirect:'error', signal:controller.signal})
+        .then(async response => {
+            if (response.status === 401 || response.status === 403 || response.status === 429) {
+                state.stage = 'verification_rejected';
+                return;
+            }
+            if (!response.ok) {state.stage = 'verification_network'; return;}
+            const url = new URL(response.url);
+            if (url.origin !== location.origin || url.pathname !== '/my/') return;
+            const html = await response.text();
+            const owner = html.length <= 2 * 1024 * 1024 ? currentUser(html) : null;
+            if (owner) state.profile = owner;
+            else state.stage = 'verification_session';
+        })
+        .catch(() => {state.stage = 'verification_network';})
+        .finally(() => clearTimeout(timer));
 })()'''
 
 
-def page_state(window):
+def page_state(window, *, open_login=False):
     """Native JS evaluation: no Promise callback / pywebview bridge dependency."""
-    value = window.run_js(PAGE_PROBE)
+    value = window.run_js(PAGE_PROBE.replace('__OPEN_LOGIN__', 'true' if open_login else 'false'))
     if isinstance(value, str) and len(value) <= 4096:
         try:
             value = json.loads(value)
@@ -109,17 +137,73 @@ def official_page(url):
         return False
 
 
-def login_cookie(cookies):
+def login_cookie(entries):
+    """Choose valid cookie fields for the official origin, preferring its own domain."""
     values = {}
-    for jar in cookies:
-        for name, morsel in jar.items():
-            if (name in COOKIE_NAMES and morsel['domain'].lower().lstrip('.') in ('music.163.com', '163.com')
-                    and morsel['path'] in ('', '/')):
-                values[name] = morsel.value
+    for name, value, domain, path in entries:
+        domain = domain.lower().lstrip('.')
+        if (name in COOKIE_NAMES and domain in ('music.163.com', '163.com') and path in ('', '/')
+                and value and valid_cookie_value(value) and (name not in values or domain == 'music.163.com')):
+            values[name] = value
     return cookie_header('; '.join(f'{name}={value}' for name, value in values.items()))
 
 
+class OfficialPage:
+    """Bounded WebView2 operations on this window, including during a login redirect."""
+    def __init__(self, window):
+        from System import Func, Object
+        self.native = window.native
+        self.callback = Func[Object]
+
+    def _result(self, start, finish):
+        def on_official(action):
+            core = self.native.webview.CoreWebView2
+            if official_page(str(core.Source)):
+                return action(core)
+            return None
+        task = self.native.Invoke(self.callback(lambda: on_official(start)))
+        if task is None:
+            return None
+        # Wait off the UI thread. Neither navigation nor a missing JS bridge
+        # should hold up the credential read or the user's close command.
+        if not task.Wait(3000):
+            raise TimeoutError()
+        return self.native.Invoke(self.callback(lambda: on_official(lambda core: finish(task.Result))))
+
+    def run_js(self, script):
+        raw = self._result(lambda core: core.ExecuteScriptAsync(script), str)
+        return json.loads(raw) if raw and len(raw) <= 16384 else None
+
+    def cookie(self):
+        def read(rows):
+            return login_cookie((row.Name, row.Value, row.Domain, row.Path)
+                                for row in rows if row.Name in COOKIE_NAMES)
+        return self._result(lambda core: core.CookieManager.GetCookiesAsync(ORIGIN + '/'), read) or ''
+
+    def reload(self):
+        def refresh():
+            core = self.native.webview.CoreWebView2
+            if official_page(str(core.Source)):
+                core.Reload()
+            return None
+        self.native.Invoke(self.callback(refresh))
+
+
+def failure_event(step, error):
+    # A source line identifies the failing operation without recording any
+    # exception text, URL, account, QR, local variables or credentials.
+    trace = error.__traceback__
+    at = 0
+    while trace:
+        if trace.tb_frame.f_globals.get('__name__') == __name__:
+            at = trace.tb_lineno
+        trace = trace.tb_next
+    return {'type':'fatal', 'step':step, 'at':at}
+
+
 def emit(value):
+    if not any(flag in sys.argv for flag in ('--self-test', '--probe-official', '--probe-login-flow')):
+        record_login_progress(value)
     print(PREFIX + json.dumps(value, ensure_ascii=True), flush=True)
 
 
@@ -134,7 +218,7 @@ def run():
     webview.settings['OPEN_EXTERNAL_LINKS_IN_BROWSER'] = False
     webview.settings['ALLOW_DOWNLOADS'] = False
     webview.settings['ALLOW_FILE_URLS'] = False
-    window = webview.create_window('网易云官方登录 · 点击网页右上角登录，完成后自动返回桌宠',
+    window = webview.create_window('网易云官方登录 · 正在打开扫码窗口',
         html='<p>正在打开网易云官方登录页面…</p>', width=1060, height=760,
         min_size=(800, 600), hidden=test or probe or flow_probe, on_top=False)
     window.events.closed += lambda: closed.set()
@@ -153,6 +237,10 @@ def run():
 
     def loop():
         threading.Thread(target=reader, daemon=True).start()
+        step = 'startup'
+        scan = WebScanProgress()
+        verification = None
+        last_stage = None
         try:
             if not window.events.loaded.wait(25):
                 raise RuntimeError('initialization')
@@ -174,11 +262,17 @@ def run():
                 # reading their encrypted body, or exposing any QR key/Cookie.
                 from System import Action
                 from System.IO import Stream, StreamReader
-                from System.Threading.Tasks import Task
+                from System.Threading.Tasks import Task, TaskScheduler
                 def response(sender, args):
                     address = str(args.Request.Uri)
                     path = urlsplit(address).path
-                    if not official_page(address) or path not in ('/api/login/qrcode/client/login', '/weapi/login/qrcode/client/login'):
+                    if not official_page(address):
+                        return
+                    if path in ('/api/login/qrcode/unikey', '/weapi/login/qrcode/unikey'):
+                        if args.Response.StatusCode == 200:
+                            site_events.put('new_code')
+                        return
+                    if path not in ('/api/login/qrcode/client/login', '/weapi/login/qrcode/client/login'):
                         return
                     if args.Response.StatusCode != 200:
                         site_events.put('site_rejected')
@@ -186,23 +280,28 @@ def run():
                     def received(task):
                         try:
                             reader = StreamReader(task.Result)
-                            text = reader.ReadToEnd()
-                            reader.Close()
+                            try:
+                                text = reader.ReadToEnd()
+                            finally:
+                                reader.Close()
                             if len(text) > 65536:
                                 return
-                            data = json.loads(text)
-                            code = data.get('code')
-                            stage = {800:'expired', 801:'waiting', 802:'scanned', 803:'confirmed'}.get(code)
+                            stage = qr_stage(json.loads(text))
                             if stage:
                                 site_events.put(stage)
-                            elif type(code) is int and code != 200:
-                                site_events.put('site_rejected')
                         except Exception:
                             pass
-                    args.Response.GetContentAsync().ContinueWith(Action[Task[Stream]](received), window.native.browser.syncContextTaskScheduler)
+                    try:
+                        # Obtain the response on the WebView thread, read its blocking stream off it.
+                        args.Response.GetContentAsync().ContinueWith(Action[Task[Stream]](received), TaskScheduler.Default)
+                    except Exception:
+                        # Navigation can retire an in-flight response. The visible official
+                        # login dialog and My Music still report the site's result.
+                        pass
                 core.WebResourceResponseReceived += response
                 return None
             window.native.Invoke(Func[Object](configure))
+            source = OfficialPage(window)
             def current_url():
                 # get_current_url is decorated with a 20-second loaded wait.
                 # Read native Source instead while login may be navigating.
@@ -215,98 +314,146 @@ def run():
                 # and encrypted handoff, without contacting the official site.
                 from System import Array, Byte
                 from System.IO import MemoryStream
+                delayed_session = '--fixture-delayed-session' in sys.argv
+                early_cookie = '--fixture-unverified-session' in sys.argv
+                button_fixture = '--fixture-official-session' in sys.argv
+                rendered_only = '--fixture-rendered-account' in sys.argv
+                cookie_rotation = '--fixture-rotated-session' in sys.argv
+                rotated = False
+                document_loads = 0
+                qr_checks = 0
+                fixture_signed_in = False
                 def fixture_resource(sender, args):
+                    nonlocal document_loads, qr_checks, rotated
                     url = str(args.Request.Uri)
+                    environment = window.native.webview.CoreWebView2.Environment
+                    args.Response = environment.CreateWebResourceResponse(None, 404, 'Not Found', '')
                     if not official_page(url):
                         return
-                    if urlsplit(url).path == '/weapi/w/nuser/account/get':
-                        # Check real AES-CBC/RSA form encoding with .NET's native
-                        # AES decryptor and an explicitly synthetic fixed secret.
-                        from urllib.parse import parse_qs
-                        from System.IO import StreamReader
-                        from System.Security.Cryptography import Aes
-                        from System.Text import Encoding
-                        reader = StreamReader(args.Request.Content)
-                        values = parse_qs(reader.ReadToEnd())
-                        def decrypt(value, secret):
-                            cipher = Aes.Create()
-                            cipher.Key = Encoding.UTF8.GetBytes(secret)
-                            cipher.IV = Encoding.UTF8.GetBytes('0102030405060708')
-                            encoded = base64.b64decode(value)
-                            data = Array[Byte](encoded)
-                            transform = cipher.CreateDecryptor()
-                            result = transform.TransformFinalBlock(data, 0, len(encoded))
-                            cipher.Dispose()
-                            return str(Encoding.UTF8.GetString(result))
-                        inner = decrypt(values['params'][0], 'fixture-secret16')
-                        decoded = json.loads(decrypt(inner, '0CoJUm6Qyw8W8jud'))
-                        import re
-                        public = base64.b64decode(re.search(r"const spki = '([^']+)'", PROFILE_PROBE).group(1))
-                        start = public.index(b'\x02\x81\x81\x00') + 4
-                        modulus = int.from_bytes(public[start:start + 128], 'big')
-                        expected_rsa = format(pow(int.from_bytes(b'fixture-secret16'[::-1], 'big'), 65537, modulus), '0256x')
-                        if decoded != {'csrf_token':'', 'e_r':False} or values['encSecKey'][0] != expected_rsa:
-                            raise ValueError('synthetic encryption mismatch')
-                        content = json.dumps({'code':200, 'data':{'profile':{'userId':77, 'nickname':'合成网页登录测试'}}})
+                    path = urlsplit(url).path
+                    if path == '/my/':
+                        # Only the regular website document in this synthetic WebView reveals its owner.
+                        signed_in = (fixture_signed_in and not rendered_only
+                                     and (not early_cookie or document_loads >= 2))
+                        owner = 'userId:77,nickname:"合成网页登录测试"' if signed_in else 'nickname:"其他人,userId:99}"'
+                        if cookie_rotation and signed_in and not rotated:
+                            rotated = True
+                            owner = 'userId:99'
+                            fixture_cookie('synthetic-rotated')
+                        content = '<html><script>var GUser={' + owner + '}; var other={userId:99};</script></html>'
+                        mime = 'text/html; charset=utf-8'
+                    elif path == '/weapi/login/qrcode/client/login':
+                        qr_checks += 1
+                        code = min(800 + qr_checks, 803) if button_fixture else 803
+                        content = json.dumps({'code':code})
                         mime = 'application/json; charset=utf-8'
-                    elif urlsplit(url).path == '/fixture-frame':
+                    elif path == '/fixture-confirmed' and button_fixture and qr_checks >= 3:
+                        fixture_cookie()
+                        window.events.loaded.clear()
+                        content, mime = '{}', 'application/json'
+                    elif path == '/fixture-frame':
                         content = '<p class="confirm">请在手机上确认登录</p>'
-                        if '--fixture-fetch' not in sys.argv:
-                            content += '<script>var GUser={userId:77,nickname:"合成网页登录测试"};</script>'
+                        if rendered_only or early_cookie:
+                            # A stale rendered owner must not complete the next account's login.
+                            user_id = 77 if document_loads >= 2 else 99
+                            content += f'<script>var GUser={{userId:{user_id},nickname:"合成网页登录测试"}};</script>'
+                        mime = 'text/html; charset=utf-8'
+                    elif path == '/':
+                        document_loads += 1
+                        content = '<html><body><p class="suc-txt" style="display:none">扫描成功</p><iframe src="/fixture-frame"></iframe><script>window.pywebview=undefined;</script></body></html>'
+                        if button_fixture:
+                            # No modal or credential until the production opener finds the late login button.
+                            content = """<button data-action="login" hidden>登录</button>
+                                <section class="m-layer" hidden><h2>扫码登录</h2><canvas width="150" height="150"></canvas></section>
+                                <script>
+                                const button = document.querySelector('button');
+                                setTimeout(() => button.hidden = false, 1300);
+                                button.onclick = () => {
+                                    document.querySelector('section').hidden = false;
+                                    async function poll() {
+                                        const response = await fetch('/weapi/login/qrcode/client/login', {method:'POST'});
+                                        const result = await response.json();
+                                        if (result.code === 803) setTimeout(() => fetch('/fixture-confirmed'), 1400);
+                                        else setTimeout(poll, 1400);
+                                    }
+                                    poll();
+                                };
+                                </script>"""
+                        elif delayed_session or early_cookie or rendered_only:
+                            if document_loads == 1:
+                                content = content.replace('</body>', """<p class="suc-txt" id="result"></p><script>
+                                    fetch('/weapi/login/qrcode/client/login', {method:'POST'}).then(r => r.json()).then(r => {
+                                        if (r.code === 803) document.getElementById('result').textContent = '登录成功';
+                                    });</script></body>""")
+                            elif delayed_session:
+                                fixture_cookie()
                         mime = 'text/html; charset=utf-8'
                     else:
-                        content = '<html><body><p class="suc-txt" style="display:none">扫描成功</p><iframe src="/fixture-frame"></iframe><script>window.pywebview=undefined;</script></body></html>'
-                        mime = 'text/html; charset=utf-8'
+                        content, mime = '', 'text/plain'
                     stream = MemoryStream(Array[Byte](content.encode('utf-8')))
-                    args.Response = window.native.webview.CoreWebView2.Environment.CreateWebResourceResponse(stream, 200, 'OK', 'Content-Type: ' + mime)
+                    args.Response = environment.CreateWebResourceResponse(stream, 200, 'OK', 'Content-Type: ' + mime + '\r\nCache-Control: no-store')
                 def fixture_setup():
                     window.native.webview.CoreWebView2.WebResourceRequested += fixture_resource
                     return None
                 window.native.Invoke(Func[Object](fixture_setup))
-                def fixture_cookie():
+                def fixture_cookie(value='synthetic-only'):
+                    nonlocal fixture_signed_in
                     manager = window.native.webview.CoreWebView2.CookieManager
-                    cookie = manager.CreateCookie('MUSIC_U', 'synthetic-only', '.music.163.com', '/')
+                    cookie = manager.CreateCookie('MUSIC_U', value, '.music.163.com', '/')
                     cookie.IsHttpOnly = True
                     cookie.IsSecure = True
                     manager.AddOrUpdateCookie(cookie)
+                    fixture_signed_in = True
                     return None
-                window.native.Invoke(Func[Object](fixture_cookie))
+                if not delayed_session and not button_fixture:
+                    window.native.Invoke(Func[Object](fixture_cookie))
+            step = 'navigate'
             window.load_url(ORIGIN + '/#/my/')
             emit({'type': 'ready'})
-            deadline = time.monotonic() + (35 if probe or flow_probe else 600)
-            last_stage = None
-            probe_started = 0
+            opened_at = time.monotonic()
+            deadline = opened_at + (35 if probe or flow_probe else 600)
+            next_probe = 0
             probe_nonce = None
             probe_cookie = None
-            login_opened = bridge_disabled = False
-            last_scan = None
-            account_probe = AccountProbe()
-            native_retry = False
+            reload_identity = None
+            login_opened = bridge_disabled = qr_poll_waiting = False
+            open_attempts = 0
+            next_open = 0
+            read_failed_since = None
+
             def status(stage):
                 nonlocal last_stage
                 if stage != last_stage:
+                    message = STATUS[stage]
                     last_stage = stage
                     emit({'type':'status', 'stage':stage})
+                    def update_title():
+                        if not closed.is_set():
+                            window.native.Text = '网易云官方登录 · ' + message
+                        return None
+                    try:
+                        window.native.Invoke(Func[Object](update_title))
+                    except Exception:
+                        # The parent received the progress even if the form was closing.
+                        pass
             while not closed.is_set() and time.monotonic() < deadline:
+                manual_check = False
                 try:
                     command = commands.get(timeout=1)
                     if command == 'close':
                         window.destroy()
                         return
                     if command == 'check':
-                        probe_started = 0
-                        native_retry = True
+                        next_probe = 0
+                        manual_check = True
                         status('checking')
                 except queue.Empty:
                     pass
                 if not official_page(current_url()):
                     continue
                 if test and not bridge_disabled and window.events.loaded.is_set():
-                    window.run_js('window.pywebview = undefined;')
+                    source.run_js('window.pywebview = undefined;')
                     bridge_disabled = True
-                if flow_probe and not login_opened and window.events.loaded.is_set():
-                    window.run_js("document.querySelector('[data-action=login]')?.click();")
-                    login_opened = True
                 if probe:
                     page = window.evaluate_js('({length:document.body.innerText.length, frames:document.querySelectorAll("iframe").length, links:document.links.length})')
                     emit({'type': 'probe_status', 'page': page})
@@ -315,69 +462,133 @@ def run():
                         window.destroy()
                         return
                     continue
-                state = page_state(window)
-                while not site_events.empty():
-                    last_scan = site_events.get_nowait()
-                    status(last_scan)
-                    if flow_probe:
-                        emit({'type':'probe_flow', 'stage':last_scan})
-                        window.destroy()
+                now = time.monotonic()
+                try:
+                    step = 'page'
+                    state = page_state(source, open_login=not login_opened and open_attempts < 3 and now >= next_open)
+                    step = 'cookie'
+                    cookie = source.cookie()
+                except Exception:
+                    if closed.is_set():
                         return
-                if state.get('stage') in ('scanned', 'expired'):
-                    if state['stage'] == 'expired' or last_scan not in ('confirmed', 'site_rejected'):
-                        last_scan = state['stage']
-                        status(last_scan)
-                cookie = login_cookie(window.get_cookies())
-                if 'MUSIC_U=' not in cookie:
-                    probe_started = 0
-                    if not state.get('stage') and last_scan not in ('scanned', 'confirmed', 'site_rejected'):
-                        status('waiting')
+                    if read_failed_since is None:
+                        read_failed_since = now
+                    if time.monotonic() - read_failed_since >= 15:
+                        raise
+                    status('page_reloading')
                     continue
-                fingerprint = hashlib.sha256(cookie.encode()).digest()
-                candidate = state.get('profile') or {}
-                profile = candidate.get('profile') if candidate.get('nonce') == probe_nonce and probe_cookie == fingerprint else None
-                # Page fetch can be affected by page scripts or browser state.
-                # Verify the same isolated credentials independently; never infer
-                # a login from cookie presence or a stale rendered GUser alone.
-                # Fixtures remain entirely offline and never send fake cookies.
-                if not test and not profile:
-                    profile, native_stage = account_probe.poll(cookie, native_retry)
-                    native_retry = False
-                    if native_stage:
-                        status(native_stage)
-                if not isinstance(profile, dict) or not profile.get('userId'):
-                    if test and probe_started and not candidate.get('pending'):
-                        status('verification_retry')
-                    if not probe_started or time.monotonic() - probe_started > 10:
+                read_failed_since = None
+                if state.get('openRequested'):
+                    open_attempts += 1
+                    next_open = now + 4
+                if state.get('dialogOpen') or state.get('renderedProfile') or state.get('stage'):
+                    login_opened = True
+                prior_stage = scan.stage
+                if (state.get('stage') == 'confirmed' or scan.stage not in ('confirmed', 'site_rejected')
+                        and state.get('stage') in ('scanned', 'expired')):
+                    scan.observe(state['stage'], now)
+                while not site_events.empty():
+                    stage = site_events.get_nowait()
+                    login_opened = True
+                    scan.site_result(stage, now)
+                    qr_poll_waiting = stage == 'waiting'
+                if flow_probe and qr_poll_waiting and state.get('qrVisible'):
+                    emit({'type':'probe_flow', 'stage':'waiting', 'qr_visible':True, 'open_attempts':open_attempts})
+                    window.destroy()
+                    return
+                if scan.stage != prior_stage and scan.stage in ('scanned', 'confirmed'):
+                    status(scan.stage)
+                step = 'account'
+                profile = None
+                auth = cookie_values(cookie).get('MUSIC_U')
+                fingerprint = hashlib.sha256(auth.encode()).digest() if auth else None
+                if fingerprint != probe_cookie:
+                    probe_cookie, probe_nonce, next_probe = fingerprint, None, 0
+                    reload_identity = None
+                    verification = 'credential' if auth else None
+                rendered = state.get('renderedProfile')
+                document_id = state.get('documentId')
+                site_challenge = scan.stage == 'site_rejected' and (state.get('dialogOpen') or not rendered)
+                if auth and not site_challenge:
+                    candidate = state.get('profile')
+                    if isinstance(candidate, dict) and probe_nonce and candidate.get('nonce') == probe_nonce:
+                        profile = candidate.get('profile')
+                        if candidate.get('stage') in ('verification_session', 'verification_rejected', 'verification_network'):
+                            verification = candidate['stage']
+                    if reload_identity and document_id and reload_identity != document_id and rendered:
+                        # A fresh official navigation with the same credentials can
+                        # also establish the account (including JS-populated profiles).
+                        profile = rendered
+                    if profile and rendered and profile['userId'] == rendered['userId']:
+                        profile['nickname'] = rendered.get('nickname') or profile.get('nickname', '')
+                    allow_read = (verification != 'verification_rejected' and scan.stage != 'site_rejected'
+                                  or manual_check or scan.stage == 'confirmed' and prior_stage != 'confirmed')
+                    if not profile and now >= next_probe and allow_read:
                         probe_nonce = str(time.monotonic_ns())
-                        probe_cookie = fingerprint
-                        probe_started = time.monotonic()
-                        script = PROFILE_PROBE.replace('__NONCE__', json.dumps(probe_nonce))
-                        script = script.replace('__FIXTURE_SECRET__', json.dumps('fixture-secret16') if test else 'null')
-                        window.run_js(script)
-                        if test:
-                            status('credential')
+                        next_probe = now + 15
+                        try:
+                            source.run_js(PROFILE_PROBE.replace('__NONCE__', json.dumps(probe_nonce)))
+                        except Exception:
+                            # The previous document may already be retired by the site.
+                            verification = 'verification_network'
+                if not profile:
+                    pending, refresh = scan.without_session(now, manual_check, verification=verification,
+                                                            qr_visible=bool(state.get('qrVisible')))
+                    if not login_opened and verification is None and pending == 'waiting':
+                        pending = 'opening' if now - opened_at < 15 else 'open_manually'
+                    if (auth and rendered and not state.get('dialogOpen') and verification == 'verification_session'
+                            and scan.stage not in ('confirmed', 'site_rejected') and reload_identity is None):
+                        # Official login methods other than QR need not emit a phone confirmation.
+                        refresh = True
+                        pending = 'refresh_account_page'
+                    status(pending)
+                    if refresh:
+                        reload_identity = document_id if auth else None
+                        probe_nonce, next_probe = None, 0
+                        step = 'navigate'
+                        try:
+                            source.reload()
+                        except Exception:
+                            # The site may already be changing documents after phone confirmation.
+                            status('page_reloading')
                     continue
-                if not official_page(current_url()):
+                if closed.is_set() or not official_page(current_url()):
                     continue
                 # Re-read HttpOnly credentials after verification; a navigation or
                 # cookie rotation must not hand off the earlier cookie snapshot.
-                cookie = login_cookie(window.get_cookies())
-                if hashlib.sha256(cookie.encode()).digest() != fingerprint:
+                step = 'cookie'
+                retry_until = time.monotonic() + 8
+                while not closed.is_set():
+                    try:
+                        cookie = source.cookie()
+                        break
+                    except Exception:
+                        if time.monotonic() >= retry_until:
+                            raise
+                        status('page_reloading')
+                        closed.wait(.3)
+                if closed.is_set():
+                    return
+                current_auth = cookie_values(cookie).get('MUSIC_U', '')
+                if hashlib.sha256(current_auth.encode()).digest() != fingerprint:
                     continue
+                step = 'handoff'
                 session = session_data(dict(api='', uid=profile['userId'],
                     nickname=profile.get('nickname', ''), cookie=cookie), '')
+                step = 'protect'
                 token = base64.b64encode(protect(json.dumps(session).encode())).decode('ascii')
+                step = 'handoff'
                 emit({'type': 'session', 'protected': token})
                 window.destroy()
                 return
             if not closed.is_set():
-                emit({'type': 'timeout'})
+                emit({'type': 'timeout', 'stage':last_stage})
                 window.destroy()
-        except Exception:
-            # Browser exceptions can contain URLs/cookies. Never print their text.
-            emit({'type': 'fatal'})
+        except Exception as error:
             if not closed.is_set():
+                event = failure_event(step, error)
+                event['stage'] = last_stage
+                emit(event)
                 window.destroy()
 
     # A fresh private profile for each attempt; remember-login stays in DPAPI only.
@@ -385,9 +596,14 @@ def run():
         webview.start(loop, gui='edgechromium', private_mode=True, storage_path=directory)
 
 
-if __name__ == '__main__':
+def main():
     try:
         run()
-    except Exception:
-        emit({'type': 'fatal'})
-        sys.exit(1)
+    except Exception as error:
+        emit(failure_event('startup', error))
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

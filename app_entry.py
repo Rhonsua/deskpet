@@ -9,8 +9,8 @@ elif '--audio-worker' in sys.argv:
     from deskpet.music.players.audio_player_worker import run
     run()
 elif '--netease-worker' in sys.argv:
-    from deskpet.music.players.netease_player_worker import run
-    run()
+    from deskpet.music.players.netease_player_worker import main
+    sys.exit(main())
 elif '--web-worker' in sys.argv:
     from deskpet.music.players.web_player_worker import run
     run()

@@ -3,6 +3,7 @@ import os
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from pathlib import Path
 import tempfile
+import time
 from unittest.mock import patch
 
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -114,6 +115,16 @@ def main():
                 start.assert_called_once()
                 assert widget._browser_pending and widget.browser_recheck.isVisible()
                 assert '尚未收到' in widget.browser_status.text()
+                widget.browser_login.active = True
+                widget.account_buttons['扫码登录网易云'].click()
+                start.assert_called_once()
+                check.assert_called_once()
+                check.reset_mock()
+                widget.showMinimized()
+                app.processEvents()
+                assert widget._browser_pending and widget.browser_login.active, 'minimizing abandoned the scanned code'
+                widget.showNormal()
+                app.processEvents()
                 for stage,text in STATUS.items():
                     widget.browser_login.status.emit(text)
                     assert widget.browser_status.text()==text and widget.status.text()==text
@@ -145,6 +156,13 @@ def main():
                 widget.cancel()
                 widget.begin_browser_login();widget._browser_failed('网页登录验证未通过')
                 assert '重试' in widget.browser_status.text() and widget.browser_recheck.isHidden()
+                widget.begin_browser_login()
+                widget.browser_login.active = True
+                before = len(requests)
+                widget.browser_login._fail('读取当前登录窗口的会话失败（W123）。')
+                assert len(requests) == before and 'W123' in widget.browser_status.text()
+                assert not widget._browser_pending and widget.qr_image.isHidden() and not widget.qr_timer.isActive()
+                widget.cancel()
                 widget.remember.setChecked(True)
                 widget.begin_browser_login()
                 with patch.object(widget.cache,'save_session') as save:
@@ -239,12 +257,17 @@ def main():
         widget.download_playlist_button.click()
         assert playlist_downloads[-1] == 'likes', 'liked user ID was mistaken for a playlist ID'
         widget._current_playlist.pop('download_source')
-        assert widget.snapshot_list.count() == 1
         app.processEvents()
         assert widget.width() <= 760, 'song action rows made the page wider than its host'
         preview = Path(__file__).resolve().parents[1] / 'preview'
         preview.mkdir(exist_ok=True)
         assert widget.grab().save(str(preview / 'netease-playback-page.png'))
+        widget.tabs.setCurrentIndex(1)
+        deadline = time.monotonic() + 3
+        while widget._snapshot_loader.active and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(.01)
+        assert widget.snapshot_list.count() == 1
         with patch.object(widget.client, 'cancel') as cancel:
             widget.snapshot_list.setCurrentRow(0)
             widget.open_snapshot()

@@ -4,20 +4,22 @@ import sqlite3
 import json
 from pathlib import Path
 
-STAGES = [('初识', 0, '节奏练习、每日互动、基础纪念册'),
+STAGES = [('初识', 0, '节奏练习、每日互动、上河图画片'),
           ('熟悉', 40, '专属称呼、星光配色舞台'),
           ('信赖', 150, '本周回忆、回忆卡导出'),
           ('默契', 350, '极光配色舞台、默契阶段纪念'),
           ('知心', 700, '暮色配色舞台、知心阶段纪念'),
           ('陪伴', 1400, '金色纪念舞台、陪伴阶段纪念')]
+SCROLL_PIECES = 18
 CATEGORIES = {'headpat':'摸摸头', 'feed':'照料 / 投喂', 'chat':'说说话', 'listen':'听歌 / 安静陪伴 10 分钟', 'game':'完成演出 / 猜歌'}
 ACTION_NAMES = {'headpat':'摸摸头', 'feed':'一起吃点心', 'happy':'开心', 'mouse_wave':'挥挥手',
                 'turn':'转身', 'level_up':'庆祝', 'eat':'吃点心', 'sleep':'晚安', 'sing':'持麦唱歌'}
 
 
 class BondStore:
-    def __init__(self, path):
+    def __init__(self, path, *, game_completed=None):
         self.path=Path(path)
+        self.game_completed = game_completed
         self.db = sqlite3.connect(str(path))
         self.db.row_factory = sqlite3.Row
         if self.db.execute('PRAGMA user_version').fetchone()[0]>2:
@@ -46,6 +48,7 @@ class BondStore:
         with self.db:
             self.db.execute('INSERT OR IGNORE INTO state(id,created) VALUES(1,?)', (datetime.now().isoformat(),))
             self.card('first-meeting', '第一次相遇', '从今天开始，把真正发生的小事慢慢记下来。')
+            self._restore_scroll_unlocks()
         self.refresh()
         self._read_cache={}
         self._mutation_serial=0
@@ -197,8 +200,53 @@ class BondStore:
         except (ValueError,TypeError):return default
 
     def configure(self,key,value):
-        with self.db:self.db.execute('INSERT INTO preferences VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
-                                    (key,json.dumps(value,ensure_ascii=False)))
+        with self.db:
+            self._write_preference(key, value)
+
+    def _write_preference(self, key, value):
+        self.db.execute('INSERT INTO preferences VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                        (key, json.dumps(value, ensure_ascii=False)))
+
+    def _restore_scroll_unlocks(self):
+        """Credit older saves once, including a bookmark ahead of surviving daily history."""
+        joined = self.scroll_joined()
+        if joined < SCROLL_PIECES and self.db.execute(
+                "SELECT 1 FROM collection WHERE id='river-scroll-complete'").fetchone():
+            joined = SCROLL_PIECES
+            self._write_preference('river_scroll_joined', joined)
+        if joined > 1:
+            missing = joined - 1 - self._scroll_play_count()
+            if missing > self._scroll_legacy_credit():
+                self._write_preference('river_scroll_legacy_credit', missing)
+
+    def _scroll_legacy_credit(self):
+        credit = self.preference('river_scroll_legacy_credit', 0)
+        return credit if type(credit) is int and 0 <= credit < SCROLL_PIECES else 0
+
+    def _scroll_play_count(self):
+        marks = ','.join('?' for _ in CATEGORIES)
+        return self.db.execute(
+            f'SELECT COUNT(*) FROM (SELECT 1 FROM daily WHERE kind IN ({marks}) LIMIT ?)',
+            (*CATEGORIES, SCROLL_PIECES - 1)).fetchone()[0]
+
+    def scroll_unlocked(self):
+        return min(SCROLL_PIECES, 1 + self._scroll_play_count() + self._scroll_legacy_credit())
+
+    def scroll_joined(self):
+        count = self.preference('river_scroll_joined', 1)
+        return count if type(count) is int and 1 <= count <= SCROLL_PIECES else 1
+
+    def join_scroll(self, piece):
+        """A correct adjoining slice advances the bookmark exactly once."""
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            if type(piece) is not int or piece != self.scroll_joined() + 1 or piece > self.scroll_unlocked():
+                return False
+            self._write_preference('river_scroll_joined', piece)
+            if piece == SCROLL_PIECES:
+                self.card('river-scroll-complete', '第一次拼好洛天依上河图',
+                          '沿着浅蓝色带，把 2012 到 2026 的天依接成了一整幅画。')
+        return True
 
     def save_chart(self,chart, favorite=False):
         from .chart import validate,digest
@@ -228,12 +276,16 @@ class BondStore:
 
     def complete_round(self, session, chart, title, judge, *, kind='rhythm', now=None):
         now=now or datetime.now()
-        if self.db.execute('SELECT 1 FROM results WHERE session=?',(session,)).fetchone():return False
         with self.db:
-            self.db.execute('INSERT INTO results VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
-                (session,chart,title[:160],now.isoformat(),judge.score,judge.best,judge.perfect,judge.good,judge.misses,judge.holds,1,kind))
+            added = self.db.execute('INSERT INTO results VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(session) DO NOTHING',
+                (session,chart,title[:160],now.isoformat(),judge.score,judge.best,judge.perfect,judge.good,judge.misses,judge.holds,1,kind)).rowcount
+            if not added:
+                return False
             self.card('first-'+kind,'第一次'+('猜歌挑战' if kind=='quiz' else '节奏演出'),'这次一起完成的小演出。',now)
-            return self.award('game',now)
+            first = self.award('game',now)
+        if self.game_completed is not None:
+            self.game_completed()
+        return first
 
     def best(self,chart):
         row=self.db.execute('SELECT MAX(score),MAX(combo) FROM results WHERE chart=?',(chart,)).fetchone()

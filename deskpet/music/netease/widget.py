@@ -539,6 +539,9 @@ class NeteaseWidget(QWidget):
         if self.base:
             self.status.setText('官方网页登录使用默认直连。请先在高级连接设置清空自定义地址并保存。')
             return
+        if self._browser_current() and self.browser_login is not None and self.browser_login.active:
+            self.recheck_browser_login()
+            return
         if not self._logout(False):
             self.status.setText('旧登录数据清理失败，暂未打开新登录窗口，请检查目录权限。')
             return
@@ -552,7 +555,7 @@ class NeteaseWidget(QWidget):
         self._browser_epoch = self._session_epoch
         self.browser_recheck.show()
         self.browser_status.show()
-        self._browser_status('正在打开网易云官方网页；请在网页完成扫码和手机确认。尚未收到账号登录结果。')
+        self._browser_status('正在打开网易云官网的二维码。请在手机上确认登录，完成后将自动返回歌单。尚未收到账号登录结果。')
         self.browser_login.start()
 
     def _browser_current(self):
@@ -835,7 +838,9 @@ class NeteaseWidget(QWidget):
         if self._snapshot_loader.active:
             self._snapshots_dirty = True
         self._snapshot_loader.cancel()
-        self.cancel()
+        logging_in = self._browser_pending or self._qr_key or (self._busy and self.client.kind in ('qr', 'qr_check'))
+        if not (event.spontaneous() and self.window().isMinimized() and logging_in):
+            self.cancel()
         super().hideEvent(event)
 
     def showEvent(self, event):

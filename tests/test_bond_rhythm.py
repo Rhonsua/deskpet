@@ -7,7 +7,6 @@ import unittest
 from unittest.mock import Mock, patch
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
-from PySide6.QtMultimedia import QMediaPlayer
 from deskpet.mods.bond.chart import generate, validate, Judgement
 from deskpet.mods.bond.rhythm import RhythmGame
 
@@ -67,13 +66,14 @@ class RhythmTests(unittest.TestCase):
         self.addCleanup(self.game.close)
 
     def test_existing_song_is_not_interrupted(self):
+        self.mod.services.audio_claim.return_value=None
         self.mod.services.snapshot.return_value['playing']=True;self.game.start()
-        self.assertFalse(self.game.requested);self.assertIn('先暂停',self.game.label.text())
+        self.assertTrue(self.game.requested);self.assertTrue(self.game.timer.isActive())
+        self.assertIsNone(self.game.transport.engine)
 
     def test_close_ignores_loaded_and_releases_lease(self):
         self.game.start();self.game.close()
-        with patch.object(self.game.player,'play') as play:
-            self.game.loaded(QMediaPlayer.LoadedMedia);play.assert_not_called()
+        self.game.transport.started.emit()
         self.assertFalse(self.game.timer.isActive());self.mod.services.audio_release.assert_called_once()
         self.mod.finish_round.assert_not_called()
 
@@ -87,22 +87,29 @@ class RhythmTests(unittest.TestCase):
         self.mod.finish_round.assert_not_called()
 
     def test_loading_timeout_does_not_restart(self):
-        self.game.requested=True;self.game.loading_timeout();self.assertTrue(self.game.finished)
+        game=self.game
+        game.requested=True
+        self.assertTrue(game.transport.claim())
+        game.transport.live=True
+        game.transport.next_preferences=time.monotonic()+1
+        game.transport.last_advance=time.monotonic()-21
+        game.transport.tick();self.assertTrue(game.finished)
+        self.assertTrue(game.start_button.isEnabled());self.assertIn('超时',game.label.text())
         self.mod.active=False
-        with patch.object(self.game.player,'play') as play:
-            self.game.loaded(QMediaPlayer.LoadedMedia);play.assert_not_called()
+        game.transport.started.emit()
+        self.assertIsNone(game.started)
 
     def test_source_round_uses_audio_position_not_wall_time(self):
         self.game.start();self.game.source='virtual-song.mp3';self.game.offset=30
         self.game.started=time.monotonic()-200
-        with patch.object(self.game.player,'position',return_value=32000),patch.object(self.game.player,'playbackState',return_value=QMediaPlayer.PlayingState):self.game.update_game()
+        with patch.object(self.game.transport,'clock',return_value=2.):self.game.update_game()
         self.assertEqual(self.game.elapsed,2);self.assertFalse(self.game.finished)
 
-    def test_pause_freezes_round_and_other_music_still_cancels(self):
+    def test_pause_freezes_round_and_other_music_can_start(self):
         self.game.start();self.game.pause();elapsed=self.game.round.elapsed
         self.game.started-=15;self.game.update_game();self.assertEqual(self.game.round.elapsed,elapsed)
         self.mod.services.snapshot.return_value['playing']=True;self.game.update_game()
-        self.assertTrue(self.game.finished);self.mod.finish_round.assert_not_called()
+        self.assertFalse(self.game.finished);self.assertTrue(self.game.paused);self.mod.finish_round.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()

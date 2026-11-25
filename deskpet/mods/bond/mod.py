@@ -18,11 +18,13 @@ class BondMod:
         self.timer=None
         self.analyzers=[]
         self.analysis_owner=None
+        self.activity_audio_owner = None
 
     def start(self):
         if self.services is None or self.services.version < 3:
             raise ValueError('互动养成需要支持 Mod API 3 的新版主程序。')
-        self.store = BondStore(self.context.data_dir / 'bond.db')
+        self.store = BondStore(self.context.data_dir / 'bond.db',
+                               game_completed=getattr(self.services, 'game_completed', None))
         self.services.growth(self.store.projection)
         self.services.subscribe(self.event)
         self.services.companion_context(self.memory_context)
@@ -153,6 +155,7 @@ class BondMod:
         for widget in list(self.widgets):
             try:
                 if widget.isVisible():widget.refresh()
+                elif widget.album.isVisible():widget.album.reload()
             except RuntimeError:self.widgets.remove(widget)
 
     def create_widget(self, parent=None):

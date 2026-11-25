@@ -45,7 +45,7 @@
 
 目标陪伴与工作人设 Mod 分别通过 `packaging/build_goal_mod.py`、`packaging/build_work_persona_mod.py` 构建为独立 ZIP。语音安装助手位于 `packaging/voice_setup/`，与桌宠安装包和语音模型分别分发。
 
-互动养成增强包通过 `packaging/build_bond_mod.py` 构建，当前产物为 `TianyiPet-BondCompanion-0.2.3.zip`。需要 0.7.2 主程序的 Mod API 3；先安装主程序，再将 ZIP 中 `bond` 文件夹解压到「扩展功能 / Mod → 打开 Mod 文件夹」所打开的目录，重启并启用。`deskpet.mods.bond` 仍明确排除在本体构建外，宿主只包含通用入口、事件、音频占用及消费接口。
+互动养成增强包通过 `packaging/build_bond_mod.py` 构建，当前产物为 `TianyiPet-BondCompanion-0.3.2.zip`。需要 0.7.2 主程序的 Mod API 3。将 ZIP 中的 `bond` 文件夹解压到「扩展功能 / Mod → 打开 Mod 文件夹」所打开的目录，重启并启用。小游戏音符奖励需要带「赚音符」的新版桌宠本体。
 
 ## 检查与清理
 

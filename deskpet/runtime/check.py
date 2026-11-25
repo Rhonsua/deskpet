@@ -11,7 +11,6 @@ import wave
 def check_music_features(pet, app, scratch, result):
     """Exercise newly frozen dependencies and workers with synthetic data only."""
     from deskpet.music.netease.direct import prepare_request
-    from deskpet.music.netease.account_probe import AccountProbe
     from deskpet.music.netease.browser_login import BrowserLogin
     import numpy as np
     music = pet.music_companion
@@ -21,9 +20,6 @@ def check_music_features(pet, app, scratch, result):
     music.timer.stop()
     address, payload, header = prepare_request('https://music.163.com/api/w/nuser/account/get', {}, '')
     assert address.endswith('/weapi/w/nuser/account/get') and len(payload['encSecKey']) == 256 and not header
-    probe = AccountProbe(lambda cookie: (dict(userId='77'), 'verified'))
-    probe.poll('MUSIC_U=synthetic-only')
-    probe.results.get(timeout=3)
     music.lyrics.update('netease:77', 1000, True)
     music.lyrics.import_online('77', '打包检查', '[00:01]这是清晰的测试歌词', 'netease:77')
     music.lyrics.configure(color='#ffd666', left_passthrough=True)
@@ -41,7 +37,7 @@ def check_music_features(pet, app, scratch, result):
     sessions, errors = [], []
     login.completed.connect(sessions.append)
     login.failed.connect(errors.append)
-    login.worker_args = ['--self-test', '--fixture-fetch']
+    login.worker_args = ['--self-test', '--fixture-official-session']
     try:
         login.start()
         deadline = time.monotonic() + 40
@@ -101,6 +97,24 @@ def check_mod_package(pet, app, archive_path, result):
                 'assets/SOURCES.md', 'assets/tianyi-background.webp', 'assets/tianyi-cover.webp',
                 'assets/tianyi-stage.webp', 'assets/tianyi-sing-front.webp',
                 'assets/tianyi-sing-left.webp', 'assets/tianyi-sing-right.webp')}
+            version = json.loads(archive.read('bond/mod.json'))['version']
+            scroll_versions = ('0.3.0', '0.3.1', '0.3.2')
+            if version in ('0.2.4', '0.2.5', '0.2.6', '0.2.7', '0.2.8', '0.2.9', *scroll_versions):
+                expected.remove('bond/assets/tianyi-cover.webp')
+                expected.update(('bond/scrapbook.py','bond/assets/album-stationery.webp',
+                                 'bond/assets/album-jasmine.webp','bond/assets/album-wings.webp'))
+                if version != '0.2.4':
+                    expected.update(('bond/studio.py','bond/assets/stage-scenery.webp'))
+                if version == '0.2.9' or version in scroll_versions:
+                    expected.add('bond/assets/album-tianyi-days.webp')
+                if version in scroll_versions:
+                    expected.add('bond/river_scroll.py')
+                    expected.update(f'bond/assets/river-scroll/{i:02d}.webp' for i in range(1, 19))
+                    # Source checkouts may omit the separately distributed character art.
+                    optional_art = {'bond/assets/' + name + '.webp' for name in (
+                        'album-wings', 'album-jasmine', 'tianyi-background', 'tianyi-stage',
+                        'tianyi-sing-front', 'tianyi-sing-left', 'tianyi-sing-right')}
+                    expected -= optional_art.difference(archive.namelist())
         else:
             expected = {'goals/' + name for name in ('mod.json', 'entry.py', '__init__.py', 'mod.py',
                         'store.py', 'widget.py', 'README.txt', 'LICENSE')}
@@ -157,6 +171,7 @@ def check_mod_package(pet, app, archive_path, result):
 
 def _check_bond_package(pet, host, app, result):
     """Use only the installed external namespace, never import bundled Bond code."""
+    from contextlib import closing
     import sqlite3
     import shiboken6
     assert not host.manager.is_enabled('bond')
@@ -185,7 +200,7 @@ def _check_bond_package(pet, host, app, result):
     app.processEvents()
     assert (not shiboken6.isValid(editor) or not editor.isVisible()) and not mod.active
     assert database.is_file()
-    with sqlite3.connect(str(database)) as saved:
+    with closing(sqlite3.connect(str(database))) as saved:
         assert saved.execute('SELECT affinity FROM state WHERE id=1').fetchone()[0] == affinity
     assert tuple(pet.panel.store.db.execute('SELECT level,xp FROM pet').fetchone()) == old_growth
     assert host.manager.set_enabled('bond', True), host.manager.error('bond')

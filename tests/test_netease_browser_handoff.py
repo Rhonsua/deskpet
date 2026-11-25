@@ -10,6 +10,7 @@ from PySide6.QtCore import QCoreApplication, QEvent, QProcess
 from PySide6.QtTest import QSignalSpy
 from deskpet.music.netease.browser_login import BrowserLogin
 from deskpet.music.players.netease_player_worker import page_state
+from deskpet.music.netease.login_progress import failure_message
 
 
 class BrowserHandoffTests(unittest.TestCase):
@@ -43,6 +44,21 @@ class BrowserHandoffTests(unittest.TestCase):
         self.assertTrue(login.active)
         self.assertEqual(login.buffer, b'new-attempt')
         self.assertEqual(failures, [])
+
+    def test_webview_errors_expose_only_the_failed_step(self):
+        for step in ('cookie', 'page', 'other'):
+            login = BrowserLogin()
+            self.addCleanup(login.cancel)
+            login.active = True
+            errors = []
+            login.failed.connect(errors.append)
+            event = dict(type='fatal', step=step, at=123, message='sensitive test string')
+            line = b'TIANYI_NETEASE_LOGIN ' + json.dumps(event).encode() + b'\n'
+            with patch.object(login.process, 'readAllStandardOutput', return_value=line):
+                login._read()
+            self.assertEqual(errors, [failure_message(event)])
+            self.assertNotIn('sensitive', errors[0])
+            self.assertFalse(login.active)
 
     def test_cancelled_owner_has_no_signal_reference_cycle(self):
         for _ in range(12):

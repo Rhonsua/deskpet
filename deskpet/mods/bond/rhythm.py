@@ -3,12 +3,14 @@ import math
 import time
 import uuid
 from pathlib import Path
-from PySide6.QtCore import Qt,QTimer,QUrl,Signal,QEvent
-from PySide6.QtGui import QColor,QPainter,QFont,QKeySequence
+from PySide6.QtCore import Qt,QTimer,QUrl,Signal,QEvent,QRectF
+from PySide6.QtGui import QColor,QPainter,QFont,QKeySequence,QPixmap,QPen
 from PySide6.QtWidgets import QDialog,QVBoxLayout,QHBoxLayout,QLabel,QWidget,QPushButton,QCheckBox,QSpinBox,QKeySequenceEdit
-from PySide6.QtMultimedia import QMediaPlayer,QAudioOutput,QSoundEffect
 from .chart import generate,Judgement
-from .stage_art import PALETTES,paint_stage
+from .playback import ClipPlayer
+from .scrapbook import activity_images
+from .stage_art import paint_stage, stage_image
+from .studio import activity_style, dark_theme
 
 
 class Stage(QWidget):
@@ -16,19 +18,54 @@ class Stage(QWidget):
         super().__init__();self.game=game;self.mouse_lane=None
         self.theme=game.mod.store.preference('theme',None) if hasattr(game.mod.store,'preference') else None
         self.stage=game.mod.store.stage
-        self.setMinimumSize(540,340);self.setFocusPolicy(Qt.StrongFocus)
+        self.setMinimumSize(400,285);self.setFocusPolicy(Qt.StrongFocus)
+        self.backdrop = None
+        self.backdrop_key = None
+        activity_images().ready.connect(self.update)
+
+    def stage_backdrop(self, lanes, line):
+        ratio = self.devicePixelRatioF()
+        w, h = self.width(), self.height()
+        key = (w, h, ratio, self.theme, self.stage, lanes, stage_image('stage-scenery').cacheKey())
+        if key == self.backdrop_key:
+            return self.backdrop
+        surface = QPixmap(round(w*ratio), round(h*ratio))
+        surface.setDevicePixelRatio(ratio)
+        surface.fill(QColor('#172737'))
+        p = QPainter(surface)
+        p.setRenderHint(QPainter.Antialiasing)
+        paint_stage(p, self.rect(), self.theme, self.stage)
+        lane_width = w / lanes
+        for lane in range(lanes):
+            bounds = QRectF(lane*lane_width+2, 0, lane_width-4, line+11)
+            p.fillRect(bounds, QColor(11,25,40,200 if lane%2 else 184))
+            if lane:
+                p.setPen(QPen(QColor(205,230,226,111), 1))
+                p.drawLine(round(lane*lane_width),0,round(lane*lane_width),line+10)
+        p.fillRect(QRectF(0,line+10,w,h-line-10),QColor('#1a2d3c'))
+        p.fillRect(QRectF(0,line-3,w,6), QColor(140,225,210,72))
+        p.fillRect(QRectF(0,line-1,w,2), QColor('#c2f3df'))
+        p.end()
+        self.backdrop_key, self.backdrop = key, surface
+        return surface
 
     def paintEvent(self,_):
-        g=self.game;w,h=self.width(),self.height();lanes=g.chart['lanes'];line=h-55
+        g=self.game;w,h=self.width(),self.height();lanes=g.chart['lanes'];line=h-52
         p=QPainter(self);p.setRenderHint(QPainter.Antialiasing)
-        paint_stage(p,self.rect(),self.theme,self.stage,g.elapsed if g.effects.isChecked() else 0)
-        p.setPen(QColor('#8fa7cc'))
-        for lane in range(1,lanes):p.drawLine(round(w*lane/lanes),0,round(w*lane/lanes),h)
-        p.drawLine(0,line,w,line)
+        p.drawPixmap(0,0,self.stage_backdrop(lanes,line))
+        cap_width = min(80., w/lanes*.52)
+        p.setFont(QFont(self.font().family(),11,QFont.Bold))
         for lane,key in enumerate(g.keys_text):
-            x=round(w*(lane+.5)/lanes)
-            p.setBrush(QColor('#9debea' if lane in g.round.held else '#48687e'));p.drawEllipse(x-26,line-26,52,52)
-            p.setPen(QColor('white'));p.drawText(x-20,line-13,40,26,Qt.AlignCenter,key)
+            x = w*(lane+.5)/lanes
+            held = lane in g.round.held
+            slot = QRectF(x-cap_width/2, line+15, cap_width, 28)
+            p.setPen(QPen(QColor('#a1dcd5' if held else '#6d929b'), 1.3))
+            p.setBrush(QColor('#a1dcd5' if held else '#293f4d'))
+            p.drawRoundedRect(slot, 7, 7)
+            p.setPen(QColor('#163741' if held else '#eef7ef'))
+            p.drawText(slot, Qt.AlignCenter, key)
+            if held:
+                p.fillRect(QRectF(x-cap_width*.62,line-2,cap_width*1.24,4),QColor('#ffe394'))
         travel=g.speed.value()/1000
         for n in g.round.notes:
             if n['state']=='done':continue
@@ -38,14 +75,25 @@ class Stage(QWidget):
             if tail>h+40 or head<0:continue
             if n['type']=='hold':
                 if n['state']=='holding':head=line
-                p.setPen(Qt.NoPen);p.setBrush(QColor('#fae097' if n['state']=='holding' else '#9a87d5'))
-                p.drawRoundedRect(x-13,max(-30,int(tail)),26,max(6,int(min(h+40,head)-max(-30,tail))),8,8)
-                p.setBrush(QColor('#fff0b0'));p.drawRoundedRect(x-22,int(tail)-5,44,10,3,3)
-            p.setPen(Qt.NoPen);p.setBrush(QColor('#acecf0' if n['type']=='tap' else '#ffe9a8'))
-            p.drawRoundedRect(x-23,int(head)-9,46,18,7,7)
+                top = max(-12., tail)
+                length = max(3., min(h+16.,head)-top)
+                stem = cap_width*.38
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor('#f9d279' if n['state']=='holding' else '#d8a96d'))
+                p.drawRoundedRect(QRectF(x-stem/2,top,stem,length),5,5)
+                p.fillRect(QRectF(x-1,top,2,length),QColor('#ffe7b6'))
+                p.setBrush(QColor('#fff0c3'))
+                p.drawRoundedRect(QRectF(x-cap_width*.36,tail-3,cap_width*.72,6),3,3)
+            is_hold = n['type']=='hold'
+            p.setPen(Qt.NoPen);p.setBrush(QColor('#163342'))
+            p.drawRoundedRect(QRectF(x-cap_width/2,head-6,cap_width,16),5,5)
+            p.setBrush(QColor('#f5ca87' if is_hold else '#99e5d8'))
+            p.drawRoundedRect(QRectF(x-cap_width/2,head-8,cap_width,14),5,5)
+            p.setBrush(QColor('#fff5db' if is_hold else '#dbfff4'))
+            p.drawRoundedRect(QRectF(x-cap_width*.26,head-5,cap_width*.52,3),1.5,1.5)
         strength=max(0,1-(time.monotonic()-g.flash)/.4)
         if strength:
-            p.setPen(QColor('#fff1b3'));p.setFont(QFont(self.font().family(),20,QFont.Bold))
+            p.setPen(QColor('#ffe39b' if g.feedback=='完美' else '#c4f1e9'));p.setFont(QFont(self.font().family(),20,QFont.Bold))
             p.drawText(self.rect().adjusted(0,24,0,-70),Qt.AlignTop|Qt.AlignHCenter,g.feedback)
             if g.effects.isChecked():
                 p.setPen(Qt.NoPen);p.setBrush(QColor(255,233,158,int(210*strength)))
@@ -85,14 +133,15 @@ class RhythmGame(QDialog):
         super().__init__(parent)
         self.mod,self.source=mod,source;self.setAttribute(Qt.WA_DeleteOnClose)
         self.setWindowTitle('天依 · 节奏演出');self.resize(720,580)
+        self.setStyleSheet(activity_style(dark_theme()))
         self.duration=40.;self.offset=0.;self.title=Path(source).stem if source else '离线节拍练习'
-        snapshot=mod.services.snapshot(music=True)
-        if source:
-            from mutagen import File
-            info=File(source)
-            if info is None or not info.info or info.info.length<35:raise ValueError('歌曲至少需要 35 秒')
-            self.duration=min(40,info.info.length-4);self.offset=min(info.info.length-self.duration-1,info.info.length*.3)
         if chart is None:
+            snapshot=mod.services.snapshot(music=True)
+            if source:
+                from mutagen import File
+                info=File(source)
+                if info is None or not info.info or info.info.length<35:raise ValueError('歌曲至少需要 35 秒')
+                self.duration=min(40,info.info.length-4);self.offset=min(info.info.length-self.duration-1,info.info.length*.3)
             analysis=snapshot['beats'] if snapshot['beat_source']=='local:'+source and source else {}
             chart=generate(analysis,source=source,offset=self.offset,duration=self.duration,bpm=bpm,seed=int(uuid.uuid4().hex[:8],16))
         self.chart=chart;self.duration=chart['duration'];self.offset=chart['offset'];self.round=Judgement(chart)
@@ -101,18 +150,20 @@ class RhythmGame(QDialog):
         configured=mod.store.preference('keys:'+str(chart['lanes']),None)
         if isinstance(configured,list) and len(configured)==chart['lanes'] and len(set(configured))==len(configured) and all(type(x) is int and 32<=x<=90 for x in configured):
             self.keys=tuple(configured);self.keys_text=tuple(QKeySequence(key).toString() for key in configured)
-        self.session=uuid.uuid4().hex;self.token=None;self.elapsed=0.;self.started=None
+        self.session=uuid.uuid4().hex;self.elapsed=0.;self.started=None
         self.requested=False;self.finished=False;self.paused=False;self.resume_keys=set();self.resume_wait=False
         self.flash=0.;self.flash_lane=1;self.feedback='';self.last_elapsed=0.;self.last_advance=time.monotonic();self.last_actor=0
-        self.player=QMediaPlayer(self);self.audio=QAudioOutput(self);self.audio.setVolume(snapshot.get('volume',.5))
-        self.router=mod.services.audio_route(self.audio,self) if hasattr(mod.services,'audio_route') else None
-        self.player.setAudioOutput(self.audio);self.player.errorOccurred.connect(self.failed);self.player.mediaStatusChanged.connect(self.loaded)
-        self.effect=None
-        box=QVBoxLayout(self);self.label=QLabel(self.title+'\n'+('节拍练习谱' if chart['practice'] else '歌曲拍点谱')+' · 单点 / 长条'+(' / 双押' if chart['difficulty']!='easy' and chart['input']!='mouse' else ''))
+        self.transport=ClipPlayer(mod,self)
+        self.transport.started.connect(self.audio_started)
+        self.transport.finished.connect(self.finish)
+        self.transport.failed.connect(self.failed)
+        self.effect=None;self.tap_bytes=None;self.tap_level=None
+        box=QVBoxLayout(self);box.setContentsMargins(15,12,15,12);box.setSpacing(8)
+        self.label=QLabel(self.title+' · '+('节拍练习谱' if chart['practice'] else '歌曲拍点谱'));self.label.setObjectName('sectionTitle')
         self.label.setTextFormat(Qt.PlainText);self.label.setWordWrap(True);box.addWidget(self.label)
         self.stage=Stage(self);box.addWidget(self.stage,1)
-        self.score=QLabel('按住长条到尾部 · 失误不会中断音乐');box.addWidget(self.score)
-        options=QHBoxLayout()
+        self.score=QLabel('薄荷色单点轻按，金色长条按住到尾端。');self.score.setObjectName('entryTitle');box.addWidget(self.score)
+        settings=QWidget();options=QHBoxLayout(settings);options.setContentsMargins(0,0,0,0);settings.hide()
         self.sound=QCheckBox('判定音');self.sound.setChecked(True);options.addWidget(self.sound)
         self.effects=QCheckBox('舞台光效');self.effects.setChecked(True);options.addWidget(self.effects)
         options.addWidget(QLabel('可见提前量'))
@@ -120,17 +171,18 @@ class RhythmGame(QDialog):
         options.addWidget(QLabel('输入偏移'))
         self.offset_control=QSpinBox();self.offset_control.setRange(-500,500);self.offset_control.setSuffix(' ms')
         self.offset_control.setValue(mod.store.preference('input_offset',0) if hasattr(mod.store,'preference') else 0)
-        options.addWidget(self.offset_control);box.addLayout(options)
-        row=QHBoxLayout();self.start_button=QPushButton('开始演出');self.start_button.clicked.connect(self.start);row.addWidget(self.start_button)
+        options.addWidget(self.offset_control);box.addWidget(settings)
+        row=QHBoxLayout();self.start_button=QPushButton('开始演出');self.start_button.setObjectName('primary');self.start_button.clicked.connect(self.start);row.addWidget(self.start_button)
         self.pause_button=QPushButton('暂停 / 继续');self.pause_button.setEnabled(False);self.pause_button.clicked.connect(self.toggle_pause);row.addWidget(self.pause_button)
         self.favorite=QPushButton('收藏这份谱');self.favorite.clicked.connect(self.save_chart);row.addWidget(self.favorite);box.addLayout(row)
-        self.key_button=QPushButton('调整按键');self.key_button.clicked.connect(self.configure_keys);row.addWidget(self.key_button)
+        self.key_button=QPushButton('调整按键');self.key_button.clicked.connect(self.configure_keys);options.addWidget(self.key_button)
+        row.addStretch();self.settings_button=QPushButton('游玩设置');self.settings_button.setCheckable(True);self.settings_button.toggled.connect(settings.setVisible);row.addWidget(self.settings_button)
         self.timer=QTimer(self);self.timer.setInterval(16);self.timer.timeout.connect(self.update_game)
         self.countdown=QTimer(self);self.countdown.setSingleShot(True);self.countdown.timeout.connect(self.resume)
 
     def now(self):
         if self.started is None:return 0.
-        return self.player.position()/1000-self.offset if self.source else time.monotonic()-self.started
+        return self.transport.clock() if self.source else time.monotonic()-self.started
 
     def save_chart(self):
         try:self.mod.store.save_chart(self.chart,True);self.favorite.setText('已收藏，可从演出页重玩')
@@ -138,16 +190,15 @@ class RhythmGame(QDialog):
 
     def start(self):
         if self.requested or self.finished or not self.mod.active:return
-        if self.mod.services.snapshot()['playing']:
-            self.label.setText('请先暂停普通播放，再开始演出。');return
-        self.token=self.mod.services.audio_claim()
-        if not self.token:self.label.setText('另一个互动正在使用声音，请先结束它。');return
+        if not self.source and not self.transport.claim():
+            self.label.setText('另一项互动正在播放，请先结束那项互动，再点开始。');return
         self.requested=True;self.start_button.setEnabled(False);self.offset_control.setEnabled(False)
         self.key_button.setEnabled(False)
         self.mod.store.configure('input_offset',self.offset_control.value())
         self.last_advance=time.monotonic()
         if self.source:
-            self.player.setSource(QUrl.fromLocalFile(self.source));QTimer.singleShot(20000,self,self.loading_timeout)
+            self.label.setText('正在准备演出片段…')
+            self.transport.play(self.source,self.offset,self.duration)
         else:self.started=time.monotonic();self.timer.start();self.pause_button.setEnabled(True)
         self.stage.setFocus()
 
@@ -178,18 +229,11 @@ class RhythmGame(QDialog):
         if not event.isAutoRepeat() and event.key() in self.keys:self.release(self.keys.index(event.key()));event.accept()
         else:super().keyReleaseEvent(event)
 
-    def loaded(self,status):
+    def audio_started(self):
         if self.finished or not self.requested or not self.mod.active:return
-        if status==QMediaPlayer.EndOfMedia:
-            if self.elapsed>=self.duration-.2:self.finish()
-            else:self.failed()
-        elif status==QMediaPlayer.LoadedMedia and self.started is None:
-            self.player.setPosition(round(self.offset*1000));self.player.play()
-            self.started=self.last_advance=time.monotonic();self.timer.start();self.pause_button.setEnabled(True)
-            self.mod.services.act('sing')
-
-    def loading_timeout(self):
-        if self.requested and self.started is None and not self.finished:self.failed()
+        self.label.setText(self.title)
+        self.started=self.last_advance=time.monotonic();self.timer.start();self.pause_button.setEnabled(True)
+        self.mod.services.act('sing')
 
     def press(self,lane):
         if self.started is None or self.finished:return
@@ -218,15 +262,16 @@ class RhythmGame(QDialog):
     def pause(self):
         if self.paused or self.finished or self.started is None:return
         self.elapsed=self.now();self.round.suspend(self.elapsed+self.offset_control.value()/1000)
-        self.paused=True;self.resume_keys.clear();self.player.pause();self.stage.update()
-        if self.effect:self.effect.stop()
+        self.paused=True;self.resume_keys.clear();self.stage.update()
+        if self.source:self.transport.toggle_pause()
+        self.stop_tap()
 
     def resume(self):
         self.resume_wait=False
         if not self.paused or self.finished or not self.mod.active:return
         self.round.held=set(self.resume_keys);self.round.rearm();self.paused=False
         self.started=time.monotonic()-self.elapsed;self.last_advance=time.monotonic()
-        if self.source:self.player.play()
+        if self.source:self.transport.toggle_pause()
         self.label.setText(self.title);self.stage.setFocus()
 
     def event(self,event):
@@ -236,33 +281,59 @@ class RhythmGame(QDialog):
 
     def play_tap(self):
         if not self.sound.isChecked():return
-        if self.effect is None:
-            import struct,wave
-            try:
-                path=self.mod.context.data_dir/'tap.wav'
-                if not path.exists():
-                    samples=[int(8000*math.exp(-i/600)*math.sin(math.tau*880*i/22050)) for i in range(1764)]
-                    with wave.open(str(path),'wb') as out:
-                        out.setnchannels(1);out.setsampwidth(2);out.setframerate(22050);out.writeframes(struct.pack('<'+'h'*len(samples),*samples))
-                self.effect=QSoundEffect(self);self.effect.setSource(QUrl.fromLocalFile(str(path)))
-            except (OSError,ValueError):return
-        self.effect.setVolume(.3*self.mod.services.snapshot().get('volume',.5));self.effect.play()
+        import sys
+        level = self.mod.services.snapshot().get('volume',.5)
+        if level <= 0:return
+        try:
+            if sys.platform == 'win32':
+                # PlaySound uses the Windows mixer directly. Constructing the first
+                # Qt sound effect here can stall the GUI for an entire musical bar.
+                import ctypes
+                if self.tap_bytes is None or self.tap_level != level:
+                    self.stop_tap()
+                    self.tap_bytes = ctypes.create_string_buffer(self.tap_wave(.3*level))
+                    self.tap_level = level
+                ctypes.windll.winmm.PlaySoundW(self.tap_bytes, None, 0x0007)  # MEMORY | NODEFAULT | ASYNC
+            else:
+                from PySide6.QtMultimedia import QSoundEffect
+                if self.effect is None:
+                    path=self.mod.context.data_dir/'tap.wav'
+                    if not path.exists():path.write_bytes(self.tap_wave(1.))
+                    self.effect=QSoundEffect(self);self.effect.setSource(QUrl.fromLocalFile(str(path)))
+                self.effect.setVolume(.3*level);self.effect.play()
+        except (OSError,ValueError):return
+
+    @staticmethod
+    def tap_wave(gain):
+        import io,struct,wave
+        buffer=io.BytesIO()
+        samples=[int(8000*gain*math.exp(-i/600)*math.sin(math.tau*880*i/22050)) for i in range(1764)]
+        with wave.open(buffer,'wb') as out:
+            out.setnchannels(1);out.setsampwidth(2);out.setframerate(22050);out.writeframes(struct.pack('<1764h',*samples))
+        return buffer.getvalue()
+
+    def stop_tap(self):
+        if self.tap_bytes is not None:
+            import ctypes
+            ctypes.windll.winmm.PlaySoundW(None,None,0)
+            self.tap_bytes=None
+        if self.effect:self.effect.stop()
 
     def update_game(self):
         if self.finished or self.started is None:return
         if not self.mod.active:self.close();return
-        if self.mod.services.snapshot()['playing'] or not self.mod.services.audio_valid(self.token):self.failed();return
+        if not self.transport.valid():self.failed('本次互动已结束。');return
         if self.paused:return
         self.elapsed=self.now()
         if self.elapsed>self.last_elapsed:
             self.last_advance=time.monotonic();self.last_elapsed=self.elapsed
-        elif time.monotonic()-self.last_advance>20:self.failed();return
-        if self.source and self.player.playbackState()!=QMediaPlayer.PlayingState:return
+        elif time.monotonic()-self.last_advance>20:self.failed('音频播放超时，请检查输出设备。');return
         self.round.advance(self.elapsed+self.offset_control.value()/1000);self.stage.update()
-        self.score.setText(f'得分 {self.round.score:,} · 连击 {self.round.combo} · 长条 {self.round.holds} · 剩余 {max(0,int(self.duration-self.elapsed))} 秒')
+        score_line = f'得分 {self.round.score:,}   ·   连击 {self.round.combo}   ·   长条 {self.round.holds}   ·   剩余 {max(0,int(self.duration-self.elapsed))} 秒'
+        if score_line != self.score.text():self.score.setText(score_line)
         if time.monotonic()-self.last_actor>3:
             self.last_actor=time.monotonic();self.mod.services.act('sing')
-        if self.elapsed>=self.duration:self.finish()
+        if not self.source and self.elapsed>=self.duration:self.finish()
 
     def finish(self):
         if self.finished:return
@@ -284,16 +355,17 @@ class RhythmGame(QDialog):
         self.mod.games.append(game);game.show();self.close()
 
     def release_audio(self):
-        self.timer.stop();self.countdown.stop();self.pause_button.setEnabled(False);self.player.stop()
-        self.player.setSource(QUrl())
-        if self.router:self.router.poll.stop()
-        if self.effect:self.effect.stop()
-        if self.token:self.mod.services.audio_release(self.token);self.token=None
+        self.timer.stop();self.countdown.stop();self.pause_button.setEnabled(False)
+        self.transport.close();self.stop_tap()
 
-    def failed(self,*_):
+    def failed(self,message):
         if self.finished:return
-        self.finished=True;self.release_audio();self.start_button.setEnabled(False)
-        self.label.setText('演出已停止，没有发放完成奖励。请检查歌曲，或先结束其他播放再试。')
+        self.finished=True;self.release_audio();self.start_button.setText('重试这份谱');self.start_button.setEnabled(True)
+        self.start_button.clicked.disconnect();self.start_button.clicked.connect(self.retry)
+        self.label.setText(message)
 
     def closeEvent(self,event):
         self.finished=True;self.release_audio();super().closeEvent(event)
+
+    def done(self,result):
+        self.finished=True;self.release_audio();super().done(result)

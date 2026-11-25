@@ -62,6 +62,36 @@ class BondFactsTests(unittest.TestCase):
         self.assertEqual(self.store.value['affinity'], 20)
         self.assertEqual(len([r for r in self.store.memories() if r['id']=='first-meeting']),1)
 
+    def test_scroll_credits_old_daily_records_and_preserves_advanced_bookmarks(self):
+        with self.store.db:
+            self.store.db.executemany('INSERT INTO daily VALUES(?,?)', [
+                ('2026-11-14', 'feed'), ('2026-11-14', 'chat'), ('2026-11-15', 'feed'),
+                ('2026-11-15', 'unknown')])
+        self.assertEqual(self.store.scroll_unlocked(), 4)
+        self.store.configure('river_scroll_joined', 9)
+        self.store.close()
+        self.store = BondStore(self.path)
+        self.assertEqual((self.store.scroll_joined(), self.store.scroll_unlocked()), (9, 9))
+        self.assertFalse(self.store.join_scroll(10))
+        self.assertTrue(self.store.record('headpat', {}, self.now))
+        self.assertEqual(self.store.scroll_unlocked(), 10)
+        self.assertTrue(self.store.join_scroll(10))
+        self.assertFalse(self.store.join_scroll(10))
+        self.store.close()
+        self.store = BondStore(self.path)
+        self.assertFalse(self.store.record('headpat', {}, self.now))
+        self.assertEqual((self.store.scroll_joined(), self.store.scroll_unlocked()), (10, 10))
+
+    def test_finished_scroll_memory_survives_a_missing_legacy_bookmark(self):
+        with self.store.db:
+            self.store.card('river-scroll-complete', '第一次拼好洛天依上河图', now=self.now)
+        self.store.close()
+        self.store = BondStore(self.path)
+        self.assertEqual((self.store.scroll_joined(), self.store.scroll_unlocked()), (18, 18))
+        self.store.award('game', self.now)
+        self.assertFalse(self.store.join_scroll(19))
+        self.assertEqual(self.store.scroll_unlocked(), 18)
+
     def test_highest_day_also_tracks_partial_listening(self):
         future = self.now + timedelta(days=2)
         self.store.record('listen', {'seconds':5}, future)

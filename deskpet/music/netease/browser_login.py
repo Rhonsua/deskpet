@@ -6,24 +6,10 @@ import weakref
 from PySide6.QtCore import QCoreApplication, QObject, QProcess, QProcessEnvironment, QTimer, Signal
 
 from deskpet.runtime.workers import worker_command
+from .login_progress import STATUS, failure_message
 from .storage import protect, session_data
 
 PREFIX = b'TIANYI_NETEASE_LOGIN '
-STATUS = {
-    'waiting':'等待网页扫码；目前尚未观察到官网的扫码确认提示。',
-    'scanned':'官网已显示扫描成功，请在手机上确认登录。',
-    'confirmed':'官网已接到手机确认，正在等待网页写入登录会话；此时尚未接回账号。',
-    'site_rejected':'官网扫码请求被拒绝或需要验证，请在网页登录窗口完成验证或刷新二维码后重试。',
-    'expired':'官网显示二维码已失效，请在网页登录窗口刷新二维码。',
-    'checking':'正在重新检测官方网页登录状态。',
-    'credential':'检测到登录凭据，正在验证账号并接回桌宠。',
-    'verification_retry':'检测到凭据，但官网尚未返回可验证的账号；会继续检测，也可点击重新检测。',
-    'verification_native':'网页尚未接回账号，正在通过桌宠直接核验当前登录凭据。',
-    'verification_session':'已取得凭据，但网易云尚未确认有效账号；请检查网页是否已显示头像，或改用直接扫码。',
-    'verification_rejected':'账号核验请求被网易云拒绝；请在官网完成验证，或改用直接扫码。',
-    'verification_network':'账号核验连接失败，将自动重试；也可点击重新检测。',
-    'verification_response':'账号核验未返回可识别的结果，将自动重试；也可改用直接扫码。',
-}
 
 
 class BrowserLogin(QObject):
@@ -116,11 +102,11 @@ class BrowserLogin(QObject):
                     self.completed.emit(session)
                     return
                 elif kind == 'ready':
-                    self.status.emit('请在网易云官方网页点击登录，完成扫码或验证后将自动返回歌单。')
+                    self.status.emit(STATUS['opening'])
                 elif kind == 'status' and event.get('stage') in STATUS:
                     self.status.emit(STATUS[event['stage']])
                 elif kind == 'fatal':
-                    self._fail('网易云登录窗口未能完成初始化或读取登录状态，请关闭后重试；需要 Edge WebView2。')
+                    self._fail(failure_message(event))
                 elif kind == 'timeout':
                     self._fail('网页登录等待超过10分钟，已关闭；可重新打开。')
             except (ValueError, KeyError, TypeError, OSError):
@@ -135,7 +121,7 @@ class BrowserLogin(QObject):
         if process is not None and (process is not self.process or epoch != self._epoch):
             return
         if error == QProcess.ProcessError.FailedToStart:
-            self._fail('无法启动网易云登录窗口，请检查浏览器组件是否完整。')
+            self._fail('未能启动网易云的独立登录窗口。')
 
     def request_check(self):
         if self.active and self.process.state() == QProcess.ProcessState.Running:
